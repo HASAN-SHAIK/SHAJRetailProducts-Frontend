@@ -1,0 +1,45 @@
+
+.edit-order-modal {
+    position: fixed;
+    overflow: scroll;
+    top: 100px !important;
+    left: 25% !important;
+    width: 50% !important;
+    min-height: 88% !important;
+    background:linear-gradient(rgb(216, 216, 245),rgb(234, 220, 220), rgb(243, 243, 199),rgb(194, 234, 194),rgb(255, 238, 207), rgb(249, 196, 249));
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1500;
+    padding: 20px !important;
+  }
+  .modal-overlay input {
+    max-width: 250px;
+  }
+  .modal-overlay label {
+    min-width: 250px;
+  }
+  
+ .edit-order-modal {
+    /* background: #e9fffc !important; */
+    padding: 20px !important;
+    border-radius: 10px !important;
+    transition: all 1s;
+  }
+  
+  .form-group {
+    margin-bottom: 15px;
+  }
+  
+  .product-group {
+    margin-bottom: 10px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  
+  .modal-actions {
+    display: flex;
+    justify-content: space-between;
+  }
+  

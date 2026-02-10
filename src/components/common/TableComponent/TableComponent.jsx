@@ -1,0 +1,100 @@
+import React, { useEffect } from "react";
+import { useState } from "react";
+import "./TableComponent.css";
+import api from "../../../utils/axios";
+import EditProductModal from "../../ProductsPage/EditOrderModal/EditProductModal";
+import { usePopup } from "../PopUp/PopupProvider";
+
+const TableComponent = ({ title, columns, data, setProductUpdateFlag, color }) => {
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
+  const { showPopup } = usePopup();
+  
+  const handleEditClick = (item) => {
+    setSelectedItem(item);
+    setShowEditModal(true);
+  };
+
+  const handleSubmitEdit = async (updatedProduct) => {
+    try {
+      const response = await api.put(`/products/${updatedProduct.id}`, updatedProduct);
+  
+      if (response.status === 200) {
+        showPopup('Product updated successfully!', 'Success');
+        handleCloseModal();
+        if (setProductUpdateFlag) {
+          setProductUpdateFlag((prev) => !prev);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to update order:', error);
+      showPopup('Error updating order', 'Error');
+    }
+  };
+  const handleCloseModal = () => {
+    setShowEditModal(false);
+    setSelectedItem(null);
+  };
+  return (
+    <div  className="table-box text-center">
+
+      <h4 style={{color: color}}> {title}</h4>
+      <table className="responsive-table">
+      {/* <div className="floating-shape circle red"></div>
+      <div className="floating-shape triangle purple"></div> */}
+        <thead>
+          <tr>
+            {columns.map((col, i) => (
+              <th  key={i}>{col}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+        {/* <div className="floating-shape tablecircle red"></div>
+        <div className="floating-shape triangle purple"></div>
+        <div className="floating-shape square yellow"></div>
+        <div className="floating-shape wave pink"></div>
+        <div className="floating-shape tablering orange"></div>
+        <div className="floating-shape tablecube green"></div> */}
+          {data && data.length > 0 ? data.map((row, i) => (
+            <tr key={i}>
+              {columns.map((col, j) => {
+                const normalized = col.toLowerCase();
+                if (normalized === 'edit') {
+                  return (
+                    <button key={`${i}-${j}-edit`} onClick={() => handleEditClick(row)} className="btn btn-info m-1">
+                      Edit
+                    </button>
+                  );
+                }
+                if (normalized === 'type') {
+                  const isWeightBased = Number(row?.is_weight_based) === 1;
+                  return (
+                    <td key={j}>
+                      <span className={`product-type-badge ${isWeightBased ? 'badge-weight' : 'badge-piece'}`}>
+                        [{isWeightBased ? 'Weight' : 'Piece'}]
+                      </span>
+                    </td>
+                  );
+                }
+                return <td key={j}>{row[normalized]}</td>;
+              })}
+            </tr>
+          )) : (
+            <tr><td colSpan={columns.length}>No Data</td></tr>
+          )}
+        </tbody>
+      </table>
+      {showEditModal && (
+        <EditProductModal
+          item={selectedItem}
+          columns = {columns}
+          onClose={handleCloseModal}
+          onSubmit={handleSubmitEdit}
+        />
+      )}
+    </div>
+  );
+};
+
+export default TableComponent;

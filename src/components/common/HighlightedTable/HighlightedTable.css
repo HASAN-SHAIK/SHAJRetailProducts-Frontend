@@ -1,0 +1,21 @@
+.table-responsive {
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.7);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.table-hover tbody tr:hover {
+  background: linear-gradient(120deg, rgba(56, 189, 248, 0.12), rgba(99, 102, 241, 0.12));
+}
+
+.transactions-page .table td{
+  background: rgba(15, 23, 42, 0.75) !important;
+  color: #e2e8f0 !important;
+}
+.transactions-page .table th{
+  background: linear-gradient(120deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9)) !important;
+  color: #7dd3fc;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

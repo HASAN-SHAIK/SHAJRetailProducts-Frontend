@@ -1,0 +1,49 @@
+.modal-overlay.edit-product-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(10, 10, 10, 0.8);
+  z-index: 9000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content{
+    display: flex; 
+    align-items: center;
+    justify-content: center;
+    max-width: 500px;
+    width: 100%;
+    font-family: 'Poppins', sans-serif;
+    border-radius: 1.5rem !important;
+    background: #182c60 !important;
+    border: 1px solid #00ffc8 !important;
+    max-height: 85vh;
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+.modal-content::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.neon-input {
+  border: 2px solid #182c60;
+  background-color: #1a1a1a;
+  color: #182c60;
+  box-shadow: 0 0 5px #182c60;
+  transition: all 0.3s ease-in-out;
+  text-align: center;
+}
+
+.neon-input:focus {
+  outline: none;
+  box-shadow: 0 0 10px #182c60, 0 0 20px #182c60;
+  background-color: #182c60;
+}
+
+.w-45 {
+  width: 45%;
+}

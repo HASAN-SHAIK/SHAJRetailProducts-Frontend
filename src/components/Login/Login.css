@@ -1,0 +1,235 @@
+/* src/pages/Login/Login.css */
+
+.login-wrapper {
+  position: relative;
+  height: 100vh;
+  background: transparent;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  font-family: 'Archivo', 'Segoe UI', sans-serif;
+}
+
+.login-container {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.9));
+  padding: 2.5rem 2rem;
+  border-radius: 20px;
+  box-shadow: 0 20px 45px rgba(0,0,0,0.45);
+  width: 90%;
+  max-width: 520px;
+  position: relative;
+  text-align: center;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.login-container h2 {
+  margin-bottom: 1.5rem;
+  font-weight: bold;
+  color: #f8fafc;
+  position: relative;
+  z-index: 5;
+}
+
+.login-container .form-label {
+  position: relative;
+  text-align: left;
+  display: block;
+  font-weight: 500;
+  margin-top: 1rem;
+  color: #e2e8f0;
+  z-index: 5 !important;
+}
+
+.login-container .form-control {
+  position: relative;
+  margin-top: 0.3rem;
+  padding: 0.6rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+  width: 100%;
+  z-index: 5 !important;
+}
+
+.login-container .loginpasswordinput {
+  margin-bottom: 1rem;
+}
+
+.login-container .letsgo {
+  background: linear-gradient(120deg, #38bdf8, #6366f1);
+  color: #0b0b0f;
+  padding: 0.65rem 1.2rem;
+  border: none;
+  border-radius: 999px;
+  width: 100%;
+  font-weight: 700;
+  margin-top: 1rem;
+  cursor: pointer;
+  transition: 0.3s;
+  position: relative;
+  z-index: 5;
+  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.35);
+}
+
+.login-container .letsgo:hover {
+  filter: brightness(1.08);
+}
+
+
+
+
+
+
+/* Floating objects */
+.floating-shape {
+  position: absolute;
+  z-index: 0;
+  opacity: 0.8;
+}
+
+/* Common shapes */
+.circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ff6b6b, #c44545);
+  top: 10%;
+  left: 15%;
+  animation: floatX 6s ease-in-out infinite;
+}
+.logincircle{
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #846bff, #c44582);
+  top: 50%;
+  left: 75%;
+  z-index: 0 !important;    
+  animation: floatXY 6s ease-in-out infinite; 
+}
+
+.triangle {
+  width: 0;
+  height: 0;
+  border-left: 24px solid transparent;
+  border-right: 24px solid transparent;
+  border-bottom: 40px solid #a77ff9;
+  top: 20%;
+  right: 15%;
+  animation: floatY 7s ease-in-out infinite;
+}
+
+.square {
+  width: 30px;
+  height: 30px;
+  background: #ffd93d;
+  top: 60%;
+  left: 10%;
+  transform: rotate(45deg);
+  animation: floatDiagonal 5.5s ease-in-out infinite;
+}
+
+.wave {
+  width: 10px;
+  height: 80px;
+  background: linear-gradient(to bottom, #ff6ec4, #7873f5);
+  border-radius: 40px;
+  top: 50%;
+  right: 12%;
+  animation: waveFloat 6.8s ease-in-out infinite;
+}
+
+.ring {
+  width: 40px;
+  height: 40px;
+  border: 6px solid orange;
+  border-radius: 50%;
+  top: 70%;
+  right: 25%;
+  animation: floatXY 5s ease-in-out infinite;
+}
+
+.loginring {
+  width: 40px;
+  height: 40px;
+  border: 6px solid rgb(200, 0, 255);
+  border-radius: 50%;
+  top: 10%;
+  left: 5%;
+  z-index: 0 !important;
+  animation: spinFloat 5s ease-in-out infinite;
+}
+
+.cube {
+  width: 25px;
+  height: 25px;
+  background: #2de2e6;
+  top: 30%;
+  left: 60%;
+  animation: spinFloat 7s ease-in-out infinite;
+}
+.logincube {
+  width: 25px;
+  height: 25px;
+  background: #93e62d;
+  top: 70%;
+  left: 25%;
+  animation: floatXY 7s ease-in-out infinite;
+}
+
+.companyLogo{
+  top: 1vh;
+  /* left: 50%; */
+  position: absolute;
+  border-radius: 10px;
+  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.35);
+  /*top: 5vh;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 2.5rem;
+  font-family: roboto;
+  font-weight: bold;
+  background: linear-gradient(to left bottom, rgb(177, 122, 18), rgb(237, 184, 184), green);
+  padding: 10px 20px;
+  border-radius: 5px;
+  color: rgb(18, 0, 51) !important;
+  z-index: 10; */
+}
+.loginErrorMessage{
+  font-family: Georgia, 'Times New Roman', Times, serif;
+  font-weight: bold;
+}
+
+/* Animations */
+@keyframes floatX {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(-30px); }
+}
+
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-40px); }
+}
+
+@keyframes floatDiagonal {
+  0%, 100% { transform: translate(-10px, 10px); }
+  50%      { transform: translate(20px, -20px); }
+}
+
+@keyframes waveFloat {
+  0%, 100% { transform: rotate(0deg); }
+  50%      { transform: rotate(20deg); }
+}
+
+@keyframes floatXY {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(-25px, 30px); }
+}
+
+@keyframes spinFloat {
+  0%   { transform: rotate(0deg) translateY(0); }
+  50%  { transform: rotate(90deg) translateY(-30px); }
+  100% { transform: rotate(180deg) translateY(0); }
+}

@@ -1,0 +1,23 @@
+.brand-name {
+    font-weight: 600;
+    font-size: 1.8rem;
+    color: #2a2a2a;
+  }
+  
+.form-control, .form-select {
+  border-radius: 12px;
+  transition: 0.3s;
+}
+
+.form-control:focus, .form-select:focus {
+  box-shadow: 0 0 0 0.2rem rgba(125, 211, 252, 0.25);
+}
+  
+  .btn-success {
+    border-radius: 8px;
+    transition: background 0.3s;
+  }
+  
+  .btn-success:hover {
+    background-color: #28a745cc;
+  }

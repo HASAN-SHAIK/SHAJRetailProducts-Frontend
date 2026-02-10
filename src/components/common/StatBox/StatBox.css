@@ -1,0 +1,32 @@
+.stat-box {
+    flex: 1;
+    min-width: 180px;
+    max-height: 100px;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.85));
+    border-left: 5px solid #38bdf8;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    padding: 16px 22px;
+    border-radius: 16px;
+    transition: 0.3s;
+    z-index: 5;
+  }
+  
+  .stat-box h5 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #7dd3fc;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  
+  .stat-box p {
+    font-size: 1.3rem;
+    font-weight: bold;
+    margin: 5px 0 0;
+    color: #f8fafc;
+  }
+  
+  .stat-box:hover {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(99, 102, 241, 0.2));
+    transform: translateY(-2px);
+  }

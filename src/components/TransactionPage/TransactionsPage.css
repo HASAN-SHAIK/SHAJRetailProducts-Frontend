@@ -1,0 +1,25 @@
+.transactions-page .brand-title {
+    font-weight: 700;
+    color: #2c3e50;
+  }
+  
+  .transactions-page .table td,
+  .transactions-page .table th {
+    vertical-align: middle;
+    padding: 14px 12px;
+  }
+
+  .transactions-page .table th {
+    background: linear-gradient(120deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
+    color: #7dd3fc;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.95rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  }
+
+  .transactions-page .table td {
+    background: rgba(15, 23, 42, 0.75);
+    color: #e2e8f0;
+    border-color: rgba(148, 163, 184, 0.15);
+  }

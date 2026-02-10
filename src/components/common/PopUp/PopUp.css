@@ -1,0 +1,154 @@
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(9, 12, 20, 0.55);
+    backdrop-filter: blur(3px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+  
+  .modal-container {
+    padding: 20px;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.96));
+    border-radius: 16px;
+    width: 80%;
+    max-width: 520px;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+  }
+
+  .modal-container::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 8px;
+    width: 100%;
+    background: linear-gradient(90deg, #ffb347, #ffcc33, #7dd56f, #4facfe, #9f7aea);
+  }
+
+  .popup-bounce {
+    animation: pop-in 420ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  }
+
+  @keyframes pop-in {
+    0% { transform: translateY(10px) scale(0.92); opacity: 0; }
+    60% { transform: translateY(-6px) scale(1.02); opacity: 1; }
+    100% { transform: translateY(0) scale(1); }
+  }
+  
+  .modal-header {
+    padding: 16px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+  }
+  
+  .close-button {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+  }
+  
+  .modal-body {
+    padding: 16px;
+  }
+
+  .modal-body p {
+    margin: 0;
+    color: #e2e8f0;
+    font-size: 1rem;
+  }
+
+  .popup-success .modal-header h2 {
+    color: #1b5e20;
+  }
+
+  .popup-error .modal-header h2 {
+    color: #b71c1c;
+  }
+
+  .popup-warning .modal-header h2 {
+    color: #8a5b00;
+  }
+
+  .popup-session .modal-header h2,
+  .popup-info .modal-header h2 {
+    color: #0f4c81;
+  }
+
+  .confetti {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .confetti-piece {
+    position: absolute;
+    top: -10%;
+    width: 8px;
+    height: 14px;
+    opacity: 0.9;
+    border-radius: 2px;
+    animation: confetti-fall 1.2s ease-out forwards;
+  }
+
+  .confetti-piece:nth-child(1) { left: 5%; background: #ff6b6b; animation-delay: 0ms; }
+  .confetti-piece:nth-child(2) { left: 12%; background: #feca57; animation-delay: 60ms; }
+  .confetti-piece:nth-child(3) { left: 20%; background: #1dd1a1; animation-delay: 120ms; }
+  .confetti-piece:nth-child(4) { left: 28%; background: #54a0ff; animation-delay: 180ms; }
+  .confetti-piece:nth-child(5) { left: 36%; background: #5f27cd; animation-delay: 240ms; }
+  .confetti-piece:nth-child(6) { left: 44%; background: #ff9f43; animation-delay: 300ms; }
+  .confetti-piece:nth-child(7) { left: 52%; background: #10ac84; animation-delay: 360ms; }
+  .confetti-piece:nth-child(8) { left: 60%; background: #ee5253; animation-delay: 420ms; }
+  .confetti-piece:nth-child(9) { left: 68%; background: #48dbfb; animation-delay: 480ms; }
+  .confetti-piece:nth-child(10) { left: 76%; background: #c8d6e5; animation-delay: 540ms; }
+  .confetti-piece:nth-child(11) { left: 84%; background: #f368e0; animation-delay: 600ms; }
+  .confetti-piece:nth-child(12) { left: 92%; background: #00d2d3; animation-delay: 660ms; }
+  .confetti-piece:nth-child(13) { left: 15%; background: #ff9ff3; animation-delay: 720ms; }
+  .confetti-piece:nth-child(14) { left: 33%; background: #2e86de; animation-delay: 780ms; }
+  .confetti-piece:nth-child(15) { left: 51%; background: #f6b93b; animation-delay: 840ms; }
+  .confetti-piece:nth-child(16) { left: 69%; background: #38ada9; animation-delay: 900ms; }
+  .confetti-piece:nth-child(17) { left: 87%; background: #e55039; animation-delay: 960ms; }
+  .confetti-piece:nth-child(18) { left: 96%; background: #78e08f; animation-delay: 1020ms; }
+
+  @keyframes confetti-fall {
+    0% { transform: translateY(-20%) rotate(0deg); opacity: 0; }
+    20% { opacity: 1; }
+    100% { transform: translateY(120%) rotate(280deg); opacity: 0; }
+  }
+  
+  .modal-footer {
+    padding: 16px;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: flex-end;
+  }
+  
+  .modal-button {
+    padding: 8px 16px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  .modal-button:hover {
+    background-color: #0056b3;
+  }
