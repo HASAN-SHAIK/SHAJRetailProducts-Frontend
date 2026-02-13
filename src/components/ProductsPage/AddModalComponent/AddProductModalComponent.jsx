@@ -38,11 +38,24 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
             </div>
 
             <div className="modal-body">
-              {fields.map(({ label, name, type }) => (
+              {fields.map(({ label, name, type, options }) => (
                 <div className="form-group mb-3" key={name}>
                   <label htmlFor={name} className="form-label text-light">{label}</label>
                   {
-                    (type === 'select') ? (
+                    (type === 'select' && Array.isArray(options)) ? (
+                      <select
+                        className="form-select custom-input"
+                        id={name}
+                        name={name}
+                        value={formData[name] || ''}
+                        onChange={onChange}
+                        required
+                      >
+                        {options.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    ) : (type === 'datalist' || type === 'select') ? (
                     <>
                       <input
                         list="categories-list"

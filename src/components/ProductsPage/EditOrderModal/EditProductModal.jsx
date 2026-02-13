@@ -16,6 +16,9 @@ const EditProductModal = ({ item, onClose, onSubmit }) => {
   const [actualPrice, setActualPrice] = useState(item.actual_price);
   const [stockQuantity, setStockQuantity] = useState(item.quantity)
   const [companyName, setCompanyName] = useState(item.company || '');
+  const [isWeightBased, setIsWeightBased] = useState(
+    item.is_weight_based === 1 || item.is_weight_based === '1' ? '1' : '0'
+  );
 
 
   const handlePriceChange = (value, index = 0) => {
@@ -31,6 +34,7 @@ const EditProductModal = ({ item, onClose, onSubmit }) => {
       selling_price: sellingPrice,
       actual_price:actualPrice,
       stock_quantity: stockQuantity,
+      is_weight_based: isWeightBased,
       id: item.id
     };
     onSubmit(updatedProduct);
@@ -94,6 +98,18 @@ const EditProductModal = ({ item, onClose, onSubmit }) => {
               value={stockQuantity}
               onChange={(e) => handlePriceChange(e.target.value, 2)}
             />
+          </div>
+
+          <div className="form-group w-100 mb-4 text-center">
+            <label className="form-label w-100">Weight Based</label>
+            <select
+              className="form-control text-center neon-input"
+              value={isWeightBased}
+              onChange={(e) => setIsWeightBased(e.target.value)}
+            >
+              <option value="0">No (Piece)</option>
+              <option value="1">Yes (Weight)</option>
+            </select>
           </div>
 
           <div className="d-flex justify-content-between w-100">

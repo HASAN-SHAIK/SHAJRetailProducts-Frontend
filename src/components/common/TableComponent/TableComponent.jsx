@@ -9,6 +9,14 @@ const TableComponent = ({ title, columns, data, setProductUpdateFlag, color }) =
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const { showPopup } = usePopup();
+
+  const isWeightBasedValue = (value) => {
+    if (value === true) return true;
+    if (value === false || value == null) return false;
+    if (typeof value === 'number') return value === 1;
+    const normalized = value.toString().trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y', 'weight', 'weighted', 'kg'].includes(normalized);
+  };
   
   const handleEditClick = (item) => {
     setSelectedItem(item);
@@ -68,7 +76,17 @@ const TableComponent = ({ title, columns, data, setProductUpdateFlag, color }) =
                   );
                 }
                 if (normalized === 'type') {
-                  const isWeightBased = Number(row?.is_weight_based) === 1;
+                  const weightSource =
+                    row?.is_weight_based ??
+                    row?.type ??
+                    row?.product_type ??
+                    row?.unit ??
+                    row?.unit_type ??
+                    row?.measure;
+                  const isWeightBased =
+                    isWeightBasedValue(weightSource) ||
+                    (typeof row?.name === 'string' && row.name.toLowerCase().includes('kg')) ||
+                    (typeof row?.product_name === 'string' && row.product_name.toLowerCase().includes('kg'));
                   return (
                     <td key={j}>
                       <span className={`product-type-badge ${isWeightBased ? 'badge-weight' : 'badge-piece'}`}>

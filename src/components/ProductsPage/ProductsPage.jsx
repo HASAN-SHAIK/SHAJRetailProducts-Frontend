@@ -23,7 +23,8 @@ const ProductsPage = ({ navigate }) => {
     actual_price: '',
     stock_quantity: '',
     category: '',
-    time_for_delivery: ''
+    time_for_delivery: '',
+    is_weight_based: '0'
   });
 
   const handleChange = (e) => {
@@ -52,7 +53,8 @@ const ProductsPage = ({ navigate }) => {
         selling_price: '',
         actual_price: '',
         stock_quantity: '',
-        time_for_delivery: ''
+        time_for_delivery: '',
+        is_weight_based: '0'
       });
       const modalElement = document.getElementById('addProductModal');
       const modal = Modal.getInstance(modalElement);
@@ -79,11 +81,15 @@ const ProductsPage = ({ navigate }) => {
   const productFields = [
     { label: 'Product Name', name: 'product_name' },
     { label: 'Company', name: 'company' },
-    { label: 'Category', name: 'category',type:'select', options: ['Electronics', 'Construction', 'Furniture', 'Accessories'], },
+    { label: 'Category', name: 'category', type: 'datalist' },
     { label: 'Selling Price', name: 'selling_price', type: 'number' },
     { label: 'Actual Price', name: 'actual_price', type: 'number' },
     { label: 'Quantity', name: 'stock_quantity', type: 'number' },
     { label: 'Time For Delivery', name:'time_for_delivery', type: 'number'},
+    { label: 'Weight Based', name: 'is_weight_based', type: 'select', options: [
+      { label: 'No (Piece)', value: '0' },
+      { label: 'Yes (Weight)', value: '1' }
+    ]},
   ];
 
  const [products, setProducts] = useState([]);
