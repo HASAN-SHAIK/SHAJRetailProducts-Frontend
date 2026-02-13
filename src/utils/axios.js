@@ -12,6 +12,16 @@ api.interceptors.request.use(
     const deviceId = getDeviceId();
     console.log('Sending device id:', deviceId); // 🔍 DEBUG
     config.headers['x-device-id'] = deviceId;
+    if (typeof window !== 'undefined') {
+      try {
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+      } catch (err) {
+        // Ignore storage access issues
+      }
+    }
     return config;
   },
   (error) => Promise.reject(error)

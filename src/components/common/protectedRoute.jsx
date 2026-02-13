@@ -16,7 +16,7 @@ const ProtectedRoute = ({ children }) => {
   if (isAuth === null) return <LoadingSpinner />;
   if (!isAuth){ 
     dispatch(setUserDetails(null));
-    return <Navigate to="/login" />;}
+    return <Navigate to="/" />;}
   return children;
 };
 

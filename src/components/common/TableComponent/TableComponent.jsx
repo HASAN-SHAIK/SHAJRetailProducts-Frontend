@@ -43,11 +43,32 @@ const TableComponent = ({ title, columns, data, setProductUpdateFlag, color }) =
     setShowEditModal(false);
     setSelectedItem(null);
   };
+
+  const normalizeKey = (value) =>
+    String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+  const getCellValue = (row, col) => {
+    if (!row || typeof row !== 'object') return row ?? '';
+    const direct = row[col];
+    if (direct !== undefined) return direct;
+    const normalizedCol = normalizeKey(col);
+    const keys = Object.keys(row);
+    for (const key of keys) {
+      if (normalizeKey(key) === normalizedCol) {
+        return row[key];
+      }
+    }
+    return row[normalizedCol];
+  };
+
   return (
     <div  className="table-box text-center">
 
       <h4 style={{color: color}}> {title}</h4>
-      <table className="responsive-table">
+      <div className="responsive-table">
+        <table>
       {/* <div className="floating-shape circle red"></div>
       <div className="floating-shape triangle purple"></div> */}
         <thead>
@@ -95,14 +116,15 @@ const TableComponent = ({ title, columns, data, setProductUpdateFlag, color }) =
                     </td>
                   );
                 }
-                return <td key={j}>{row[normalized]}</td>;
+                return <td key={j}>{getCellValue(row, col)}</td>;
               })}
             </tr>
           )) : (
             <tr><td colSpan={columns.length}>No Data</td></tr>
           )}
         </tbody>
-      </table>
+        </table>
+      </div>
       {showEditModal && (
         <EditProductModal
           item={selectedItem}

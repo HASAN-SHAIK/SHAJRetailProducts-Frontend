@@ -47,3 +47,28 @@
 .w-45 {
   width: 45%;
 }
+
+@media (max-width: 768px) {
+  .modal-overlay.edit-product-modal {
+    padding: 16px;
+  }
+
+  .modal-content {
+    width: 100%;
+    max-width: 95vw;
+    padding: 16px !important;
+  }
+
+  .modal-content .form-control {
+    font-size: 0.9rem;
+  }
+
+  .w-45 {
+    width: 100%;
+  }
+
+  .modal-content .d-flex.justify-content-between {
+    flex-direction: column;
+    gap: 10px;
+  }
+}

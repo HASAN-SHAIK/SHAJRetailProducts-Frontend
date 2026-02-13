@@ -101,7 +101,7 @@ const OrdersPage = ({ userRole, navigate }) => {
     `;
   }).join('');
 
-  const shopName = details?.shop_name || 'Ameena Automobiles';
+  const shopName = details?.shop_name || 'SHAJ Retail Products';
   const ownerName = details?.owner_name || '';
   const gstNumber = details?.gst_number || '27ABCDE1234F1Z5';
   const panNumber = details?.pan_number || '';
@@ -265,7 +265,7 @@ const OrdersPage = ({ userRole, navigate }) => {
           <div class="total"><span>Grand Total</span><span>₹${grandTotal.toFixed(2)}</span></div>
         </div>
 
-        <div class="note">This is a demo GST receipt with dummy GST details.</div>
+        <div class="note">This is a system-generated GST receipt.</div>
       </div>
     </body>
   </html>
@@ -336,7 +336,7 @@ const OrdersPage = ({ userRole, navigate }) => {
    setFilteredOrders(sorted);
  };
  const GST_COMPANY = {
-  name: 'Ameena Automobiles',
+  name: 'SHAJ Retail Products',
   addressLine1: 'Beside Masjid, Main Road',
   addressLine2: 'Mattampally, Suryapet - 508204',
   phone: '7981907327',
@@ -690,7 +690,7 @@ useEffect(() => {
            {filteredOrders && filteredOrders.map((order, idx) => (
 order.type === 'personal' ? null : <tr key={idx} className={deletedOrderIds.has(order.id) ? 'opacity-50' : ''}>
 <td>{order.id}</td>
-<td className='fw-bold'>
+<td className='fw-bold orders-products-cell'>
                  {order.items.length>0 ? order.items.map(p => (
 <div>{p.product_name} - {formatItemDisplay(p)}</div>
                  )) : <div className='text-success'>Purchased Items</div>}

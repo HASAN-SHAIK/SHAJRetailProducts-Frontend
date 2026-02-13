@@ -12,7 +12,10 @@
   }
   .responsive-table{
     position: relative;
-    z-index: 0
+    z-index: 0;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   
 .table-box h4 {
@@ -64,6 +67,28 @@
     display: flex;
     gap: 20px;
     flex-wrap: wrap;
+  }
+
+  @media (max-width: 768px) {
+    .table-box {
+      padding: 12px;
+      min-width: 100%;
+    }
+
+    .table-box h4 {
+      font-size: 0.9rem;
+    }
+
+    .table-box table {
+      min-width: 640px;
+    }
+
+    .table-box th,
+    .table-box td {
+      padding: 10px 8px;
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
   }
 
     

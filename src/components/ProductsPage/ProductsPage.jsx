@@ -218,7 +218,7 @@ const ProductsPage = ({ navigate }) => {
               </div>
             )}
 
-            <div className="d-flex mb-3 gap-3">
+            <div className="products-filters d-flex mb-3 gap-3">
               <input className="w-60 form-control" placeholder="Search Products. . . ." value={searchTerm} onChange={handleSearch} />
               <select className="form-select w-40" value={searchCategory} onChange={handleCategorySearch}>
                 <option value="">All Categories</option>
@@ -226,7 +226,7 @@ const ProductsPage = ({ navigate }) => {
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
               </select>
-              <select className="form-select w-50 mx-3" onChange={handleSort}>
+              <select className="form-select w-50" onChange={handleSort}>
                 <option value="">Sort by</option>
                 <option value="name">Name</option>
                 <option value="company">Company</option>
