@@ -98,7 +98,7 @@ const DashboardOverview = ({navigate}) => {
           err?.response?.status === 403
         ){
           showPopup("Token Expired Please Login Again!!", "Session");
-          navigate('/login');
+          navigate('/');
         }
         console.log(err);
       } finally {

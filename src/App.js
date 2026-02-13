@@ -18,7 +18,7 @@ import api from './utils/axios';
 import { processOfflineQueue } from './utils/offlineOrders';
 
 function App() {
-  const authPages = ['/', '/login', '/register', '/logout'];
+  const authPages = ['/', '/register', '/logout'];
   const userDetails = useSelector((state) => state.user.userDetails);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -96,6 +96,8 @@ const showServerDownBanner = !isOnline || serverOffline;
         </div>
       )}
       <Routes>
+        <Route path="/" element={<LoginPage navigate={navigate} />} />
+        <Route path="/login" element={<Navigate to="/" replace />} />
         <Route
           path="/dashboard"
           element={
@@ -146,7 +148,7 @@ const showServerDownBanner = !isOnline || serverOffline;
             </ProtectedRoute>
           }
         />
-        <Route path='*' element={userDetails ? <Navigate to="/dashboard" replace />: <LoginPage navigate={navigate}/>} />
+        <Route path="*" element={userDetails ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />
       </Routes>
     </>
   );

@@ -23,6 +23,10 @@ code {
   body {
     font-size: 14px;
   }
+
+  body *:not(.navbar):not(.navbar *) {
+    font-size: 14px !important;
+  }
 }
 
 @media (max-width: 576px) {
