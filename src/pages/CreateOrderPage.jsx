@@ -498,9 +498,9 @@ const handlePurchaseProductSelect = (product, index) => {
         <span className="wow-pulse"></span>
       </div>
       <div className="order-shell wow-content">
-        <div className="order-hero">
+        {/* <div className="order-hero">
           <div>
-            <div className="order-kicker">Ameena Automobiles</div>
+            <div className="order-kicker">SHAJ Retail Products</div>
             <h3 className='order-title'>
               {orderDetails ? 'Update Order' : 'Create New Order'}
             </h3>
@@ -511,7 +511,7 @@ const handlePurchaseProductSelect = (product, index) => {
           <div className="order-hero-badge">
             Owner Mode
           </div>
-        </div>
+        </div> */}
         <div className="order-card">
       <div className="mb-3">
         {saleMethods && saleMethods.map(type => (

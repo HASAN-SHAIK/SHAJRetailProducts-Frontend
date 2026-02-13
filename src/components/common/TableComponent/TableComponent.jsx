@@ -39,7 +39,8 @@ const TableComponent = ({ title, columns, data, setProductUpdateFlag, color }) =
     <div  className="table-box text-center">
 
       <h4 style={{color: color}}> {title}</h4>
-      <table className="responsive-table">
+      <div className="responsive-table">
+        <table>
       {/* <div className="floating-shape circle red"></div>
       <div className="floating-shape triangle purple"></div> */}
         <thead>
@@ -84,7 +85,8 @@ const TableComponent = ({ title, columns, data, setProductUpdateFlag, color }) =
             <tr><td colSpan={columns.length}>No Data</td></tr>
           )}
         </tbody>
-      </table>
+        </table>
+      </div>
       {showEditModal && (
         <EditProductModal
           item={selectedItem}

@@ -25,7 +25,7 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="wow-page">
+    <div className="wow-page login-page">
       <div className="wow-motion-layer" aria-hidden="true">
         <span className="wow-orb orb-a"></span>
         <span className="wow-orb orb-b"></span>

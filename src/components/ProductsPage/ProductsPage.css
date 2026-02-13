@@ -21,3 +21,26 @@
   .btn-success:hover {
     background-color: #28a745cc;
   }
+
+  .products-filters {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  @media (max-width: 768px) {
+    .products-filters {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .products-filters .form-control,
+    .products-filters .form-select {
+      width: 100% !important;
+    }
+
+    .products-filters .w-60,
+    .products-filters .w-50,
+    .products-filters .w-40 {
+      width: 100% !important;
+    }
+  }

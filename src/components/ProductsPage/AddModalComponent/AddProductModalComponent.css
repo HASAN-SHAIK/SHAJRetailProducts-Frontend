@@ -52,6 +52,38 @@
     width: 0;
     height: 0;
   }
+
+@media (max-width: 768px) {
+  .modal-dialog.custom-modal-width {
+    margin: 0.75rem auto;
+  }
+
+  .custom-modal {
+    width: 94vw !important;
+    max-height: 90vh;
+    padding: 14px;
+  }
+
+  .custom-modal .modal-body {
+    max-height: 70vh;
+  }
+
+  .custom-modal .form-control.custom-input,
+  .custom-modal .form-select.custom-input {
+    width: 100%;
+    min-width: 100%;
+    font-size: 0.9rem;
+  }
+
+  .custom-modal .modal-footer {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .custom-modal .modal-footer .btn {
+    width: 100%;
+  }
+}
   
   .custom-input {
     /* border-radius: 8px; */

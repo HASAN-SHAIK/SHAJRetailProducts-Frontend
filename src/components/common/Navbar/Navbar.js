@@ -20,8 +20,7 @@ const Navbar = () => {
             <div className="nav-left d-flex align-items-center">
               <img src={logo} className='my-1 nav-logo' alt="SHAJ Logo" width="100" height="50"/>
               <button onClick={() => navigateTo('/dashboard')} className='m-1 btn companyName fs-3 btn-block'>
-              {/* <i class="bi bi-motherboard fs-3 m-1"></i> */}
-              Ameena Automobiles</button>
+              SHAJ Retail Products</button>
             </div>
              <button className="btn newOrderBtn fw-bold nav-cta" onClick={() => navigateTo('/neworder')}>
               <span className='fs-3'>New Order</span>
