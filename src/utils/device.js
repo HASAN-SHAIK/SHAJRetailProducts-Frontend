@@ -1,4 +1,10 @@
+let cachedDeviceId = null;
+
 export function getDeviceId() {
+  if (cachedDeviceId) {
+    return cachedDeviceId;
+  }
+
   let deviceId;
   try {
     deviceId = localStorage.getItem('device_id');
@@ -18,5 +24,6 @@ export function getDeviceId() {
     }
   }
 
+  cachedDeviceId = deviceId;
   return deviceId;
 }

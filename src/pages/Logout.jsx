@@ -21,6 +21,11 @@ const Logout = () => {
       dispatch(clearUserDetails());
       dispatch(clearOrderDetails());
       Cookies.remove('token');
+      try {
+        localStorage.removeItem('auth_token');
+      } catch (err) {
+        // Ignore storage failures
+      }
     }
     catch (error) {
       showPopup('Logout failed. Please try again.', 'Error');

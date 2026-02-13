@@ -28,6 +28,13 @@ const Login = ( ) => {
     try {
       const deviceId = getDeviceId();
       const res = await api.post('/auth/login', {device_id: deviceId, ...form}); // Set-Cookie works if backend handles it
+      if (res.data?.token && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('auth_token', res.data.token);
+        } catch (err) {
+          // Ignore storage failures (private mode / blocked storage)
+        }
+      }
       dispatch(setUserDetails(res.data.user)); // Dispatch user details to Redux store
       setIsLoading(false);
       navigate('/dashboard');

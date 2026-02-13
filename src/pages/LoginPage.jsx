@@ -17,7 +17,14 @@ const LoginPage = () => {
     setError('');
 
     try {
-      await api.post('/auth/login', form); // cookie is auto-stored
+      const res = await api.post('/auth/login', form); // cookie is auto-stored
+      if (res.data?.token && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('auth_token', res.data.token);
+        } catch (err) {
+          // Ignore storage failures (private mode / blocked storage)
+        }
+      }
       navigate('/dashboard'); // redirect on success
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
