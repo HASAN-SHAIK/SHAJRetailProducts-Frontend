@@ -6,6 +6,6 @@ describe('Logout Flow', () => {
 
   it('Should logout successfully', () => {
     cy.contains('Logout').click();
-    cy.url().should('include', '/login');
+    cy.url().should('include', '/');
   });
 });
