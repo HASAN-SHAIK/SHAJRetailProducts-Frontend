@@ -17,6 +17,9 @@
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
+  .responsive-table.scroll-y {
+    overflow-y: auto;
+  }
   
 .table-box h4 {
     font-size: 1rem;

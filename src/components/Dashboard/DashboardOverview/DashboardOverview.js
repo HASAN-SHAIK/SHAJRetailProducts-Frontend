@@ -45,6 +45,7 @@ const DashboardOverview = ({navigate}) => {
   const [profitData, setProfitData] = useState([]);
   const [profitLoading, setProfitLoading] = useState(false);
   const [serverOffline, setServerOffline] = useState(false);
+  const tableMaxHeight = "320px";
   const { showPopup } = usePopup();
 
   const isNetworkError = (err) =>
@@ -195,10 +196,40 @@ const DashboardOverview = ({navigate}) => {
       </div> */}
 
       <div className="tables-section row">
-        {mostSellingTable &&mostSellingTable.length >0 && <TableComponent title="Most Selling Products" columns={sellingColumns} data={mostSellingTable} />}
-        {profitByProductTable && profitByProductTable.length > 0 && <TableComponent title="Most Profitable Products" columns={profitColumns} data={profitByProductTable} />}
-        {inventoryData.outOfStockProducts && inventoryData.outOfStockProducts.length > 0 && <TableComponent color='red' title="Out of Stock Products" columns={stockColumns} data={inventoryData.outOfStockProducts} />}
-        {inventoryData.lowStockProducts && inventoryData.lowStockProducts.length > 0 && <TableComponent color='orange' title="Low on Stock" columns={stockColumns} data={inventoryData.lowStockProducts} />}
+        {mostSellingTable &&mostSellingTable.length >0 && (
+          <TableComponent
+            title="Most Selling Products"
+            columns={sellingColumns}
+            data={mostSellingTable}
+            maxHeight={tableMaxHeight}
+          />
+        )}
+        {profitByProductTable && profitByProductTable.length > 0 && (
+          <TableComponent
+            title="Most Profitable Products"
+            columns={profitColumns}
+            data={profitByProductTable}
+            maxHeight={tableMaxHeight}
+          />
+        )}
+        {inventoryData.outOfStockProducts && inventoryData.outOfStockProducts.length > 0 && (
+          <TableComponent
+            color='red'
+            title="Out of Stock Products"
+            columns={stockColumns}
+            data={inventoryData.outOfStockProducts}
+            maxHeight={tableMaxHeight}
+          />
+        )}
+        {inventoryData.lowStockProducts && inventoryData.lowStockProducts.length > 0 && (
+          <TableComponent
+            color='orange'
+            title="Low on Stock"
+            columns={stockColumns}
+            data={inventoryData.lowStockProducts}
+            maxHeight={tableMaxHeight}
+          />
+        )}
       </div>
 
       <div className="profit-graph-card p-5 mb-5">

@@ -307,9 +307,11 @@ const OrdersPage = ({ userRole, navigate }) => {
      console.log("Orders", res.data.orders);
      setOrders(res.data.orders);
      setFilteredOrders(res.data.orders);
-     setOfflineOrders(getOfflineOrderQueue());
+     const queue = getOfflineOrderQueue();
+     setOfflineOrders(Array.isArray(queue) ? queue : []);
    } catch (err) {
-    setOfflineOrders(getOfflineOrderQueue());
+    const queue = getOfflineOrderQueue();
+    setOfflineOrders(Array.isArray(queue) ? queue : []);
     if(err.response?.data?.message === 'Invalid Token' || err.response?.status === '400' || err.response?.status == '401' || err.response?.status === '403'){
       showPopup("Token Expired Please Login Again!", "Session");
       navigate('/logout');
@@ -570,14 +572,17 @@ useEffect(() => {
   // setIsLoading(false);
 }, [orderUpdateFlag]);
 useEffect(() => {
-  const refreshOffline = () => setOfflineOrders(getOfflineOrderQueue());
+  const refreshOffline = () => {
+    const queue = getOfflineOrderQueue();
+    setOfflineOrders(Array.isArray(queue) ? queue : []);
+  };
   refreshOffline();
   window.addEventListener('online', refreshOffline);
   return () => window.removeEventListener('online', refreshOffline);
 }, []);
 
- const renderOfflineRows = () => (
-  offlineOrders.map((entry, idx) => {
+ const renderOfflineRows = (entries) => (
+  entries.map((entry, idx) => {
     const payload = entry.payload || {};
     const items = payload.items || payload.products || [];
     const totalPrice = payload.total_price || payload.total_amount || 0;
@@ -623,6 +628,7 @@ useEffect(() => {
     );
   })
  );
+ const offlineOrdersList = Array.isArray(offlineOrders) ? offlineOrders : [];
  return (
   
     isLoading ?
@@ -755,7 +761,7 @@ order.type === 'personal' ? null : <tr key={idx} className={deletedOrderIds.has(
 </td>
 </tr>
            ))}
-{offlineOrders.length > 0 && renderOfflineRows()}
+{offlineOrdersList.length > 0 && renderOfflineRows(offlineOrdersList)}
 {filteredOrders.length === 0 && (
 <tr>
 <td colSpan={userRole === 'admin' ? 11 : 10}>No orders found.</td>

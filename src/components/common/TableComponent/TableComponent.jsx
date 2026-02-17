@@ -5,7 +5,7 @@ import api from "../../../utils/axios";
 import EditProductModal from "../../ProductsPage/EditOrderModal/EditProductModal";
 import { usePopup } from "../PopUp/PopupProvider";
 
-const TableComponent = ({ title, columns, data, setProductUpdateFlag, color }) => {
+const TableComponent = ({ title, columns, data, setProductUpdateFlag, color, maxHeight }) => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const { showPopup } = usePopup();
@@ -67,7 +67,10 @@ const TableComponent = ({ title, columns, data, setProductUpdateFlag, color }) =
     <div  className="table-box text-center">
 
       <h4 style={{color: color}}> {title}</h4>
-      <div className="responsive-table">
+      <div
+        className={`responsive-table${maxHeight ? ' scroll-y' : ''}`}
+        style={maxHeight ? { maxHeight } : undefined}
+      >
         <table>
       {/* <div className="floating-shape circle red"></div>
       <div className="floating-shape triangle purple"></div> */}
