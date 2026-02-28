@@ -16,18 +16,32 @@ import Footer from './components/Footer/Footer';
 import { setUserDetails } from './store/userSlice';
 import api from './utils/axios';
 import { processOfflineQueue } from './utils/offlineOrders';
+import { setTenantConfig, setTenantConfigStatus, setSubscriptionStatus, setTenantIdentity } from './store/tenantSlice';
+import SubscriptionExpired from './pages/SubscriptionExpired';
+import { decodeJwtPayload } from './utils/jwt';
+import Support from './pages/Support';
+import { usePopup } from './components/common/PopUp/PopupProvider';
 
 function App() {
   const authPages = ['/', '/register', '/logout'];
   const userDetails = useSelector((state) => state.user.userDetails);
+  const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
+  const tenantConfigStatus = useSelector((state) => state.tenant.configStatus);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [serverOffline, setServerOffline] = useState(
     typeof window !== 'undefined' && window.__serverOffline === true
   );
+  const [tenantBanner, setTenantBanner] = useState(null);
   const navigate = useNavigate();
-const dispatch = useDispatch();
+  const dispatch = useDispatch();
   const location = useLocation();
+  const { showPopup } = usePopup();
+  const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
+  const reportsEnabled =
+    planFeatures.advanced_reports === true ||
+    planFeatures.analytical_reports === true ||
+    tenantConfig?.enable_reports !== false;
 
 useEffect(() => {
   const checkSession = async () => {
@@ -35,14 +49,90 @@ useEffect(() => {
       if (!navigator.onLine) return;
       const res = await api.get('/auth/getLogin');
       dispatch(setUserDetails(res.data.user)); // optional (for username)
+      if (res?.data?.user) {
+        dispatch(setTenantIdentity({
+          tenantId: res.data.user.tenant_id,
+          role: res.data.user.role,
+          userId: res.data.user.id,
+        }));
+      }
     } catch (err) {
       if (!navigator.onLine) return;
-      console.error('Session check failed:', err);
-      navigate('/logout');
+      const status = err?.response?.status;
+      if (status === 401) {
+        console.error('Session check failed:', err);
+        navigate('/logout');
+      } else {
+        console.error('Session check failed:', err);
+      }
     }
   };
   checkSession();
 }, []);
+
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  try {
+    const token = localStorage.getItem('auth_token');
+    const decoded = decodeJwtPayload(token);
+    if (decoded) {
+      dispatch(setTenantIdentity({
+        tenantId: decoded.tenant_id,
+        role: decoded.role,
+        userId: decoded.user_id,
+      }));
+    }
+  } catch (err) {
+    // ignore
+  }
+}, [dispatch]);
+
+  useEffect(() => {
+    const fetchTenantConfig = async () => {
+      if (!userDetails || tenantConfigStatus === 'loading' || tenantConfigStatus === 'loaded') return;
+      dispatch(setTenantConfigStatus('loading'));
+      try {
+        const res = await api.get('/platform/config');
+        const payload = res?.data?.data || res?.data || {};
+        dispatch(setTenantConfig(payload));
+        if (payload.subscription_status || payload.subscriptionStatus) {
+          dispatch(setSubscriptionStatus(payload.subscription_status || payload.subscriptionStatus));
+        }
+      } catch (err) {
+        const code = err?.response?.data?.code;
+        if (code === 'SUBSCRIPTION_INACTIVE') {
+          dispatch(setSubscriptionStatus('inactive'));
+          dispatch(setTenantConfigStatus('loaded'));
+          dispatch(setTenantConfig(null));
+        } else {
+          dispatch(setTenantConfigStatus('error'));
+          console.error('Failed to fetch tenant config', err);
+        }
+      }
+    };
+    fetchTenantConfig();
+  }, [userDetails, tenantConfigStatus, dispatch]);
+
+useEffect(() => {
+  const fetchTenantBanner = async () => {
+    if (!userDetails || !navigator.onLine) return;
+    try {
+      const res = await api.get('/banner');
+      const payload = res?.data?.data || res?.data || {};
+      const rawDaysLeft = payload.days_left ?? payload.daysLeft;
+      const parsedDaysLeft = rawDaysLeft === null || rawDaysLeft === undefined ? null : Number(rawDaysLeft);
+      setTenantBanner({
+        enabled: payload.show_banner === true || payload.showBanner === true,
+        color: payload.bannerColor || payload.color || null,
+        daysLeft: Number.isFinite(parsedDaysLeft) ? parsedDaysLeft : null,
+      });
+    } catch (err) {
+      console.error('Failed to fetch tenant banner', err);
+      setTenantBanner(null);
+    }
+  };
+  fetchTenantBanner();
+}, [userDetails]);
 
 useEffect(() => {
   const syncOfflineOrders = async () => {
@@ -82,7 +172,38 @@ useEffect(() => {
   return () => window.removeEventListener('server-status', handleServerStatus);
 }, []);
 
+useEffect(() => {
+  const handleAuthExpired = () => {
+    navigate('/logout');
+  };
+  const handleSubscriptionExpired = () => {
+    navigate('/subscription-expired');
+  };
+  const handleForbidden = (event) => {
+    const message = event?.detail?.message || 'Admin access only';
+    showPopup(message, 'Access');
+  };
+  window.addEventListener('auth-expired', handleAuthExpired);
+  window.addEventListener('subscription-expired', handleSubscriptionExpired);
+  window.addEventListener('forbidden', handleForbidden);
+  return () => {
+    window.removeEventListener('auth-expired', handleAuthExpired);
+    window.removeEventListener('subscription-expired', handleSubscriptionExpired);
+    window.removeEventListener('forbidden', handleForbidden);
+  };
+}, [navigate, showPopup]);
+
 const showServerDownBanner = !isOnline || serverOffline;
+const showTenantBanner = tenantBanner?.enabled === true;
+const tenantBannerDays = Number.isFinite(tenantBanner?.daysLeft) ? tenantBanner.daysLeft : null;
+const tenantBannerColor = (() => {
+  if (tenantBannerDays !== null) {
+    if (tenantBannerDays <= 3) return '#ef4444';
+    if (tenantBannerDays <= 5) return '#f97316';
+    if (tenantBannerDays < 7) return '#f59e0b';
+  }
+  return tenantBanner?.color || null;
+})();
   return (
     <>
       {userDetails && !authPages.includes(location.pathname) && 
@@ -92,18 +213,33 @@ const showServerDownBanner = !isOnline || serverOffline;
       </div>}
       {showServerDownBanner && (
         <div className="server-down-banner">
-          Server is Offline
+          Server is Offline You Can Still Create Orders, But Sync Will Happen Once Server is Back Online
+        </div>
+      )}
+      {showTenantBanner && (
+        <div
+          className="tenant-status-banner"
+          style={
+            tenantBannerColor
+              ? { background: tenantBannerColor, backgroundImage: 'none' }
+              : undefined
+          }
+        >
+          {tenantBannerDays === null
+            ? 'Subscription status notice'
+            : `Your subscription will expire in ${tenantBannerDays} day${tenantBannerDays === 1 ? '' : 's'}.`}
         </div>
       )}
       <Routes>
         <Route path="/" element={<LoginPage navigate={navigate} />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/subscription-expired" element={<SubscriptionExpired />} />
         <Route
           path="/dashboard"
           element={
             <ProtectedRoute>
               <ThemeProvider>
-                <Dashboard navigate={navigate} />
+                {reportsEnabled ? <Dashboard navigate={navigate} /> : <Navigate to="/neworder" replace />}
               </ThemeProvider>
             </ProtectedRoute>
           }
@@ -141,11 +277,17 @@ const showServerDownBanner = !isOnline || serverOffline;
           }
         />
         <Route
-          path='/logout'
+          path="/support"
           element={
             <ProtectedRoute>
-              <Logout />
+              <Support navigate={navigate} />
             </ProtectedRoute>
+          }
+        />
+        <Route
+          path='/logout'
+          element={
+            <Logout />
           }
         />
         <Route path="*" element={userDetails ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />

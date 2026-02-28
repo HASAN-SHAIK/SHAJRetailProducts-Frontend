@@ -17,7 +17,7 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
             : [];
         setCategories(list);
       } catch (err) {
-        if ((err.response?.data && err.response.data.message === 'Access Denied') || err.response?.status === 400 || err.response?.status == 401 || err.response?.status === 403) {
+        if (err.response?.status == 401) {
           showPopup("Token Expired Please Login Again!", "Session");
           navigate('/logout');
         } else {

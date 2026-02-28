@@ -1,20 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './ProductsPage.css'; // Custom styles
-import TableComponent from '../common/TableComponent/TableComponent';
 import api from '../../utils/axios';
 import { Modal } from 'bootstrap';
 import AddProductModalComponent from './AddModalComponent/AddProductModalComponent';
-import LoadingSpinner from '../common/LoadingSpinner/LoadingSpinner';
 import { useSelector } from 'react-redux';
 import { saveProductsCache } from '../../utils/offlineProducts';
 import { usePopup } from '../common/PopUp/PopupProvider';
+import EditProductModal from './EditOrderModal/EditProductModal';
 
 const ProductsPage = ({ navigate }) => {
 //Modal data
- const [showEditModal, setShowEditModal] = useState(false);
- const [selectedOrder, setSelectedOrder] = useState(null);
  const [productUpdateFlag, setProductUpdateFlag] = useState(false);
  const userDetails = useSelector((state) => state.user.userDetails);
+ const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
+ const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
+ const weightBasedEnabled =
+  planFeatures.enable_weight_based !== false &&
+  tenantConfig?.enable_weight_based !== false;
+ const pieceBasedEnabled =
+  planFeatures.enable_piece_based !== false &&
+  tenantConfig?.enable_piece_based !== false;
+ const defaultWeightValue = weightBasedEnabled && !pieceBasedEnabled ? '1' : '0';
  const { showPopup } = usePopup();
  const [formData, setFormData] = useState({
   product_name: '',
@@ -24,7 +30,7 @@ const ProductsPage = ({ navigate }) => {
     stock_quantity: '',
     category: '',
     time_for_delivery: '',
-    is_weight_based: '0'
+    is_weight_based: defaultWeightValue
   });
 
   const handleChange = (e) => {
@@ -35,13 +41,16 @@ const ProductsPage = ({ navigate }) => {
     }));
   };
 
-  const handleEditClick = (order) => {
-    setSelectedOrder(order);
-    setShowEditModal(true);
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!pieceBasedEnabled && formData.is_weight_based === '0') {
+      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    if (!weightBasedEnabled && formData.is_weight_based === '1') {
+      showPopup('Weight-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
 
     try {
       await api.post('/products', formData); // Your endpoint
@@ -54,7 +63,7 @@ const ProductsPage = ({ navigate }) => {
         actual_price: '',
         stock_quantity: '',
         time_for_delivery: '',
-        is_weight_based: '0'
+        is_weight_based: defaultWeightValue
       });
       const modalElement = document.getElementById('addProductModal');
       const modal = Modal.getInstance(modalElement);
@@ -63,12 +72,9 @@ const ProductsPage = ({ navigate }) => {
     setProductUpdateFlag(true)
 
     } catch (err) {
-      if(err.response.data.message === 'Invalid Token' || err.response.data.message === 'Access Denied' || err.response.status === 401 || err.response.status === 403 || err.response.status === 400){
+      if(err.response.data.message === 'Invalid Token' || err.response.status === 401){
       showPopup("Token Expired Please Login Again!", "Session");
       navigate('/logout');
-      }
-      else if(err.status === 403){
-      showPopup("You should be admin", "Access");     
       }
       else{
       showPopup("Issue while adding please try later", "Error");
@@ -87,52 +93,110 @@ const ProductsPage = ({ navigate }) => {
     { label: 'Quantity', name: 'stock_quantity', type: 'number' },
     { label: 'Time For Delivery', name:'time_for_delivery', type: 'number'},
     { label: 'Weight Based', name: 'is_weight_based', type: 'select', options: [
-      { label: 'No (Piece)', value: '0' },
-      { label: 'Yes (Weight)', value: '1' }
+      ...(pieceBasedEnabled ? [{ label: 'No (Piece)', value: '0' }] : []),
+      ...(weightBasedEnabled ? [{ label: 'Yes (Weight)', value: '1' }] : [])
     ]},
   ];
 
  const [products, setProducts] = useState([]);
- const [searchTerm, setSearchTerm] = useState('');
- const [searchCategory, setSearchCategory] = useState('');
   const [categories, setCategories] = useState([]);
-  const [sortBy, setSortBy] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+ const [errorMessage, setErrorMessage] = useState('');
+ const [pagination, setPagination] = useState({
+  page: 1,
+  limit: 10,
+  total_pages: 1,
+  total_records: 0,
+ });
+ const [searchInput, setSearchInput] = useState('');
+ const [searchQuery, setSearchQuery] = useState('');
+ const [selectedCategory, setSelectedCategory] = useState('');
+ const [sortBy, setSortBy] = useState('created_at');
+ const [sortOrder, setSortOrder] = useState('desc');
+ const [editTarget, setEditTarget] = useState(null);
+ const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+ const [deleteTarget, setDeleteTarget] = useState(null);
+ const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
-    fetchProducts().then(()=> setIsLoading(false));
     fetchCategories();
-  }, [productUpdateFlag]);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPagination((prev) => ({ ...prev, page: 1 }));
+      setSearchQuery(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [productUpdateFlag, pagination.page, pagination.limit, searchQuery, selectedCategory, sortBy, sortOrder]);
+
+  const buildParams = useCallback(() => {
+    const params = {
+      page: pagination.page,
+      limit: pagination.limit,
+      search: searchQuery || undefined,
+      category_id: selectedCategory || undefined,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    };
+    return params;
+  }, [pagination.page, pagination.limit, searchQuery, selectedCategory, sortBy, sortOrder]);
 
   const fetchProducts = async () => {
-    try{
-    const response = await api.get('/products');
-    setProducts(response.data);
-    saveProductsCache(response.data);
-    }
-    catch(err){
-     if(err.response?.data?.message === 'Invalid Token' || err.response.status === 400 || err.response.status === 401 || err.response.status === 403){
-      showPopup("Token Expired Please Login Again!", "Session");
-      navigate('/logout');
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      const response = await api.get('/products', { params: buildParams() });
+      const payload = response?.data || {};
+      const list = Array.isArray(payload.products) ? payload.products : [];
+      setProducts(list);
+      saveProductsCache(list);
+      setPagination((prev) => ({
+        ...prev,
+        page: payload.pagination?.page || prev.page,
+        limit: payload.pagination?.limit || prev.limit,
+        total_pages: payload.pagination?.total_pages || 1,
+        total_records: payload.pagination?.total_records || 0,
+      }));
+    } catch (err) {
+      if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
+        showPopup("Token Expired Please Login Again!", "Session");
+        navigate('/logout');
+      } else {
+        setErrorMessage('Unable to load products. Please try again.');
       }
-      else{
-        console.log(err);
-      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const fetchCategories = async () => {
     try {
-      const res = await api.get('/orders/getcategories');
-      const list = Array.isArray(res.data?.data)
-        ? res.data.data.map((c) => c.category).filter(Boolean)
-        : Array.isArray(res.data)
-          ? res.data.map((c) => c.category).filter(Boolean)
-          : [];
-      setCategories(list);
+      let res;
+      try {
+        res = await api.get('/categories');
+      } catch (innerErr) {
+        res = await api.get('/orders/getcategories');
+      }
+      const raw = res?.data?.categories || res?.data?.data || res?.data || [];
+      const list = Array.isArray(raw) ? raw : [];
+      const normalized = list.map((item) => {
+        if (typeof item === 'string') {
+          return { id: item, name: item };
+        }
+        return {
+          id: item.id ?? item.category_id ?? item.value ?? item.category ?? item.name,
+          name: item.name ?? item.category ?? item.label ?? item.title ?? '',
+        };
+      }).filter((item) => item.name);
+      setCategories(normalized);
     } catch (err) {
-      if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 400 || err.response?.status === 401 || err.response?.status === 403) {
+      if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
         showPopup("Token Expired Please Login Again!", "Session");
         navigate('/logout');
       } else {
@@ -141,59 +205,99 @@ const ProductsPage = ({ navigate }) => {
     }
   };
 
-  const handleSearch = (e) => setSearchTerm(e.target.value);
-  const handleCategorySearch = (e) => setSearchCategory(e.target.value);
-
-  const handleSort = (e) => setSortBy(e.target.value);
-
-  const normalizeCategory = (value) => {
-    if (value == null) return '';
-    if (typeof value === 'string') return value.trim();
-    if (typeof value === 'object') {
-      return (
-        value.category ||
-        value.name ||
-        value.title ||
-        value.label ||
-        ''
-      ).toString().trim();
-    }
-    return value.toString().trim();
-  };
-
-  const categoryOptions = Array.from(
-    new Set(
-      (categories.length ? categories : products.map((p) => p.category))
-        .map(normalizeCategory)
-        .filter(Boolean)
-    )
+  const categoryOptions = useMemo(
+    () => categories,
+    [categories]
   );
 
-  const filteredProducts = products
-    .filter((p) => {
-      const term = searchTerm.toLowerCase();
-      const nameMatch = (p.name || '').toLowerCase().includes(term);
-      const companyMatch = (p.company || '').toLowerCase().includes(term);
-      return nameMatch || companyMatch;
-    })
-    .filter((p) => {
-      if (!searchCategory) return true;
-      const productCategory = normalizeCategory(p.category);
-      return productCategory.toLowerCase() === searchCategory.toLowerCase();
-    })
-    .sort((a, b) => {
-      if (!sortBy) return 0;
-      return a[sortBy].localeCompare(b[sortBy]);
-    });
-    const handleOpenModal = () => {
-        const modalElement = document.getElementById('addProductModal');
-        const bootstrapModal = new Modal(modalElement);
-        setShowModal(true);
-        bootstrapModal.show();
-    }
+  const formatMoney = (value) => {
+    const amount = Number(value || 0);
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 2,
+    }).format(Number.isFinite(amount) ? amount : 0);
+  };
 
+  const handleSortToggle = (field) => {
+    if (sortBy === field) {
+      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortOrder('asc');
+    }
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  const getSortIndicator = (field) => {
+    if (sortBy !== field) return '';
+    return sortOrder === 'asc' ? '^' : 'v';
+  };
+
+  const handleOpenModal = () => {
+    if (!pieceBasedEnabled && !weightBasedEnabled) {
+      showPopup('Product types are disabled for this tenant.', 'Feature');
+      return;
+    }
+    const modalElement = document.getElementById('addProductModal');
+    const bootstrapModal = new Modal(modalElement);
+    setShowModal(true);
+    bootstrapModal.show();
+  };
+
+  const handleEditClick = (product) => {
+    setEditTarget(product);
+  };
+
+  const handleSubmitEdit = async (updatedProduct) => {
+    if (!pieceBasedEnabled && String(updatedProduct.is_weight_based) === '0') {
+      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    if (!weightBasedEnabled && String(updatedProduct.is_weight_based) === '1') {
+      showPopup('Weight-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    try {
+      const response = await api.put(`/products/${updatedProduct.id}`, updatedProduct);
+      if (response.status === 200) {
+        showPopup('Product updated successfully!', 'Success');
+        setEditTarget(null);
+        setProductUpdateFlag((prev) => !prev);
+      }
+    } catch (error) {
+      console.error('Failed to update product:', error);
+      showPopup('Error updating product', 'Error');
+    }
+  };
+
+  const openDeleteModal = (product) => {
+    setDeleteTarget(product);
+    setDeleteModalOpen(true);
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteModalOpen(false);
+    setDeleteTarget(null);
+  };
+
+  const handleDeleteProduct = async () => {
+    const productId = deleteTarget?.id;
+    if (!productId) return;
+    setDeletingId(productId);
+    try {
+      await api.delete(`/products/${productId}`);
+      showPopup('Product deleted', 'Success');
+      closeDeleteModal();
+      setProductUpdateFlag((prev) => !prev);
+    } catch (err) {
+      showPopup('Failed to delete product', 'Error');
+    } finally {
+      setDeletingId(null);
+    }
+  };
   return (
-    <div className="wow-page">
+    <div className="wow-page products-page">
       <div className="wow-motion-layer" aria-hidden="true">
         <span className="wow-orb orb-a"></span>
         <span className="wow-orb orb-b"></span>
@@ -203,58 +307,215 @@ const ProductsPage = ({ navigate }) => {
         <span className="wow-ring ring-b"></span>
         <span className="wow-pulse"></span>
       </div>
-      <div className="wow-content w-90 container-fluid pt-4">
-        {isLoading ? (
-          <LoadingSpinner />
-        ) : (
-          <>
-            {userDetails.role === 'admin' && (
-              <div className="d-flex float-end">
-                <div>
-                  <button className="btn btn-success form-control" onClick={() => handleOpenModal(true)}>
-                    Add Product
-                  </button>
-                </div>
-              </div>
-            )}
+      <div className="wow-content container-fluid pt-4">
+        <div className="products-header">
+          <div>
+            {/* <h2 className="products-title">Products</h2> */}
+            <p className="products-subtitle">Search, filter, and manage inventory.</p>
+          </div>
+          {userDetails.role === 'admin' && (
+            <button className="btn btn-success" onClick={handleOpenModal}>
+              Add Product
+            </button>
+          )}
+        </div>
 
-            <div className="products-filters d-flex mb-3 gap-3">
-              <input className="w-60 form-control" placeholder="Search Products. . . ." value={searchTerm} onChange={handleSearch} />
-              <select className="form-select w-40" value={searchCategory} onChange={handleCategorySearch}>
-                <option value="">All Categories</option>
-                {categoryOptions.map((cat) => (
-                  <option key={cat} value={cat}>{cat}</option>
+        <div className="products-controls">
+          <input
+            className="form-control search-input"
+            placeholder="Search by product name or company"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+          />
+          <select
+            className="form-select category-select"
+            value={selectedCategory}
+            onChange={(event) => {
+              setSelectedCategory(event.target.value);
+              setPagination((prev) => ({ ...prev, page: 1 }));
+            }}
+          >
+            <option value="">All Categories</option>
+            {categoryOptions.map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+          <div className="sort-controls">
+            <select
+              className="form-select sort-select"
+              value={sortBy}
+              onChange={(event) => {
+                setSortBy(event.target.value);
+                setSortOrder('asc');
+                setPagination((prev) => ({ ...prev, page: 1 }));
+              }}
+            >
+              <option value="created_at">Sort by Date</option>
+              <option value="name">Sort by Name</option>
+              <option value="selling_price">Sort by Price</option>
+              <option value="stock_quantity">Sort by Stock</option>
+            </select>
+            <button
+              className="btn btn-outline-primary btn-sm"
+              onClick={() => {
+                setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+                setPagination((prev) => ({ ...prev, page: 1 }));
+              }}
+              type="button"
+            >
+              {sortOrder === 'asc' ? 'Asc' : 'Desc'}
+            </button>
+          </div>
+        </div>
+
+        <div className="products-card">
+          <div className="products-table-wrapper">
+            <table className="products-table">
+              <thead>
+                <tr>
+                  <th role="button" onClick={() => handleSortToggle('name')} className="sortable">
+                    Product <span className="sort-indicator">{getSortIndicator('name')}</span>
+                  </th>
+                  <th role="button" onClick={() => handleSortToggle('company_name')} className="sortable">
+                    Company <span className="sort-indicator">{getSortIndicator('company_name')}</span>
+                  </th>
+                  <th>Category</th>
+                  <th role="button" onClick={() => handleSortToggle('selling_price')} className="sortable">
+                    Selling Price <span className="sort-indicator">{getSortIndicator('selling_price')}</span>
+                  </th>
+                  <th role="button" onClick={() => handleSortToggle('stock_quantity')} className="sortable">
+                    Stock <span className="sort-indicator">{getSortIndicator('stock_quantity')}</span>
+                  </th>
+                  <th>Status</th>
+                  {userDetails.role === 'admin' && <th>Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading && Array.from({ length: 6 }).map((_, idx) => (
+                  <tr key={`skeleton-${idx}`} className="skeleton-row">
+                    <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
+                    {userDetails.role === 'admin' && <td><span className="skeleton-block" /></td>}
+                  </tr>
                 ))}
-              </select>
-              <select className="form-select w-50" onChange={handleSort}>
-                <option value="">Sort by</option>
-                <option value="name">Name</option>
-                <option value="company">Company</option>
-              </select>
+                {!isLoading && errorMessage && (
+                  <tr>
+                    <td colSpan={userDetails.role === 'admin' ? 7 : 6} className="empty-state">
+                      {errorMessage}
+                    </td>
+                  </tr>
+                )}
+                {!isLoading && !errorMessage && products.length === 0 && (
+                  <tr>
+                    <td colSpan={userDetails.role === 'admin' ? 7 : 6} className="empty-state">
+                      No products found.
+                    </td>
+                  </tr>
+                )}
+                {!isLoading && !errorMessage && products.map((product) => {
+                  const stock = Number(product.stock_quantity ?? product.quantity ?? 0);
+                  const minStock = Number(product.min_stock_level ?? 0);
+                  const lowStock = minStock > 0 && stock <= minStock;
+                  return (
+                    <tr key={product.id} className="products-row">
+                      <td>{product.name || product.product_name || '-'}</td>
+                      <td>{product.company_name || product.company || '-'}</td>
+                      <td>{product.category_name || product.category || '-'}</td>
+                      <td>{formatMoney(product.selling_price)}</td>
+                      <td>{stock}</td>
+                      <td>
+                        <span className={`stock-badge ${lowStock ? 'low' : 'ok'}`}>
+                          {lowStock ? 'Low Stock' : 'In Stock'}
+                        </span>
+                      </td>
+                      {userDetails.role === 'admin' && (
+                        <td className="actions-cell">
+                          <button className="btn btn-outline-primary btn-sm" onClick={() => handleEditClick(product)}>
+                            Edit
+                          </button>
+                          <button className="btn btn-outline-danger btn-sm" onClick={() => openDeleteModal(product)}>
+                            Delete
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="products-pagination">
+            <button
+              className="page-btn"
+              disabled={pagination.page <= 1}
+              onClick={() => setPagination((prev) => ({ ...prev, page: prev.page - 1 }))}
+            >
+              Prev
+            </button>
+            <div className="page-list">
+              {Array.from({ length: pagination.total_pages || 1 }, (_, idx) => idx + 1).map((page) => (
+                <button
+                  key={`page-${page}`}
+                  className={`page-btn ${page === pagination.page ? 'active' : ''}`}
+                  onClick={() => setPagination((prev) => ({ ...prev, page }))}
+                >
+                  {page}
+                </button>
+              ))}
             </div>
+            <button
+              className="page-btn"
+              disabled={pagination.page >= pagination.total_pages}
+              onClick={() => setPagination((prev) => ({ ...prev, page: prev.page + 1 }))}
+            >
+              Next
+            </button>
+          </div>
+        </div>
 
-            <TableComponent
-              columns={['Name', 'Company', 'Type', 'Selling_Price', ...(userDetails.role === 'admin' ? ['Actual_Price'] : []), 'Quantity', ...(userDetails.role === 'admin' ? ['Edit'] : [])]}
-              data={filteredProducts}
-              isAdmin={userDetails.role === 'admin'}
-              setProductUpdateFlag={setProductUpdateFlag}
-            />
-
-            {userDetails.role === 'admin' && (
-              <AddProductModalComponent
-                navigate={navigate}
-                setProductUpdateFlag={setProductUpdateFlag}
-                modalId="addProductModal"
-                title="Add Product"
-                fields={productFields}
-                formData={formData}
-                onChange={handleChange}
-                onSubmit={handleSubmit}
-                onClose={() => setShowModal(false)}
-                onProductAdded={fetchProducts}
-              />
-            )}
-          </>
+        {userDetails.role === 'admin' && (
+          <AddProductModalComponent
+            navigate={navigate}
+            setProductUpdateFlag={setProductUpdateFlag}
+            modalId="addProductModal"
+            title="Add Product"
+            fields={productFields}
+            formData={formData}
+            onChange={handleChange}
+            onSubmit={handleSubmit}
+            onClose={() => setShowModal(false)}
+            onProductAdded={fetchProducts}
+          />
+        )}
+        {editTarget && (
+          <EditProductModal
+            item={editTarget}
+            pieceBasedEnabled={pieceBasedEnabled}
+            weightBasedEnabled={weightBasedEnabled}
+            onClose={() => setEditTarget(null)}
+            onSubmit={handleSubmitEdit}
+          />
+        )}
+        {deleteModalOpen && (
+          <div className="delete-modal-overlay" onClick={closeDeleteModal}>
+            <div className="delete-modal" onClick={(event) => event.stopPropagation()}>
+              <h4>Delete product?</h4>
+              <p>Are you sure you want to delete {deleteTarget?.name || deleteTarget?.product_name}?</p>
+              <div className="delete-actions">
+                <button className="btn btn-outline-secondary" onClick={closeDeleteModal}>
+                  Cancel
+                </button>
+                <button className="btn btn-danger" onClick={handleDeleteProduct} disabled={deletingId === deleteTarget?.id}>
+                  {deletingId === deleteTarget?.id ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

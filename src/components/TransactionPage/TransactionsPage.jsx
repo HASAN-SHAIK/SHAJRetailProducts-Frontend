@@ -13,7 +13,16 @@ import { usePopup } from '../common/PopUp/PopupProvider';
 const TransactionsPage = ({navigate}) => {
   const [transactions, setTransactions] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedRange, setSelectedRange] = useState('this_month');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [customRangeKey, setCustomRangeKey] = useState(0);
   const { showPopup } = usePopup();
+  const hasNonZeroValue = (value) => {
+    if (value === null || value === undefined) return false;
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0;
+  };
 
   const formatToIST = (utcDate) => {
     if (!utcDate) return '';
@@ -30,22 +39,54 @@ const TransactionsPage = ({navigate}) => {
   };
   
   useEffect(() => {
-    fetchTransactions().then(()=> setIsLoading(false));
-  }, []);
+    fetchTransactions();
+  }, [selectedRange, customRangeKey]);
+
+  const buildRangeParams = () => {
+    const params = { range: selectedRange };
+    if (selectedRange === 'custom') {
+      params.start_date = customStartDate;
+      params.end_date = customEndDate;
+    }
+    return params;
+  };
 
   const fetchTransactions = async () => {
+    if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
+      return;
+    }
     try {
-      const res = await api.get('/transactions');
+      setIsLoading(true);
+      const res = await api.get('/transactions', { params: buildRangeParams() });
       setTransactions(res.data);
     } catch (err) {
-          if(err.response.data.message === 'Invalid Token' || err.response.status === '400' || err.response.status == '401' || err.response.status === '403'){
-      showPopup("Token Expired Please Login Again!", "Session");
-      navigate('/logout');
-    }
+        if(err.response.data.message === 'Invalid Token' || err.response.status == '401'){
+          showPopup("Token Expired Please Login Again!", "Session");
+          navigate('/logout');
+        }
     else{
       console.error('Error fetching transactions:', err);
     }
     }
+    finally{
+      setIsLoading(false);
+    }
+  };
+
+  const totalTransactions = Array.isArray(transactions?.transactions)
+    ? transactions.transactions.length
+    : 0;
+
+  const handleRangeChange = (value) => {
+    setSelectedRange(value);
+  };
+
+  const handleApplyCustomRange = () => {
+    if (!customStartDate || !customEndDate) {
+      showPopup('Please select start and end dates', 'Validation');
+      return;
+    }
+    setCustomRangeKey((prev) => prev + 1);
   };
 
   return (
@@ -54,14 +95,63 @@ const TransactionsPage = ({navigate}) => {
    :
    <div>
     <div className="container-fluid  pt-4 transactions-page">
-      {/* <h2 className="mb-4 brand-title">Transactions</h2> */}
+      <div className="transactions-page-header">
+        <div>
+          {/* <h2 className="transactions-title">Transactions</h2> */}
+          <p className="transactions-subtitle">Track payments and status across orders.</p>
+        </div>
+        <div className="transactions-range">
+          <select
+            className="form-select range-select"
+            value={selectedRange}
+            onChange={(e) => handleRangeChange(e.target.value)}
+          >
+            <option value="today">Today</option>
+            <option value="this_week">This Week</option>
+            <option value="this_month">This Month</option>
+            <option value="last_month">Last Month</option>
+            <option value="last_30_days">Last 30 Days</option>
+            <option value="custom">Custom Range</option>
+          </select>
+          {selectedRange === 'custom' && (
+            <div className="range-custom">
+              <input
+                type="date"
+                className="form-control"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+              />
+              <span className="range-separator">to</span>
+              <input
+                type="date"
+                className="form-control"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+              />
+              <button className="btn btn-primary btn-sm" onClick={handleApplyCustomRange}>
+                Apply
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     { !transactions ? '': <>
       <div className="row mb-4">
-        {transactions && transactions.total_income && <InfoCard title="Total Revenue" value={transactions&&transactions.total_income} icon="bi text-info bi-bank fs-1" />}
-        {transactions && transactions.total_cash && <InfoCard title="Total Cash"  value={transactions&&transactions.total_cash} icon="bi text-light bi-cash-stack fs-1" />}
-        {transactions && transactions.total_online && <InfoCard title="Total Online" value={transactions&&transactions.total_online} icon="bi text-primary bi-phone-flip fs-1" />}
-        <InfoCard title="Total Transactions" value={transactions && transactions.transactions.length} icon="bi bi-arrow-down-up text-warning fs-1" />
-        <InfoCard title="Success Rate" value="100%" icon="bi bi-hand-thumbs-up text-success fs-1" />
+        {hasNonZeroValue(transactions?.total_income) && (
+          <InfoCard title="Total Revenue" value={transactions.total_income} icon="bi text-info bi-bank fs-1" />
+        )}
+        {hasNonZeroValue(transactions?.total_cash) && (
+          <InfoCard title="Total Cash"  value={transactions.total_cash} icon="bi text-light bi-cash-stack fs-1" />
+        )}
+        {hasNonZeroValue(transactions?.total_online) && (
+          <InfoCard title="Total Online" value={transactions.total_online} icon="bi text-primary bi-phone-flip fs-1" />
+        )}
+        {totalTransactions > 0 && (
+          <InfoCard title="Total Transactions" value={totalTransactions} icon="bi bi-arrow-down-up text-warning fs-1" />
+        )}
+        {totalTransactions > 0 && (
+          <InfoCard title="Success Rate" value="100%" icon="bi bi-hand-thumbs-up text-success fs-1" />
+        )}
       </div>
       <HighlightedTable
         title={'Transactions'}

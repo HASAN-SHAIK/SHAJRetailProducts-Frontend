@@ -30,6 +30,21 @@
   position: relative;
   z-index: 5;
 }
+.login-container .tenant-name {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  font-family: "Archivo", "Segoe UI", sans-serif;
+  color: #1f2937;
+  text-shadow: none;
+  display: inline-block;
+  position: relative;
+}
+
+.login-container .tenant-name::after {
+  content: "";
+  display: none;
+}
 
 .login-container .form-label {
   position: relative;

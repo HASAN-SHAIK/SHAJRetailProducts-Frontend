@@ -6,16 +6,16 @@ import api from '../../utils/axios';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { setUserDetails } from '../../store/userSlice'; // Assuming you have a Redux slice for user details
-import { useSelector } from 'react-redux';
 import logo from '../../Images/logo.png';
 import { getDeviceId } from '../../utils/device';
+import { decodeJwtPayload } from '../../utils/jwt';
+import { setTenantConfig, setTenantConfigStatus, setTenantIdentity, setSubscriptionStatus } from '../../store/tenantSlice';
 const Login = ( ) => {
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const userDetails = useSelector((state) => state.user.userDetails);
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
@@ -28,14 +28,50 @@ const Login = ( ) => {
     try {
       const deviceId = getDeviceId();
       const res = await api.post('/auth/login', {device_id: deviceId, ...form}); // Set-Cookie works if backend handles it
+      let decoded = null;
       if (res.data?.token && typeof window !== 'undefined') {
         try {
           localStorage.setItem('auth_token', res.data.token);
+          decoded = decodeJwtPayload(res.data.token);
         } catch (err) {
           // Ignore storage failures (private mode / blocked storage)
         }
       }
-      dispatch(setUserDetails(res.data.user)); // Dispatch user details to Redux store
+      if (decoded) {
+        dispatch(setTenantIdentity({
+          tenantId: decoded.tenant_id,
+          role: decoded.role,
+          userId: decoded.user_id,
+        }));
+      }
+      const userPayload = res.data.user || (decoded ? {
+        id: decoded.user_id,
+        role: decoded.role,
+        tenant_id: decoded.tenant_id,
+      } : null);
+      dispatch(setUserDetails(userPayload)); // Dispatch user details to Redux store
+
+      dispatch(setTenantConfigStatus('loading'));
+      try {
+        const configRes = await api.get('/platform/config');
+        const payload = configRes?.data?.data || configRes?.data || {};
+        dispatch(setTenantConfig(payload));
+        if (payload.subscription_status || payload.subscriptionStatus) {
+          dispatch(setSubscriptionStatus(payload.subscription_status || payload.subscriptionStatus));
+        }
+      } catch (err) {
+        const code = err?.response?.data?.code;
+        if (code === 'SUBSCRIPTION_INACTIVE') {
+          dispatch(setSubscriptionStatus('inactive'));
+          dispatch(setTenantConfigStatus('loaded'));
+          dispatch(setTenantConfig(null));
+          setIsLoading(false);
+          navigate('/subscription-expired');
+          return;
+        }
+        dispatch(setTenantConfigStatus('error'));
+        console.error('Failed to fetch tenant config', err);
+      }
       setIsLoading(false);
       navigate('/dashboard');
     } catch (err) {
@@ -49,7 +85,7 @@ const Login = ( ) => {
     <div className="login-wrapper">
        <img className='companyLogo' src={logo} alt="SHAJ Logo" width="30%" height="20%"/>
       <div className="login-container">
-        <h2>Ameena Automobiles</h2>
+        <h2 className="tenant-name">SHAJ NextGen Technologies</h2>
         {/* <p className='disabled'>Use password 'admin'</p> */}
       <div className="floating-shape logincube green"></div>
       <div className="floating-shape logincircle red"></div>

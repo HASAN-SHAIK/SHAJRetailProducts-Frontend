@@ -1,0 +1,272 @@
+.support-page {
+  color: #e2e8f0;
+  padding: 24px;
+  margin-top: 0;
+}
+
+.support-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.support-header-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.support-header h3 {
+  margin: 0 0 4px;
+  font-size: 1.6rem;
+}
+
+.support-header p {
+  margin: 0;
+  color: #94a3b8;
+}
+
+.support-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.support-card {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+.support-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.support-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.support-table th,
+.support-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.support-table th {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.support-row {
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.support-row:hover {
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.badge-open {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
+
+.badge-progress {
+  background: rgba(251, 191, 36, 0.2);
+  color: #facc15;
+}
+
+.badge-resolved {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+.badge-closed {
+  background: rgba(148, 163, 184, 0.2);
+  color: #94a3b8;
+}
+
+.priority-low {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.priority-medium {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.priority-high {
+  color: #fb923c;
+  font-weight: 600;
+}
+
+.priority-urgent {
+  color: #f87171;
+  font-weight: 700;
+}
+
+.support-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.page-btn {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+  padding: 6px 12px;
+  border-radius: 10px;
+}
+
+.page-btn.active {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.page-list {
+  display: flex;
+  gap: 6px;
+}
+
+.support-modal-overlay,
+.support-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1050;
+}
+
+.support-modal {
+  width: min(520px, 90vw);
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  padding: 20px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.support-drawer-overlay {
+  justify-content: flex-end;
+}
+
+.support-drawer {
+  width: min(460px, 90vw);
+  height: 100%;
+  background: rgba(15, 23, 42, 0.98);
+  border-left: 1px solid rgba(148, 163, 184, 0.2);
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.drawer-eyebrow {
+  color: #94a3b8;
+  margin: 0;
+}
+
+.drawer-title {
+  margin: 4px 0 0;
+}
+
+.drawer-close {
+  border: none;
+  background: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+  padding: 6px 12px;
+  border-radius: 10px;
+}
+
+.drawer-section {
+  margin-bottom: 20px;
+}
+
+.drawer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.drawer-grid .label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #94a3b8;
+}
+
+.conversation-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.message-card {
+  background: rgba(30, 41, 59, 0.6);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.message-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.reply-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.support-page .empty-state {
+  color: #94a3b8;
+  text-align: center;
+  padding: 16px 0;
+}

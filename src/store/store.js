@@ -5,6 +5,7 @@ import { combineReducers } from 'redux';
 import userReducer from './userSlice'; 
 import orderReducer from './orderSlice'; 
 import expireReducer from "redux-persist-transform-expire";
+import tenantReducer from './tenantSlice';
 
 const expireTransform = expireReducer("user", {
   expireSeconds: process.env.TOKEN_EXPIRY,
@@ -16,13 +17,14 @@ const expireTransform = expireReducer("user", {
 const persistConfig = {
   key: 'root',
   storage,
-  whitelist: ['user', 'order'], 
+  whitelist: ['user', 'order', 'tenant'], 
   transforms: [expireTransform], 
 };
 
 const rootReducer = combineReducers({
   user: userReducer,
   order: orderReducer,
+  tenant: tenantReducer,
 });
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);

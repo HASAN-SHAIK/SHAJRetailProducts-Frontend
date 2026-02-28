@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import api from '../utils/axios';
 import { useNavigate } from 'react-router-dom';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
@@ -13,16 +13,25 @@ const CreateOrderPage = () => {
   const [categories, setCategories] = useState([]);
   const [saleMethods, setSaleMethods] = useState(['sale', 'purchase', 'personal']);
   const userDetails = useSelector((state) => state.user.userDetails);
+  const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
+  const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
   const [transactionType, setTransactionType] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [products, setProducts] = useState([]);
   const [totalAmount, setTotalAmount] = useState(0);
   const [personalAmount, setPersonalAmount] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [customerLocation, setCustomerLocation] = useState('');
+  const [customerSuggestions, setCustomerSuggestions] = useState([]);
+  const [barcodeInput, setBarcodeInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const orderDetails = useSelector((state) => state.order.orderDetails);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { showPopup } = usePopup();
+  const latestSearchRef = useRef({ sale: {}, purchase: {}, customer: '' });
 useEffect(() => {
   (async () => {
     try {
@@ -49,6 +58,10 @@ useEffect(() => {
         setTotalAmount(parseFloat(orderDetails.total_price));
         setPaymentMethod(orderDetails.payment);
         setPersonalAmount(orderDetails.personal_amount || '');
+        setCustomerName(orderDetails.customer_name || '');
+        setCustomerPhone(orderDetails.customer_phone || '');
+        setCustomerAddress(orderDetails.customer_address || '');
+        setCustomerLocation(orderDetails.customer_location || orderDetails.location || '');
       }
       try {
         const res = await api.get('/orders/getcategories');
@@ -79,12 +92,9 @@ useEffect(() => {
       if (
         navigator.onLine &&
         (message === 'Invalid Token' ||
-          message === 'Access Denied' ||
-          status == 400 ||
-          status == 401 ||
-          status == 403)
+          status == 401)
       ) {
-        showPopup("Token Expired or Access Denied. Please Login Again!", "Session");
+        showPopup("Token Expired Please Login Again!", "Session");
         navigate('/logout');
       } else {
         console.error("Failed to load categories:", err);
@@ -109,10 +119,71 @@ useEffect(() => {
     setPersonalAmount('');
   };
 
+  const requireCustomerDetails =
+    planFeatures.customer_details_enabled === true ||
+    tenantConfig?.customer_details_enabled === true ||
+    tenantConfig?.require_customer_details === true;
+  const weightBasedEnabled =
+    planFeatures.enable_weight_based !== false &&
+    tenantConfig?.enable_weight_based !== false;
+  const pieceBasedEnabled =
+    planFeatures.enable_piece_based !== false &&
+    tenantConfig?.enable_piece_based !== false;
+  const creditEnabled = tenantConfig?.enable_credit_sales === true;
+  const barcodeEnabled = tenantConfig?.enable_barcode === true;
+
   const handlePaymentMethodChange = (e) => setPaymentMethod(e.target.value);
+
+  const handleCustomerSearch = async (text) => {
+    latestSearchRef.current.customer = text;
+    if (text.length < 2) {
+      setCustomerSuggestions([]);
+      return;
+    }
+    try {
+      const response = await api.get(
+        `/customers/search?name=${encodeURIComponent(text)}`
+      );
+      const results =
+        response?.data?.data?.customers ||
+        response?.data?.customers ||
+        response?.data?.data ||
+        response?.data ||
+        [];
+      if (latestSearchRef.current.customer !== text) return;
+      setCustomerSuggestions(Array.isArray(results) ? results : []);
+    } catch (err) {
+      if (latestSearchRef.current.customer !== text) return;
+      setCustomerSuggestions([]);
+      if (navigator.onLine) {
+        if (
+          (err.response?.data && err.response.data.message === 'Invalid Token') ||
+          err.response?.status === 401 ||
+          err.response?.status === 401
+        ) {
+          showPopup('Token Expired Please Login Again!', 'Session');
+          navigate('/logout');
+        } else {
+          console.log(err);
+        }
+      }
+    }
+  };
+
+  const handleCustomerSelect = (customer) => {
+    setCustomerName(customer?.name || '');
+    setCustomerPhone(customer?.mobile || customer?.phone || '');
+    setCustomerAddress(customer?.address || '');
+    setCustomerLocation(customer?.location || '');
+    setCustomerSuggestions([]);
+  };
 
   const handleAddProductRow = () => {
     if (transactionType === 'sale') {
+      if (!pieceBasedEnabled && !weightBasedEnabled) {
+        showPopup('Product types are disabled for this tenant.', 'Feature');
+        return;
+      }
       setProducts([
         ...products,
         {
@@ -147,28 +218,64 @@ useEffect(() => {
     calculateTotal(updated);
   };
 
+  const filterByProductType = (list = []) =>
+    list.filter((product) => {
+      const isWeight = Number(product?.is_weight_based) === 1;
+      if (isWeight && !weightBasedEnabled) return false;
+      if (!isWeight && !pieceBasedEnabled) return false;
+      return true;
+    });
+
   const handleSaleProductSearch = async (text, index) => {
-    if (text.length < 2) return;
+    latestSearchRef.current.sale[index] = text;
+    if (text.length < 2) {
+      setProducts((prev) => {
+        const updated = [...prev];
+        if (updated[index]) {
+          updated[index] = { ...updated[index], suggestions: [] };
+        }
+        return updated;
+      });
+      return;
+    }
     try {
       if (!navigator.onLine) {
         const suggestions = searchCachedProducts(text);
-        const updated = [...products];
-        updated[index].suggestions = suggestions;
-        setProducts(updated);
+        const filtered = filterByProductType(suggestions);
+        if (latestSearchRef.current.sale[index] !== text) return;
+        setProducts((prev) => {
+          const updated = [...prev];
+          if (updated[index]) {
+            updated[index] = { ...updated[index], suggestions: filtered };
+          }
+          return updated;
+        });
         return;
       }
-      const response = await api.get(`/products/search?name=${text}`);
+      const response = await api.get(`/products/search?name=${encodeURIComponent(text)}`);
       const results = response?.data?.products || response?.data?.data || response?.data || [];
-      const updated = [...products];
-      updated[index].suggestions = Array.isArray(results) ? results : [];
-      setProducts(updated);
+      const filtered = filterByProductType(results);
+      if (latestSearchRef.current.sale[index] !== text) return;
+      setProducts((prev) => {
+        const updated = [...prev];
+        if (updated[index]) {
+          updated[index] = { ...updated[index], suggestions: Array.isArray(filtered) ? filtered : [] };
+        }
+        return updated;
+      });
     } catch (err) {
       const suggestions = searchCachedProducts(text);
-      const updated = [...products];
-      updated[index].suggestions = suggestions;
-      setProducts(updated);
+      const filtered = filterByProductType(suggestions);
+      if (latestSearchRef.current.sale[index] !== text) return;
+      setProducts((prev) => {
+        const updated = [...prev];
+        if (updated[index]) {
+          updated[index] = { ...updated[index], suggestions: filtered };
+        }
+        return updated;
+      });
       if (navigator.onLine) {
-        if ((err.response?.data && err.response.data.message === 'Invalid Token') || err.status === 400 || err.response?.status === 401 || err.response?.status === 403) {
+        if ((err.response?.data && err.response.data.message === 'Invalid Token') || err.response?.status === 401) {
           showPopup("Token Expired Please Login Again!", "Session");
           navigate('/logout');
         } else {
@@ -179,6 +286,15 @@ useEffect(() => {
   };
 
   const handleSaleProductSelect = (product, index) => {
+    const isWeight = Number(product?.is_weight_based) === 1;
+    if (isWeight && !weightBasedEnabled) {
+      showPopup('Weight-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    if (!isWeight && !pieceBasedEnabled) {
+      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
     const updated = [...products];
     updated[index] = {
       product_name: product.name,
@@ -193,28 +309,55 @@ useEffect(() => {
     calculateTotal(updated);
   };
 
-  const handlePurchaseProductSearch = async (text, index) => {
-  if (text.length < 2) return;
+const handlePurchaseProductSearch = async (text, index) => {
+  latestSearchRef.current.purchase[index] = text;
+  if (text.length < 2) {
+    setProducts((prev) => {
+      const updated = [...prev];
+      if (updated[index]) {
+        updated[index] = { ...updated[index], suggestions: [] };
+      }
+      return updated;
+    });
+    return;
+  }
   try {
     if (!navigator.onLine) {
-      const suggestions = searchCachedProducts(text);
-      const updated = [...products];
-      updated[index].suggestions = suggestions;
-      setProducts(updated);
+      const suggestions = filterByProductType(searchCachedProducts(text));
+      if (latestSearchRef.current.purchase[index] !== text) return;
+      setProducts((prev) => {
+        const updated = [...prev];
+        if (updated[index]) {
+          updated[index] = { ...updated[index], suggestions };
+        }
+        return updated;
+      });
       return;
     }
-    const response = await api.get(`/products/search?name=${text}`);
+    const response = await api.get(`/products/search?name=${encodeURIComponent(text)}`);
     const results = response?.data?.products || response?.data?.data || response?.data || [];
-    const updated = [...products];
-    updated[index].suggestions = Array.isArray(results) ? results : [];
-    setProducts(updated);
+    const filtered = filterByProductType(results);
+    if (latestSearchRef.current.purchase[index] !== text) return;
+    setProducts((prev) => {
+      const updated = [...prev];
+      if (updated[index]) {
+        updated[index] = { ...updated[index], suggestions: Array.isArray(filtered) ? filtered : [] };
+      }
+      return updated;
+    });
   } catch (err) {
-    const suggestions = searchCachedProducts(text);
-    const updated = [...products];
-    updated[index].suggestions = suggestions;
-    setProducts(updated);
+    const suggestions = filterByProductType(searchCachedProducts(text));
+    const filtered = suggestions;
+    if (latestSearchRef.current.purchase[index] !== text) return;
+    setProducts((prev) => {
+      const updated = [...prev];
+      if (updated[index]) {
+        updated[index] = { ...updated[index], suggestions: filtered };
+      }
+      return updated;
+    });
     if (navigator.onLine) {
-      if ((err.response?.data && err.response.data.message === 'Invalid Token') || err.status === 400 || err.response?.status === 401 || err.response?.status === 403) {
+      if ((err.response?.data && err.response.data.message === 'Invalid Token') || err.response?.status === 401) {
         showPopup("Token Expired Please Login Again!", "Session");
         navigate('/logout');
       } else {
@@ -225,6 +368,15 @@ useEffect(() => {
 };
 
 const handlePurchaseProductSelect = (product, index) => {
+  const isWeight = Number(product?.is_weight_based) === 1;
+  if (isWeight && !weightBasedEnabled) {
+    showPopup('Weight-based products are disabled for this tenant.', 'Feature');
+    return;
+  }
+  if (!isWeight && !pieceBasedEnabled) {
+    showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+    return;
+  }
   const updated = [...products];
   updated[index] = {
     ...updated[index],
@@ -243,7 +395,8 @@ const handlePurchaseProductSelect = (product, index) => {
   calculateTotal(updated);
 };
 
-  const isWeightBasedProduct = (product) => Number(product?.is_weight_based) === 1;
+  const isWeightBasedProduct = (product) =>
+    Number(product?.is_weight_based) === 1;
 
   const isValidWeightInput = (value) => {
     if (value === '') return true;
@@ -260,10 +413,64 @@ const handlePurchaseProductSelect = (product, index) => {
   const getQuantityPlaceholder = (product) =>
     isWeightBasedProduct(product) ? 'Weight (kg)' : 'Quantity (pcs)';
 
+  const handleBarcodeSearch = async () => {
+    const code = barcodeInput.trim();
+    if (!code) return;
+    if (transactionType !== 'sale') {
+      showPopup('Barcode search is only for sales.', 'Validation');
+      return;
+    }
+    try {
+      let product = null;
+      try {
+        const res = await api.get(`/products/barcode?code=${encodeURIComponent(code)}`);
+        product = res?.data?.product || res?.data?.data || res?.data;
+        if (Array.isArray(product)) product = product[0];
+      } catch (err) {
+        const res = await api.get(`/products/search?barcode=${encodeURIComponent(code)}`);
+        const results = res?.data?.products || res?.data?.data || res?.data || [];
+        product = Array.isArray(results) ? results[0] : null;
+      }
+      if (!product) {
+        showPopup('No product found for this barcode', 'Validation');
+        return;
+      }
+      const isWeight = Number(product?.is_weight_based) === 1;
+      if (isWeight && !weightBasedEnabled) {
+        showPopup('Weight-based products are disabled for this tenant.', 'Feature');
+        return;
+      }
+      if (!isWeight && !pieceBasedEnabled) {
+        showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+        return;
+      }
+      const updated = [
+        ...products,
+        {
+          product_name: product.name,
+          id: product.id,
+          quantity: '',
+          suggestions: [],
+          selling_price: product.selling_price,
+          is_weight_based: product.is_weight_based ?? 0,
+          stock_quantity: product.stock_quantity ?? null,
+        },
+      ];
+      setProducts(updated);
+      setBarcodeInput('');
+    } catch (err) {
+      showPopup('Barcode lookup failed', 'Error');
+    }
+  };
+
   const handleQuantityChange = (value, index) => {
     const updated = [...products];
     const current = updated[index] || {};
     const weightBased = isWeightBasedProduct(current);
+    if (!weightBased && !pieceBasedEnabled && current?.id) {
+      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
 
     if (weightBased) {
       if (!isValidWeightInput(value)) {
@@ -284,6 +491,17 @@ const handlePurchaseProductSelect = (product, index) => {
     } else {
       if (!isValidPieceInput(value)) {
         showPopup('Invalid input for piece item', 'Validation');
+        return;
+      }
+      const numeric = parseInt(value, 10);
+      if (
+        value !== '' &&
+        Number.isFinite(numeric) &&
+        current.stock_quantity != null &&
+        current.stock_quantity !== '' &&
+        numeric > Number(current.stock_quantity)
+      ) {
+        showPopup('Entered quantity exceeds stock', 'Validation');
         return;
       }
       updated[index].quantity = value;
@@ -333,6 +551,14 @@ const handlePurchaseProductSelect = (product, index) => {
       }
 
     if (transactionType === 'sale') {
+      if (requireCustomerDetails) {
+        const nameFilled = customerName.trim().length > 0;
+        const phoneFilled = customerPhone.trim().length > 0;
+        if (nameFilled && !phoneFilled) {
+          showPopup('Customer phone is required when name is provided', 'Validation');
+          return;
+        }
+      }
       for (const p of products) {
         if (!p.id || p.quantity === '' || p.quantity == null) {
           showPopup('Select product and quantity', 'Validation');
@@ -380,6 +606,10 @@ const handlePurchaseProductSelect = (product, index) => {
         transaction_type: transactionType,
         type: transactionType,
         user_id: userDetails.id,
+        customer_name: customerName || undefined,
+        customer_phone: customerPhone || undefined,
+        customer_address: customerAddress || undefined,
+        customer_location: customerLocation || undefined,
         total_amount: transactionType === 'personal' ? parseFloat(personalAmount) : totalAmount,
         total_price: transactionType === 'personal' ? parseFloat(personalAmount) : totalAmount,
         payment: paymentMethod,
@@ -413,6 +643,10 @@ const handlePurchaseProductSelect = (product, index) => {
     const createPayload = {
         transaction_type: transactionType,
         user_id: userDetails.id,
+        customer_name: customerName || undefined,
+        customer_phone: customerPhone || undefined,
+        customer_address: customerAddress || undefined,
+        customer_location: customerLocation || undefined,
         total_amount: transactionType === 'personal' ? parseFloat(personalAmount) : totalAmount,
         payment_method: paymentMethod,
         products: products.map(p => {
@@ -469,9 +703,7 @@ const handlePurchaseProductSelect = (product, index) => {
       if (
         navigator.onLine &&
         (message === 'Invalid Token' ||
-          status === 400 ||
-          status === 401 ||
-          status === 403)
+          status === 401)
       ) {
         showPopup("Token Expired Please Login Again!", "Session");
         navigate('/logout');
@@ -512,7 +744,7 @@ const handlePurchaseProductSelect = (product, index) => {
             Owner Mode
           </div>
         </div> */}
-        <div className="order-card">
+      <div className="order-card">
       <div className="mb-3">
         {saleMethods && saleMethods.map(type => (
           <label key={type} className="me-3">
@@ -535,7 +767,7 @@ const handlePurchaseProductSelect = (product, index) => {
         <div className="mb-3">
           <label>Payment Method:</label>
           <div>
-            {['cash', 'online'].map(method => (
+            {['cash', 'online', ...(creditEnabled ? ['credit'] : [])].map(method => (
               <label key={method} className="me-3">
                 <input
                   type="radio"
@@ -545,6 +777,86 @@ const handlePurchaseProductSelect = (product, index) => {
                 /> {method}
               </label>
             ))}
+          </div>
+        </div>
+      )}
+
+      {requireCustomerDetails && transactionType === 'sale' && (
+        <div className="mb-3">
+          <label>Customer Details:</label>
+          <div className="row">
+            <div className="col-md-6 mb-2">
+              <input
+                className="form-control bg-light text-dark"
+                placeholder="Customer Name"
+                value={customerName}
+                onChange={(e) => {
+                  setCustomerName(e.target.value);
+                  handleCustomerSearch(e.target.value);
+                }}
+              />
+              {customerSuggestions.length > 0 && (
+                <ul className="list-group">
+                  {customerSuggestions.map((c) => (
+                    <li
+                      key={c.id || c.mobile || c.phone || c.name}
+                      className="list-group-item list-group-item-action"
+                      onClick={() => handleCustomerSelect(c)}
+                    >
+                      {c.name}
+                      {c.mobile ? ` - ${c.mobile}` : c.phone ? ` - ${c.phone}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="col-md-6 mb-2">
+              <input
+                className="form-control bg-light text-dark"
+                placeholder="Customer Phone"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+              />
+            </div>
+            <div className="col-12">
+              <input
+                className="form-control bg-light text-dark"
+                placeholder="Customer Address (optional)"
+                value={customerAddress}
+                onChange={(e) => setCustomerAddress(e.target.value)}
+              />
+            </div>
+            <div className="col-12 mt-2">
+              <input
+                className="form-control bg-light text-dark"
+                placeholder="Customer Location (optional)"
+                value={customerLocation}
+                onChange={(e) => setCustomerLocation(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {barcodeEnabled && transactionType === 'sale' && (
+        <div className="mb-3">
+          <label>Barcode:</label>
+          <div className="d-flex gap-2">
+            <input
+              className="form-control bg-light text-dark"
+              placeholder="Scan or enter barcode"
+              value={barcodeInput}
+              onChange={(e) => setBarcodeInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleBarcodeSearch();
+                }
+              }}
+            />
+            <button className="btn btn-outline-primary" type="button" onClick={handleBarcodeSearch}>
+              Add
+            </button>
           </div>
         </div>
       )}
@@ -608,6 +920,11 @@ const handlePurchaseProductSelect = (product, index) => {
               inputMode={isWeightBasedProduct(p) ? 'decimal' : 'numeric'}
               data-testid="sale-quantity-input"
             />
+            {p.quantity !== '' && p.quantity != null && (
+              <small className="form-text text-white">
+                {isWeightBasedProduct(p) ? `Weight: ${Number(p.quantity).toFixed(2)} kg` : `Qty: ${p.quantity} pcs`}
+              </small>
+            )}
             {isWeightBasedProduct(p) && (
               <small className="form-text text-white weight-helper">
                 Use decimal for kg, e.g., 1.25

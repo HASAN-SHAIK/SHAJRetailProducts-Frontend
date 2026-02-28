@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { clearUserDetails } from '../store/userSlice';
+import { clearTenantState } from '../store/tenantSlice';
 import Cookies from 'js-cookie';
 import api from '../utils/axios';
 import LoadingSpinner from '../components/common/LoadingSpinner/LoadingSpinner';
@@ -14,30 +15,33 @@ const Logout = () => {
   const dispatch = useDispatch();
   const { showPopup } = usePopup();
   useEffect(() => {
-
     const logoutUser = async () => {
-    try{
-      const response = await api.post('/auth/logout');
-      dispatch(clearUserDetails());
-      dispatch(clearOrderDetails());
-      Cookies.remove('token');
+      let logoutError = null;
       try {
-        localStorage.removeItem('auth_token');
-      } catch (err) {
-        // Ignore storage failures
+        await api.post('/auth/logout');
+      } catch (error) {
+        logoutError = error;
+        console.error('Logout error:', error);
+      } finally {
+        // Always clear local session state, even if the API call fails.
+        dispatch(clearUserDetails());
+        dispatch(clearOrderDetails());
+        dispatch(clearTenantState());
+        Cookies.remove('token');
+        try {
+          localStorage.removeItem('auth_token');
+        } catch (err) {
+          // Ignore storage failures
+        }
+        if (logoutError) {
+          showPopup('Logout failed on the server. You have been signed out locally.', 'Error');
+        }
+        navigate('/');
       }
-    }
-    catch (error) {
-      showPopup('Logout failed. Please try again.', 'Error');
-       console.error('Logout error:', error);
-    }
-    finally {
-      navigate('/');
-    }
-  }
+    };
+
     logoutUser();
-    // Navigate to login
-  }, []);
+  }, [dispatch, navigate, showPopup]);
 
   return (
     <div className="wow-page">

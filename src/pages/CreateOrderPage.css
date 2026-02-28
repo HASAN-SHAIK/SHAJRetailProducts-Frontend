@@ -3,6 +3,7 @@
 .create-order-page {
   min-height: 100vh;
   padding: 40px 24px 64px;
+  margin-top: 72px;
   background:
     radial-gradient(800px 320px at 10% 0%, rgba(255, 190, 11, 0.22), transparent 60%),
     radial-gradient(900px 420px at 90% 10%, rgba(46, 196, 182, 0.2), transparent 60%),

@@ -48,6 +48,19 @@ api.interceptors.response.use(
         window.dispatchEvent(new CustomEvent('server-status', { detail: { offline: true } }));
       }
     }
+    const status = error?.response?.status;
+    if (typeof window !== 'undefined') {
+      if (status === 401) {
+        window.dispatchEvent(new CustomEvent('auth-expired'));
+      }
+      if (status === 402) {
+        window.dispatchEvent(new CustomEvent('subscription-expired'));
+      }
+      if (status === 403) {
+        const message = error?.response?.data?.message || 'Admin access only';
+        window.dispatchEvent(new CustomEvent('forbidden', { detail: { message } }));
+      }
+    }
     return Promise.reject(error);
   }
 );

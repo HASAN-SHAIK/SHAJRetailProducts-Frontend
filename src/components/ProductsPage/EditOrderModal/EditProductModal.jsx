@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './EditProductModal.css';
 
-const EditProductModal = ({ item, onClose, onSubmit }) => {
+const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, weightBasedEnabled = true }) => {
   useEffect(() => {
     // Add Google Font (Orbitron - a cool tech font)
     const link = document.createElement("link");
@@ -14,10 +14,35 @@ const EditProductModal = ({ item, onClose, onSubmit }) => {
   const [productName, setProductName] = useState(item.name || item.product_name || '');
   const [sellingPrice, setSellingPrice] = useState(item.selling_price);
   const [actualPrice, setActualPrice] = useState(item.actual_price);
-  const [stockQuantity, setStockQuantity] = useState(item.quantity)
-  const [companyName, setCompanyName] = useState(item.company || '');
+  const [stockQuantity, setStockQuantity] = useState(
+    item.stock_quantity ?? item.quantity ?? item.stock ?? ''
+  );
+  const [companyName, setCompanyName] = useState(
+    item.company || item.company_name || item.brand || ''
+  );
+
+  const isWeightBasedValue = (value) => {
+    if (value === true) return true;
+    if (value === false || value == null) return false;
+    if (typeof value === 'number') return value === 1;
+    const normalized = value.toString().trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y', 'weight', 'weighted', 'kg'].includes(normalized);
+  };
+
+  const weightSource =
+    item.is_weight_based ??
+    item.type ??
+    item.product_type ??
+    item.unit ??
+    item.unit_type ??
+    item.measure;
+
   const [isWeightBased, setIsWeightBased] = useState(
-    item.is_weight_based === 1 || item.is_weight_based === '1' ? '1' : '0'
+    isWeightBasedValue(weightSource) ||
+      (typeof item?.name === 'string' && item.name.toLowerCase().includes('kg')) ||
+      (typeof item?.product_name === 'string' && item.product_name.toLowerCase().includes('kg'))
+      ? '1'
+      : '0'
   );
 
 
@@ -27,6 +52,8 @@ const EditProductModal = ({ item, onClose, onSubmit }) => {
 
 
   const handleSubmit = () => {
+    if (!pieceBasedEnabled && isWeightBased === '0') return;
+    if (!weightBasedEnabled && isWeightBased === '1') return;
     const updatedProduct = {
       name: productName,
       product_name: productName,
@@ -107,9 +134,15 @@ const EditProductModal = ({ item, onClose, onSubmit }) => {
               value={isWeightBased}
               onChange={(e) => setIsWeightBased(e.target.value)}
             >
-              <option value="0">No (Piece)</option>
-              <option value="1">Yes (Weight)</option>
+              {pieceBasedEnabled && <option value="0">No (Piece)</option>}
+              {weightBasedEnabled && <option value="1">Yes (Weight)</option>}
             </select>
+            {!pieceBasedEnabled && (
+              <small className="form-text text-warning">Piece-based products are disabled.</small>
+            )}
+            {!weightBasedEnabled && (
+              <small className="form-text text-warning">Weight-based products are disabled.</small>
+            )}
           </div>
 
           <div className="d-flex justify-content-between w-100">

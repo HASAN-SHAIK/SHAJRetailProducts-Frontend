@@ -1,782 +1,945 @@
-import React, { useState, useEffect } from 'react';
-import { formatIstDate, formatIstDateTime } from '../../utils/date';
-import api from '../../utils/axios'; // assuming custom axios instance
-import './OrdersPage.css'; // optional custom styles
-import TableComponent from '../common/TableComponent/TableComponent';
-import EditOrderModal from './EditOrderModal/EditOrderModal';
-import LoadingSpinner from '../common/LoadingSpinner/LoadingSpinner';
-import { setOrderDetails } from '../../store/orderSlice';
-import { useDispatch } from 'react-redux';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import api from '../../utils/axios';
+import './OrdersPage.css';
 import { usePopup } from '../common/PopUp/PopupProvider';
-import { getOfflineOrderQueue, processOfflineQueue } from '../../utils/offlineOrders';
-const OrdersPage = ({ userRole, navigate }) => {
- const columns = ["OrderId", "Products", "Price", "TotalPrice", "ByUser", "Date", "Edit"]
- const [orders, setOrders] = useState([]);
- const [filteredOrders, setFilteredOrders] = useState([]);
- const [search, setSearch] = useState('');
- const [sortBy, setSortBy] = useState('orderId');
- const [orderUpdateFlag, setOrderUpdateFlag] = useState(0);
- const [deletedOrderIds, setDeletedOrderIds] = useState(new Set());
- const [showEditModal, setShowEditModal] = useState(false);
- const [selectedOrder, setSelectedOrder] = useState(null);
- const [orderId, setOrderId] = useState(null);
- const [isLoading, setIsLoading] = useState(true);
- const [offlineOrders, setOfflineOrders] = useState([]);
- const [isSyncing, setIsSyncing] = useState(false);
- const [shopDetails, setShopDetails] = useState(null);
-  const dispatch = useDispatch();
+import { useSelector } from 'react-redux';
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+
+const OrdersPage = ({ navigate }) => {
   const { showPopup } = usePopup();
-
- const formatToIST = (utcDate) => {
-  if (!utcDate) return '';
-  const date = new Date(utcDate);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
+  const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
+  const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
+  const gstInvoiceEnabled = planFeatures.GST_invoice_enabled === true;
+  const [orders, setOrders] = useState([]);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 10,
+    total_pages: 1,
+    total_records: 0,
   });
- };
-
- const calculateSubtotal = (order) => {
-  if (!order?.items?.length) return 0;
-  return order.items.reduce((sum, item) => {
-    const qty = parseFloat(item.quantity || 0);
-    const price = parseFloat(item.selling_price || item.price || 0);
-    return sum + qty * price;
-  }, 0);
- };
-
- const formatItemQuantityPlain = (item) => {
-  const weightBased = Number(item?.is_weight_based) === 1;
-  const qty = Number(item?.quantity || 0);
-  if (!Number.isFinite(qty)) return weightBased ? '0.00 kg' : '0 pcs';
-  const qtyValue = weightBased ? qty.toFixed(2) : Math.trunc(qty).toString();
-  return weightBased ? `${qtyValue} kg` : `${qtyValue} pcs`;
- };
-
- const formatItemDisplay = (item) => {
-  const weightBased = Number(item?.is_weight_based) === 1;
-  return weightBased
-    ? `Weight: ${formatItemQuantityPlain(item)}`
-    : `Qty: ${formatItemQuantityPlain(item)}`;
- };
-
- const fetchShopDetails = async () => {
-  try {
-    const res = await api.get('/shop-details/me');
-    const details = res?.data?.shop_details || null;
-    setShopDetails(details);
-    return details;
-  } catch (err) {
-    return null;
-  }
- };
-
- const downloadGstReceipt = async (order) => {
-  if (!order) return;
-  const details = shopDetails || await fetchShopDetails();
-  const subtotal = calculateSubtotal(order);
-  const sgstRate = 0.09;
-  const cgstRate = 0.09;
-  const sgst = subtotal * sgstRate;
-  const cgst = subtotal * cgstRate;
-  const grandTotal = subtotal + sgst + cgst;
-
-  const itemsRows = (order.items || []).map((item, idx) => {
-    const qty = parseFloat(item.quantity || 0);
-    const price = parseFloat(item.selling_price || item.price || 0);
-    const lineTotal = qty * price;
-    return `
-      <tr>
-        <td>${idx + 1}</td>
-        <td>${item.product_name || 'Item'}</td>
-        <td>${formatItemQuantityPlain(item)}</td>
-        <td>₹${price.toFixed(2)}</td>
-        <td>₹${lineTotal.toFixed(2)}</td>
-      </tr>
-    `;
-  }).join('');
-
-  const shopName = details?.shop_name || 'SHAJ Retail Products';
-  const ownerName = details?.owner_name || '';
-  const gstNumber = details?.gst_number || '27ABCDE1234F1Z5';
-  const panNumber = details?.pan_number || '';
-  const addressLine = details?.address_line || 'Customer Address (Dummy)';
-  const city = details?.city || 'City';
-  const state = details?.state || 'State';
-  const pincode = details?.pincode || '000000';
-  const mobileNumber = details?.mobile_number || '';
-  const altMobile = details?.alternate_mobile || '';
-  const contactLine = [mobileNumber, altMobile].filter(Boolean).join(' / ');
-
-  const receiptHtml = `
-  <!doctype html>
-  <html>
-    <head>
-      <meta charset="utf-8" />
-      <title>GST Receipt - Order ${order.id}</title>
-      <style>
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap');
-        :root{
-          --ink:#0f172a;
-          --muted:#64748b;
-          --accent1:#ff8a00;
-          --accent2:#ff4d6d;
-          --accent3:#2ec4b6;
-          --accent4:#4d9de0;
-          --paper:#ffffff;
-          --bg1:#fff7ed;
-          --bg2:#ecfeff;
-        }
-        * { box-sizing: border-box; }
-        body {
-          font-family: "Space Grotesk", "Segoe UI", sans-serif;
-          padding: 28px;
-          color: var(--ink);
-          background: radial-gradient(1200px 400px at 10% -10%, var(--bg2), transparent 60%),
-                      radial-gradient(1200px 500px at 90% -20%, var(--bg1), transparent 60%);
-        }
-        .header { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
-        .brand {
-          font-family: "Fraunces", "Times New Roman", serif;
-          font-size: 26px;
-          font-weight: 600;
-          letter-spacing: 0.3px;
-        }
-        .tag {
-          font-size: 12px;
-          padding: 6px 12px;
-          border-radius: 999px;
-          background: linear-gradient(90deg, #ffe29a, #ffbd86, #ffd6e7);
-          color: #7a2d00;
-          display: inline-block;
-          font-weight: 600;
-        }
-        .meta {
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 10px 12px;
-          box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-        }
-        .card {
-          border: 1px solid #e2e8f0;
-          border-radius: 16px;
-          padding: 18px;
-          margin-top: 16px;
-          background: var(--paper);
-          box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
-          position: relative;
-          overflow: hidden;
-        }
-        .card::before{
-          content:"";
-          position:absolute;
-          inset:0;
-          height:6px;
-          background: linear-gradient(90deg, var(--accent1), var(--accent2), var(--accent3), var(--accent4));
-        }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
-        .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
-        table { width: 100%; border-collapse: collapse; margin-top: 14px; }
-        th, td { border-bottom: 1px dashed #e2e8f0; padding: 10px 8px; text-align: left; font-size: 13.5px; }
-        th { background: #f8fafc; font-weight: 700; }
-        tbody tr:nth-child(even) td { background: #f9fafb; }
-        .totals {
-          margin-top: 14px;
-          width: 340px;
-          margin-left: auto;
-          background: #f8fafc;
-          border-radius: 12px;
-          padding: 10px 12px;
-          border: 1px solid #e2e8f0;
-        }
-        .totals div { display: flex; justify-content: space-between; padding: 6px 0; }
-        .total { font-weight: 700; font-size: 16px; color: #0f766e; }
-        .note { font-size: 12px; color: var(--muted); margin-top: 12px; }
-        .stamp {
-          display: inline-block;
-          padding: 6px 10px;
-          border: 2px dashed #fb7185;
-          color: #be123c;
-          font-weight: 700;
-          border-radius: 10px;
-          transform: rotate(-2deg);
-          background: #fff1f2;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <div>
-          <div class="brand">${shopName}</div>
-          <div class="tag">GST Receipt</div>
-        </div>
-        <div class="meta">
-          <div><strong>GSTIN:</strong> ${gstNumber}</div>
-          ${panNumber ? `<div><strong>PAN:</strong> ${panNumber}</div>` : ''}
-          <div><strong>Invoice No:</strong> GST-${order.id}</div>
-          <div><strong>Date:</strong> ${formatToIST(order.order_date)}</div>
-        </div>
-      </div>
-
-      <div class="card grid">
-        <div>
-          <div class="label">Billed To</div>
-          <div>${order.username || 'Customer'}</div>
-          <div>${addressLine}</div>
-          <div>${city}, ${state} - ${pincode}</div>
-        </div>
-        <div>
-          <div class="label">Sold By</div>
-          <div>${shopName}</div>
-          ${ownerName ? `<div>Owner: ${ownerName}</div>` : ''}
-          <div>${addressLine}</div>
-          <div>${city}, ${state} - ${pincode}</div>
-          ${contactLine ? `<div>Phone: ${contactLine}</div>` : ''}
-          <div class="stamp">PAID</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Item</th>
-              <th>Qty</th>
-              <th>Rate</th>
-              <th>Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsRows || '<tr><td colspan="5">No items</td></tr>'}
-          </tbody>
-        </table>
-
-        <div class="totals">
-          <div><span>Taxable Value</span><span>₹${subtotal.toFixed(2)}</span></div>
-          <div><span>SGST (9%)</span><span>₹${sgst.toFixed(2)}</span></div>
-          <div><span>CGST (9%)</span><span>₹${cgst.toFixed(2)}</span></div>
-          <div class="total"><span>Grand Total</span><span>₹${grandTotal.toFixed(2)}</span></div>
-        </div>
-
-        <div class="note">This is a system-generated GST receipt.</div>
-      </div>
-    </body>
-  </html>
-  `;
-
-  const blob = new Blob([receiptHtml], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `GST_Receipt_Order_${order.id}.html`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-  showPopup('GST receipt downloaded', 'Success');
- };
- 
-
- const handleEditClick = (order) => {
-  // Assuming you have a Redux action to set order details
-   dispatch(setOrderDetails(order));
-   navigate('/neworder')
-  //  console.log(order)
-  //  setSelectedOrder(order);
-  //  setShowEditModal(true);
- };
-
- const handleCloseModal = () => {
-   setShowEditModal(false);
-   setSelectedOrder(null);
-   setOrderUpdateFlag(true);
- };
- useEffect(() => {
-   handleSearch(search);
- }, [orders]);
- const fetchOrders = async () => {
-   try {
-     const res = await api.get('/orders');
-     console.log("Orders", res.data.orders);
-     setOrders(res.data.orders);
-     setFilteredOrders(res.data.orders);
-     const queue = getOfflineOrderQueue();
-     setOfflineOrders(Array.isArray(queue) ? queue : []);
-   } catch (err) {
-    const queue = getOfflineOrderQueue();
-    setOfflineOrders(Array.isArray(queue) ? queue : []);
-    if(err.response?.data?.message === 'Invalid Token' || err.response?.status === '400' || err.response?.status == '401' || err.response?.status === '403'){
-      showPopup("Token Expired Please Login Again!", "Session");
-      navigate('/logout');
-    }
-    else{
-     console.error("error While getting orders", err);
-   }
-  }
- };
- const handleSearch = (value) => {
-   setSearch(value);
-   const filtered = orders.filter(order =>
-     order.id
-   );
-   setFilteredOrders(filtered);
- };
- const handleSort = (key) => {
-   setSortBy(key);
-   const sorted = [...filteredOrders].sort((a, b) => {
-     if (key === 'date') return new Date(b.order_date) - new Date(a.order_date);
-    //  console.log(a[key], b[key]);
-     return a[key]-b[key];
-   });
-   setFilteredOrders(sorted);
- };
- const GST_COMPANY = {
-  name: 'SHAJ Retail Products',
-  addressLine1: 'Beside Masjid, Main Road',
-  addressLine2: 'Mattampally, Suryapet - 508204',
-  phone: '7981907327',
-  gstin: '36GEBPA1674F1ZT',
- };
- const GST_RATE = 0.18; // 18% total GST (CGST 9% + SGST 9%) - update if needed
-
- const formatMoney = (value) => {
-  const num = Number(value || 0);
-  return num.toFixed(2);
- };
-
- const handleGstDownload = async (order) => {
-  const details = shopDetails || await fetchShopDetails();
-  const invoiceDate = order.order_date
-    ? formatIstDate(order.order_date)
-    : formatIstDate(new Date());
-
-  const items = (order.items || []).map((item) => {
-    const qty = Number(item.quantity || 0);
-    const rate = Number(item.selling_price || 0);
-    const amount = qty * rate;
-    return {
-      name: item.product_name || 'Item',
-      qty,
-      rate,
-      amount,
-      qtyLabel: formatItemQuantityPlain(item),
-    };
+  const [selectedRange, setSelectedRange] = useState('this_month');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [customRangeKey, setCustomRangeKey] = useState(0);
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState('desc');
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerError, setDrawerError] = useState('');
+  const [drawerOrder, setDrawerOrder] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [customerDetailsEnabled, setCustomerDetailsEnabled] = useState(false);
+  const [shopDetails, setShopDetails] = useState(null);
+  const [shopDetailsLoading, setShopDetailsLoading] = useState(false);
+  const [gstModalOpen, setGstModalOpen] = useState(false);
+  const [gstCustomer, setGstCustomer] = useState({
+    name: '',
+    mobile: '',
+    address: '',
   });
+  const [gstSubmitting, setGstSubmitting] = useState(false);
 
-  const taxableValue = items.reduce((sum, item) => sum + item.amount, 0);
-  const totalGst = taxableValue * GST_RATE;
-  const halfGst = totalGst / 2;
-  const grandTotal = taxableValue + totalGst;
-
-  const shopName = details?.shop_name || GST_COMPANY.name;
-  const addressLine1 = details?.address_line || GST_COMPANY.addressLine1;
-  const addressLine2 = `${details?.city || ''}${details?.state ? `, ${details.state}` : ''}${details?.pincode ? ` - ${details.pincode}` : ''}`.trim() || GST_COMPANY.addressLine2;
-  const phoneLine = [details?.mobile_number, details?.alternate_mobile].filter(Boolean).join(' / ') || GST_COMPANY.phone;
-  const gstin = details?.gst_number || GST_COMPANY.gstin;
-  const ownerName = details?.owner_name || '';
-  const panNumber = details?.pan_number || '';
-
-  const html = `
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>GST Invoice - Order ${order.id}</title>
-    <style>
-      body { font-family: Arial, sans-serif; color: #111; margin: 24px; }
-      .header { display: flex; justify-content: space-between; align-items: flex-start; }
-      .title { font-size: 22px; font-weight: 700; }
-      .small { font-size: 12px; color: #444; }
-      .section { margin-top: 16px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-      th, td { border: 1px solid #ccc; padding: 8px; font-size: 12px; }
-      th { background: #f2f2f2; text-align: left; }
-      .right { text-align: right; }
-      .totals { margin-top: 12px; width: 100%; }
-      .totals td { border: none; padding: 4px 0; font-size: 12px; }
-      .footer { margin-top: 20px; font-size: 12px; color: #333; }
-    </style>
-  </head>
-  <body>
-    <div class="header">
-      <div>
-        <div class="title">${shopName}</div>
-        <div class="small">${addressLine1}</div>
-        <div class="small">${addressLine2}</div>
-        ${ownerName ? `<div class="small">Owner: ${ownerName}</div>` : ''}
-        <div class="small">Phone: ${phoneLine}</div>
-        <div class="small">GSTIN: ${gstin}</div>
-        ${panNumber ? `<div class="small">PAN: ${panNumber}</div>` : ''}
-      </div>
-      <div>
-        <div class="title">GST Invoice</div>
-        <div class="small">Order ID: ${order.id}</div>
-        <div class="small">Date: ${invoiceDate}</div>
-      </div>
-    </div>
-
-    <div class="section">
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 40px;">#</th>
-            <th>Product</th>
-            <th style="width: 80px;" class="right">Qty</th>
-            <th style="width: 120px;" class="right">Rate</th>
-            <th style="width: 140px;" class="right">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map((item, idx) => `
-            <tr>
-              <td>${idx + 1}</td>
-              <td>${item.name}</td>
-              <td class="right">${item.qtyLabel}</td>
-              <td class="right">${formatMoney(item.rate)}</td>
-              <td class="right">${formatMoney(item.amount)}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-
-    <table class="totals">
-      <tr>
-        <td class="right">Taxable Value:</td>
-        <td class="right" style="width: 140px;">${formatMoney(taxableValue)}</td>
-      </tr>
-      <tr>
-        <td class="right">CGST (${(GST_RATE * 100 / 2).toFixed(1)}%):</td>
-        <td class="right">${formatMoney(halfGst)}</td>
-      </tr>
-      <tr>
-        <td class="right">SGST (${(GST_RATE * 100 / 2).toFixed(1)}%):</td>
-        <td class="right">${formatMoney(halfGst)}</td>
-      </tr>
-      <tr>
-        <td class="right"><strong>Grand Total:</strong></td>
-        <td class="right"><strong>${formatMoney(grandTotal)}</strong></td>
-      </tr>
-    </table>
-
-    <div class="footer">
-      This is a system-generated GST invoice.
-    </div>
-  </body>
-</html>
-  `.trim();
-
-  const blob = new Blob([html], { type: 'text/html' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', `GST-Order-${order.id}.html`);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
- };
- const handlePaymentClick = async (id, type) => {
-  try{
-  const res = await api.post('/orders/mark-paid', {
-    order_id: id,
-    type: type
-  });
-  showPopup("Marked as paid", "Success");
-  setOrderUpdateFlag(1);
-}
-catch(err){
-  if(err.response.data.message === 'Invalid Token'){
-      showPopup("Token Expired Please Login Again!", "Session");
-      navigate('/logout');
-  }
-  else
-  showPopup("Error while processing payment Please Try Again!", "Error");
-  console.log("Error while marking payment", err)
-}
-
- }
- const handleOrderDelete =async(id) => {
-  try {
-    const res = await api.delete(`/orders/${id}`);
-    const Id = id +"delete"
-    const element = document.getElementById(Id);
-    element.innerHTML = 'Deleted';
-    element.classList.add('disabled')    
-    showPopup("Deleted Successfully", "Success");
-    setDeletedOrderIds((prev) => {
-      const next = new Set(prev);
-      next.add(id);
-      return next;
+  const formatDate = useCallback((value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
     });
-    setOrderUpdateFlag((prev) => !prev);
-  } catch (error) {
-    console.log("problem in Deleting the Order", error);
-  }
- }
- const handleSubmitEdit = async (updatedOrder) => {
-  try {
-    const response = await api.put(`/orders/${selectedOrder.id}`, updatedOrder);
+  }, []);
 
-    if (response.status === 200) {
-      showPopup('Order updated successfully!', 'Success');
-      handleCloseModal();
-    }
-    setOrderUpdateFlag(true);
-  }
-  catch(err){
-  if(err.response.data.message === 'Invalid Token'){
-      showPopup("Token Expired Please Login Again!", "Session");
-      navigate('/logout');
-  }
-  else
-  showPopup("Error while processing payment Please Try Again!", "Error");
-  console.log("Error while marking payment", err)
-}
- };
+  const formatMoney = useCallback((value) => {
+    const amount = Number(value || 0);
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 2,
+    }).format(Number.isFinite(amount) ? amount : 0);
+  }, []);
 
- const handleSyncOffline = async () => {
-  if (isSyncing) return;
-  if (!navigator.onLine) {
-    showPopup('You are offline. Connect to the internet and try again.', 'Offline');
-    return;
-  }
-  setIsSyncing(true);
-  try {
-    const result = await processOfflineQueue(api);
-    setOfflineOrders(getOfflineOrderQueue());
-    if (result.processed === 0 && result.failed === 0) {
-      showPopup('No offline orders to sync.', 'Sync');
-    } else {
-      showPopup(
-        `Synced ${result.processed}. Failed ${result.failed}. Remaining ${result.remaining}.`,
-        'Sync'
-      );
-      setOrderUpdateFlag((prev) => !prev);
+  const buildRangeParams = useCallback(() => {
+    const params = {
+      page: pagination.page,
+      limit: pagination.limit,
+      range: selectedRange,
+      search: searchQuery || undefined,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    };
+    if (selectedRange === 'custom') {
+      params.start_date = customStartDate;
+      params.end_date = customEndDate;
     }
-  } catch (err) {
-    showPopup('Sync failed. Please try again.', 'Error');
- } finally {
-    setIsSyncing(false);
-  }
- };
-useEffect(() => {
-  fetchOrders().then(()=> setIsLoading(false))
-  // setIsLoading(false);
-}, [orderUpdateFlag]);
-useEffect(() => {
-  const refreshOffline = () => {
-    const queue = getOfflineOrderQueue();
-    setOfflineOrders(Array.isArray(queue) ? queue : []);
+    return params;
+  }, [pagination.page, pagination.limit, selectedRange, customStartDate, customEndDate, searchQuery, sortBy, sortOrder]);
+
+  const fetchOrders = useCallback(async () => {
+    if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
+      return;
+    }
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      const res = await api.get('/orders', { params: buildRangeParams() });
+      const payload = res?.data || {};
+      setOrders(Array.isArray(payload.orders) ? payload.orders : []);
+      setCustomerDetailsEnabled(Boolean(payload.customer_details_enabled));
+      setPagination((prev) => ({
+        ...prev,
+        page: payload.pagination?.page || prev.page,
+        limit: payload.pagination?.limit || prev.limit,
+        total_pages: payload.pagination?.total_pages || 1,
+        total_records: payload.pagination?.total_records || 0,
+      }));
+    } catch (err) {
+        if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
+          showPopup('Token Expired Please Login Again!', 'Session');
+          navigate('/logout');
+          return;
+        }
+      setErrorMessage('Unable to load orders. Please try again.');
+      setOrders([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [buildRangeParams, customEndDate, customStartDate, navigate, selectedRange, showPopup]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders, customRangeKey]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPagination((prev) => ({ ...prev, page: 1 }));
+      setSearchQuery(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  const fetchOrderDetails = useCallback(async (orderId) => {
+    if (!orderId) return;
+    setDrawerLoading(true);
+    setDrawerError('');
+    setDrawerOrder(null);
+    try {
+      const res = await api.get(`/orders/${orderId}`);
+      const payload = res?.data || {};
+      setCustomerDetailsEnabled(Boolean(payload.customer_details_enabled));
+      setDrawerOrder(payload.order || payload);
+
+      if (gstInvoiceEnabled && !shopDetails && !shopDetailsLoading) {
+        setShopDetailsLoading(true);
+        try {
+          const shopRes = await api.get('/shop-details/me');
+          const shopPayload = shopRes?.data?.shop_details || shopRes?.data?.data || shopRes?.data || {};
+          setShopDetails(shopPayload);
+        } catch (innerErr) {
+          // non-blocking for order drawer
+          console.error('Failed to load shop details', innerErr);
+        } finally {
+          setShopDetailsLoading(false);
+        }
+      }
+    } catch (err) {
+      setDrawerError('Unable to load order details.');
+    } finally {
+      setDrawerLoading(false);
+    }
+  }, []);
+
+  const openDrawer = useCallback((orderId) => {
+    setDrawerOpen(true);
+    fetchOrderDetails(orderId);
+  }, [fetchOrderDetails]);
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setDrawerOrder(null);
+    setDrawerError('');
   };
-  refreshOffline();
-  window.addEventListener('online', refreshOffline);
-  return () => window.removeEventListener('online', refreshOffline);
-}, []);
 
- const renderOfflineRows = (entries) => (
-  entries.map((entry, idx) => {
-    const payload = entry.payload || {};
-    const items = payload.items || payload.products || [];
-    const totalPrice = payload.total_price || payload.total_amount || 0;
-  return (
-      <tr key={`offline-${entry.id || idx}`} className="table-warning">
-        <td>Offline-{entry.id || idx}</td>
-        <td className="fw-bold">
-          {items.length > 0 ? items.map((p, i) => (
-            <div key={i}>{p.product_name || p.name || 'Item'} - {formatItemDisplay(p)}</div>
-          )) : <div className="text-muted">Pending Sync</div>}
-        </td>
-        <td>
-          {items.length > 0 ? items.map((p, i) => (
-            <div key={i}>{p.selling_price || p.price || '-'}</div>
-          )) : <div>-</div>}
-        </td>
-        <td>{totalPrice}</td>
-        <td>{payload.user_name || payload.username || 'Offline User'}</td>
-        <td className="text-warning fw-bold">
-          queued
-          <div>
-            <span className="badge bg-warning text-dark">Offline</span>
-          </div>
-        </td>
-        <td>{formatToIST(entry.createdAt)}</td>
-        {userRole === 'admin' && (
-          <td>
-            <button className="btn btn-secondary btn-sm" disabled>Edit</button>
-          </td>
-        )}
-        <td>
-          <button className="btn btn-outline-secondary btn-sm" disabled>
-            Download
-          </button>
-        </td>
-        <td>
-          <button className="btn btn-outline-secondary btn-sm" disabled>Pay Now</button>
-        </td>
-        <td>
-          <button className="btn btn-outline-secondary btn-sm" disabled>Delete</button>
-        </td>
-      </tr>
+  const handleRangeChange = (value) => {
+    setSelectedRange(value);
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  const handleApplyCustomRange = () => {
+    if (!customStartDate || !customEndDate) {
+      showPopup('Please select start and end dates', 'Validation');
+      return;
+    }
+    setPagination((prev) => ({ ...prev, page: 1 }));
+    setCustomRangeKey((prev) => prev + 1);
+  };
+
+  const handlePaymentAction = async (event, targetOrder) => {
+    if (event) {
+      event.stopPropagation();
+    }
+    const order = targetOrder || drawerOrder;
+    if (!order?.id) return;
+
+    const paymentMode =
+      order.payment_method ||
+      order.payment_mode ||
+      order.payment ||
+      'cash';
+
+    try {
+      await api.post('/orders/mark-paid', {
+        order_id: order.id,
+        payment_mode: paymentMode,
+      });
+      showPopup('Order marked as paid.', 'Success');
+      fetchOrders();
+      if (drawerOpen) {
+        fetchOrderDetails(order.id);
+      }
+    } catch (err) {
+        if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
+          showPopup('Token Expired Please Login Again!', 'Session');
+          navigate('/logout');
+          return;
+        }
+      showPopup('Failed to mark order as paid.', 'Error');
+    }
+  };
+
+  const openGstModal = () => {
+    if (!drawerOrder) return;
+    const customer = drawerOrder.customer || {};
+    setGstCustomer({
+      name: customer.name || drawerOrder.customer_name || '',
+      mobile: customer.mobile || customer.phone || drawerOrder.customer_phone || '',
+      address: customer.address || drawerOrder.customer_address || '',
+    });
+    setGstModalOpen(true);
+  };
+
+  const closeGstModal = () => {
+    setGstModalOpen(false);
+  };
+
+  const handleGstSubmit = async (event) => {
+    event.preventDefault();
+    if (!drawerOrder?.id) return;
+    if (!gstCustomer.name.trim() || !gstCustomer.mobile.trim()) {
+      showPopup('Customer name and mobile are required for GST invoice.', 'Validation');
+      return;
+    }
+    try {
+      setGstSubmitting(true);
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const left = 14;
+      const right = pageWidth - 14;
+      let y = 18;
+
+      const formatINR = (value) => `INR ${Number(value || 0).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+
+      const shop = shopDetails || {};
+      const shopName = shop.shop_name || shop.name || shop.business_name || 'Your Shop Name';
+      const shopGST = shop.gst_number || shop.gstin || shop.gstin_number || 'GSTIN NOT PROVIDED';
+      const addressLine = shop.address_line || shop.address || shop.shop_address || shop.address1 || '';
+      const city = shop.city || shop.town || '';
+      const state = shop.state || shop.region || '';
+      const pincode = shop.pincode || shop.postal_code || shop.zip || '';
+      const shopAddress = [addressLine, city, state, pincode].filter(Boolean).join(', ');
+      const shopContact = [
+        shop.phone || shop.mobile || shop.mobile_number || shop.contact_number,
+        shop.email || shop.contact_email,
+      ].filter(Boolean).join(' | ');
+
+      doc.setFillColor(18, 42, 67);
+      doc.rect(0, 0, pageWidth, 32, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('TAX INVOICE', left, 18);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Original for Recipient', left, 26);
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text(shopName, right, 18, { align: 'right' });
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      if (shopAddress) doc.text(shopAddress, right, 24, { align: 'right' });
+      if (shopContact) doc.text(shopContact, right, 29, { align: 'right' });
+
+      y = 40;
+      doc.setTextColor(33, 33, 33);
+      doc.setDrawColor(220, 220, 220);
+      doc.setLineWidth(0.2);
+
+      const billToMaxWidth = right - (left + 100);
+      const addressLines = gstCustomer.address
+        ? doc.splitTextToSize(`Address: ${gstCustomer.address}`, billToMaxWidth)
+        : [];
+      const invoiceLines = [
+        `Invoice No: ${drawerOrder.id}`,
+        `Invoice Date: ${formatDate(drawerOrder.created_at)}`,
+        `GSTIN: ${shopGST}`,
+      ];
+      const billToLines = [
+        `${gstCustomer.name}`,
+        `Mobile: ${gstCustomer.mobile}`,
+        ...addressLines,
+      ];
+      const maxLines = Math.max(invoiceLines.length, billToLines.length);
+      const lineHeight = 6;
+      const boxHeight = 12 + maxLines * lineHeight;
+
+      doc.rect(left, y, pageWidth - left * 2, boxHeight);
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Invoice Details', left + 4, y + 7);
+      doc.text('Bill To', left + 100, y + 7);
+      doc.setFont('helvetica', 'normal');
+
+      invoiceLines.forEach((line, idx) => {
+        doc.text(line, left + 4, y + 14 + idx * lineHeight);
+      });
+
+      billToLines.forEach((line, idx) => {
+        doc.text(line, left + 100, y + 14 + idx * lineHeight);
+      });
+
+      y += boxHeight + 8;
+
+      const rows = drawerItems.map((item, index) => {
+        const qty = Number(item.quantity || item.qty || 0);
+        const rate = Number(item.price || item.unit_price || 0);
+        const lineTotal = Number(item.total || item.line_total || qty * rate);
+        const hsn = item.hsn || item.hsn_code || 'NA';
+        return [
+          index + 1,
+          item.name || item.product_name || '-',
+          hsn,
+          qty || 0,
+          formatINR(rate),
+          formatINR(lineTotal),
+        ];
+      });
+
+      autoTable(doc, {
+        startY: y,
+        head: [['#', 'Item', 'HSN', 'Qty', 'Rate', 'Amount']],
+        body: rows,
+        theme: 'grid',
+        styles: {
+          fontSize: 9,
+          cellPadding: 2,
+        },
+        headStyles: {
+          fillColor: [233, 238, 245],
+          textColor: 33,
+          fontStyle: 'bold',
+        },
+        columnStyles: {
+          0: { cellWidth: 8 },
+          2: { cellWidth: 22 },
+          3: { cellWidth: 12, halign: 'right' },
+          4: { cellWidth: 28, halign: 'right' },
+          5: { cellWidth: 30, halign: 'right' },
+        },
+      });
+
+      y = doc.lastAutoTable.finalY + 8;
+
+      const subTotal = rows.reduce((sum, row) => {
+        const amount = Number(String(row[5]).replace(/[^0-9.]/g, '')) || 0;
+        return sum + amount;
+      }, 0);
+      const taxableAmount = subTotal;
+      const cgstRate = 0.09;
+      const sgstRate = 0.09;
+      const cgst = taxableAmount * cgstRate;
+      const sgst = taxableAmount * sgstRate;
+      const totalTax = cgst + sgst;
+      const grandTotal = taxableAmount + totalTax;
+
+      doc.setDrawColor(220, 220, 220);
+      doc.rect(pageWidth - 80, y, 66, 30);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Taxable Amount', pageWidth - 76, y + 6);
+      doc.text(formatINR(subTotal), right - 2, y + 6, { align: 'right' });
+      doc.text('CGST (9%)', pageWidth - 76, y + 12);
+      doc.text(formatINR(cgst), right - 2, y + 12, { align: 'right' });
+      doc.text('SGST (9%)', pageWidth - 76, y + 18);
+      doc.text(formatINR(sgst), right - 2, y + 18, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      doc.text('Total Amount', pageWidth - 76, y + 26);
+      doc.text(formatINR(grandTotal), right - 2, y + 26, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+
+      const footerY = Math.max(y + 40, pageHeight - 50);
+      doc.setDrawColor(200, 200, 200);
+      doc.line(left, footerY - 12, right, footerY - 12);
+      doc.setFontSize(9);
+      doc.text('Customer Signature', left, footerY);
+      doc.text('Authorized Signatory', right, footerY, { align: 'right' });
+      doc.setFontSize(8);
+      doc.text('This is a computer-generated invoice. No signature required.', pageWidth / 2, footerY + 10, { align: 'center' });
+
+      doc.save(`GST-Invoice-${drawerOrder.id}.pdf`);
+
+      setGstModalOpen(false);
+      showPopup('GST invoice downloaded.', 'Success');
+    } catch (err) {
+      showPopup('Failed to generate GST invoice.', 'Error');
+    } finally {
+      setGstSubmitting(false);
+    }
+  };
+
+  const openDeleteModal = (event, order) => {
+    event.stopPropagation();
+    setDeleteTarget(order);
+    setDeleteModalOpen(true);
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteModalOpen(false);
+    setDeleteTarget(null);
+  };
+
+  const handleDeleteOrder = async () => {
+    const orderId = deleteTarget?.id;
+    if (!orderId) return;
+    setDeletingId(orderId);
+    try {
+      await api.delete(`/orders/${orderId}`);
+      showPopup('Order deleted', 'Success');
+      closeDeleteModal();
+      fetchOrders();
+    } catch (err) {
+      showPopup('Failed to delete order', 'Error');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleRowClick = (orderId) => {
+    openDrawer(orderId);
+  };
+
+  const handleSortToggle = (field) => {
+    if (sortBy === field) {
+      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortOrder('asc');
+    }
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  const getSortIndicator = (field) => {
+    if (sortBy !== field) return '';
+    return sortOrder === 'asc' ? '▲' : '▼';
+  };
+
+  const getProductNames = (order) => {
+    if (Array.isArray(order?.product_names)) {
+      return order.product_names.filter(Boolean).map(String);
+    }
+    if (Array.isArray(order?.products)) {
+      return order.products
+        .map((p) => (typeof p === 'string' ? p : p?.name || p?.product_name || ''))
+        .filter(Boolean);
+    }
+    if (Array.isArray(order?.items)) {
+      return order.items
+        .map((item) => item?.product_name || item?.name || '')
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const renderProductSummary = (order) => {
+    const names = getProductNames(order);
+    if (names.length === 0) return order.products_summary || '-';
+    const displayCount = 3;
+    const shown = names.slice(0, displayCount);
+    const remaining = names.length - shown.length;
+    const label = remaining > 0
+      ? `${shown.join(', ')} +${remaining} more`
+      : shown.join(', ');
+    return (
+      <span className="product-summary" title={names.join(', ')}>
+        {label}
+      </span>
     );
-  })
- );
- const offlineOrdersList = Array.isArray(offlineOrders) ? offlineOrders : [];
- return (
-  
-    isLoading ?
-    <div style={{height: '100vh'}}>
-   <LoadingSpinner/>
-   </div>
-    :
-    <>
-<div className="container-fluid pt-5 orderspage-shell">
-     {/* Navbar */}
-{/* Header and Controls */}
-<div className="text-center mb-4">
-{/* <h5 className="bg-warning p-2 rounded">Company Name</h5> */}
-<div className="row justify-content-around mt-4">
-<div className="col-md-6  ">
-<input
-             type="text"
-             placeholder="Search by OrderId"
-             className="form-control"
-             value={search}
-             onChange={(e) => handleSearch(e.target.value)}
-           />
-</div>
-<div className="col-md-4">
-<select
-             className="form-select"
-             onChange={(e) => handleSort(e.target.value)}
-             value={sortBy}
->
-<option value="date">Sort by Date</option>
-<option value="id">Sort by OrderId</option>
-</select>
-</div>
-<div className="col-md-2">
-  <button
-    className="btn btn-outline-primary w-100"
-    onClick={handleSyncOffline}
-    disabled={isSyncing}
-  >
-    {isSyncing ? 'Syncing...' : 'Sync Offline'}
-  </button>
-</div>
-</div>
-</div>
-{/* <TableComponent columns={columns} data = {orders && orders.orders}/> */}
-     {/* Table */}
-<div  className="table-responsive orderspage orders-table">
-<table className="table table-hover  text-center align-middle small">
-<thead className="">
-<tr className='p-3'>
-<th>OrderId</th>
-<th>Products</th>
-<th>Price</th>
-<th>TotalPrice</th>
-<th>ByUser</th>
-<th>Status</th>
-<th>Date</th>
-{userRole === 'admin' && <th>Edit</th>}
-<th>GST Receipt</th>
-<th>Make Payment</th>
-<th>Delete</th>
-</tr>
-</thead>
-<tbody>
-           {filteredOrders && filteredOrders.map((order, idx) => (
-order.type === 'personal' ? null : <tr key={idx} className={deletedOrderIds.has(order.id) ? 'opacity-50' : ''}>
-<td>{order.id}</td>
-<td className='fw-bold orders-products-cell'>
-                 {order.items.length>0 ? order.items.map(p => (
-<div>{p.product_name} - {formatItemDisplay(p)}</div>
-                 )) : <div className='text-success'>Purchased Items</div>}
-</td>
-<td>
-                 {order.items && order.items.map(p => <div>{p.selling_price}</div>)}
-</td>
-<td>{order.total_price}</td>
-<td>{order.username}</td>
-<td class={order.order_status === 'completed'? 'text-success fw-bold': 'text-danger fw-bold'} >{order.order_status}</td>
-<td>{formatToIST(order.order_date)}</td>
-{userRole === 'admin' && (
-<td>
-<button className='btn btn-info' onClick={() => handleEditClick(order)} disabled={order.order_status === 'completed'}>Edit</button>
+  };
 
-{showEditModal && order && (
-  <EditOrderModal
-    completeOrder={selectedOrder}
-    onClose={handleCloseModal}
-    onSubmit={handleSubmitEdit}
-    setOrderUpdateFlag={setOrderUpdateFlag}
-    navigate={navigate}
-  />
-)}
-</td>
-               )}
-<td>
-  <button className='btn btn-outline-primary btn-sm' onClick={() => downloadGstReceipt(order)}>
-    Download
-  </button>
-</td>
-<td >
-    {order.order_status === 'pending' ? order.payment === 'cash'
-    ? <button onClick={() => handlePaymentClick(order.id, order.type, order.payment)} className='btn btn-outline-success'>Mark as Paid</button> 
-    : <button type="button" class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target={`#exampleModal-${order.id}`}>
-      Pay Now
+  const pages = useMemo(() => {
+    const total = pagination.total_pages || 1;
+    return Array.from({ length: total }, (_, idx) => idx + 1);
+  }, [pagination.total_pages]);
+
+  const renderPaymentCell = (order) => {
+    const status = order.payment_status;
+    if (status === 'paid') {
+      return <span className="payment-badge paid">Completed</span>;
+    }
+    if (status === 'partial') {
+      return (
+        <button
+          className="payment-btn warning"
+          onClick={(event) => handlePaymentAction(event, order)}
+        >
+          Pay Balance
+        </button>
+      );
+    }
+    return (
+      <button
+        className="payment-btn danger"
+        onClick={(event) => handlePaymentAction(event, order)}
+      >
+        Make Payment
       </button>
-    : 'Done'}
+    );
+  };
 
-    {/* <!-- Modal --> */}
-<div  class="modal fade" id={`exampleModal-${order.id}`} tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
-  <div class="modal-dialog">
-    <div class="modal-content" style={{width: '100% !important'}}>
-      <div class="modal-header">
-        <h5 class="modal-title" id="exampleModalLabel">payment QR</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+  const drawerItems = Array.isArray(drawerOrder?.items)
+    ? drawerOrder.items
+    : Array.isArray(drawerOrder?.products)
+      ? drawerOrder.products
+      : [];
+
+  const paymentHistory = Array.isArray(drawerOrder?.payment_history)
+    ? drawerOrder.payment_history
+    : Array.isArray(drawerOrder?.payments)
+      ? drawerOrder.payments
+      : [];
+
+  const customer = drawerOrder?.customer || {};
+  const balance = Number(drawerOrder?.balance || 0);
+
+  return (
+    <div className="orders-page">
+      <div className="orders-page-header">
+        <div>
+          {/* <h2 className="orders-title">Orders</h2> */}
+          {/* <p className="orders-subtitle">Clean, paginated view of recent orders.</p> */}
+        </div>
+        <div className="orders-controls">
+          <input
+            className="form-control search-input"
+            placeholder="Search by Order ID, Customer, or Product"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+          />
+          <div className="orders-controls-right">
+            <div className="sort-controls">
+              <select
+                className="form-select sort-select"
+                value={sortBy}
+                onChange={(event) => handleSortToggle(event.target.value)}
+              >
+                <option value="created_at">Sort by Date</option>
+                <option value="total_amount">Sort by Total Amount</option>
+                <option value="total_paid">Sort by Total Paid</option>
+                <option value="balance">Sort by Balance</option>
+              </select>
+              <button
+                className="btn btn-outline-primary btn-sm"
+                onClick={() => {
+                  setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+                  setPagination((prev) => ({ ...prev, page: 1 }));
+                }}
+                type="button"
+              >
+                {sortOrder === 'asc' ? 'Asc' : 'Desc'}
+              </button>
+            </div>
+            <select
+              className="form-select range-select"
+              value={selectedRange}
+              onChange={(event) => handleRangeChange(event.target.value)}
+            >
+              <option value="today">Today</option>
+              <option value="this_week">This Week</option>
+              <option value="this_month">This Month</option>
+              <option value="last_month">Last Month</option>
+              <option value="last_30_days">Last 30 Days</option>
+              <option value="custom">Custom Range</option>
+            </select>
+            {selectedRange === 'custom' && (
+              <div className="range-custom">
+                <input
+                  type="date"
+                  className="form-control"
+                  value={customStartDate}
+                  onChange={(event) => setCustomStartDate(event.target.value)}
+                />
+                <span className="range-separator">to</span>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={customEndDate}
+                  onChange={(event) => setCustomEndDate(event.target.value)}
+                />
+                <button className="btn btn-primary btn-sm" onClick={handleApplyCustomRange}>
+                  Apply
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-      <div class="modal-body">
-        <div style={{fontFamily: 'sans-serif', fontSize: 40}}> <span className='fw-bold'>Rs. {order.total_price}</span></div>
-        <img src='https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQG2YbnRpjVi-n9hZYm-mifpv6YGaYaiEyfxg&s' />
+
+      <div className="orders-card">
+        <div className="orders-table-wrapper">
+          <table className="orders-table">
+            <thead>
+              <tr>
+                <th>Order ID</th>
+                <th>Products</th>
+                {customerDetailsEnabled && <th>Customer</th>}
+                <th role="button" onClick={() => handleSortToggle('total_amount')} className="sortable">
+                  Total <span className="sort-indicator">{getSortIndicator('total_amount')}</span>
+                </th>
+                <th>Payment</th>
+                <th role="button" onClick={() => handleSortToggle('created_at')} className="sortable">
+                  Date <span className="sort-indicator">{getSortIndicator('created_at')}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && Array.from({ length: 6 }).map((_, idx) => (
+                <tr key={`skeleton-${idx}`} className="skeleton-row">
+                  <td><span className="skeleton-block" /></td>
+                  <td><span className="skeleton-block" /></td>
+                  {customerDetailsEnabled && <td><span className="skeleton-block" /></td>}
+                  <td><span className="skeleton-block" /></td>
+                  <td><span className="skeleton-block" /></td>
+                  <td><span className="skeleton-block" /></td>
+                </tr>
+              ))}
+              {!isLoading && errorMessage && (
+                <tr>
+                  <td colSpan={customerDetailsEnabled ? 6 : 5} className="empty-state">{errorMessage}</td>
+                </tr>
+              )}
+              {!isLoading && !errorMessage && orders.length === 0 && (
+                <tr>
+                  <td colSpan={customerDetailsEnabled ? 6 : 5} className="empty-state">No orders found.</td>
+                </tr>
+              )}
+              {!isLoading && !errorMessage && orders.map((order) => (
+                <tr
+                  key={order.id}
+                  className="orders-row"
+                  onClick={() => handleRowClick(order.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      handleRowClick(order.id);
+                    }
+                  }}
+                >
+                  <td>#{order.id}</td>
+                  <td>{renderProductSummary(order)}</td>
+                  {customerDetailsEnabled && <td>{order.customer_name || '-'}</td>}
+                  <td>{formatMoney(order.total_amount)}</td>
+                  <td>{renderPaymentCell(order)}</td>
+                  <td>{formatDate(order.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="orders-pagination">
+          <button
+            className="page-btn"
+            disabled={pagination.page <= 1}
+            onClick={() => setPagination((prev) => ({ ...prev, page: prev.page - 1 }))}
+          >
+            Prev
+          </button>
+          <div className="page-list">
+            {pages.map((page) => (
+              <button
+                key={`page-${page}`}
+                className={`page-btn ${page === pagination.page ? 'active' : ''}`}
+                onClick={() => setPagination((prev) => ({ ...prev, page }))}
+              >
+                {page}
+              </button>
+            ))}
+          </div>
+          <button
+            className="page-btn"
+            disabled={pagination.page >= pagination.total_pages}
+            onClick={() => setPagination((prev) => ({ ...prev, page: prev.page + 1 }))}
+          >
+            Next
+          </button>
+        </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onClick={()=> handlePaymentClick(order.id, order.type, order.payment)}>Payment Received</button>
-      </div>
+
+      {drawerOpen && (
+        <div className="order-drawer-overlay" onClick={closeDrawer}>
+          <aside className="order-drawer" onClick={(event) => event.stopPropagation()}>
+            <div className="drawer-header">
+              <div>
+                <p className="drawer-eyebrow">Order #{drawerOrder?.id || '-'}</p>
+                <h3 className="drawer-title">{formatDate(drawerOrder?.created_at)}</h3>
+              </div>
+              <button className="drawer-close" onClick={closeDrawer} type="button">Close</button>
+            </div>
+
+            {drawerLoading && (
+              <div className="drawer-loading">
+                <span className="skeleton-block large" />
+                <span className="skeleton-block" />
+                <span className="skeleton-block" />
+              </div>
+            )}
+
+            {!drawerLoading && drawerError && (
+              <div className="drawer-empty">{drawerError}</div>
+            )}
+
+            {!drawerLoading && !drawerError && drawerOrder && (
+              <div className="drawer-content">
+                {customerDetailsEnabled && (
+                  <section className="drawer-section">
+                    <h4>Customer</h4>
+                    <div className="drawer-grid">
+                      <div>
+                        <span className="label">Name</span>
+                        <p>{customer.name || drawerOrder.customer_name || '-'}</p>
+                      </div>
+                      <div>
+                        <span className="label">Phone</span>
+                        <p>{customer.mobile || customer.phone || drawerOrder.customer_phone || '-'}</p>
+                      </div>
+                      <div>
+                        <span className="label">Address</span>
+                        <p>{customer.address || drawerOrder.customer_address || '-'}</p>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                <section className="drawer-section">
+                  <h4>Products</h4>
+                  <table className="drawer-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th>Qty</th>
+                        <th>Price</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {drawerItems.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="drawer-empty">No items available.</td>
+                        </tr>
+                      )}
+                      {drawerItems.map((item, idx) => (
+                        <tr key={`item-${idx}`}>
+                          <td>{item.name || item.product_name || '-'}</td>
+                          <td>{item.quantity || item.qty || '-'}</td>
+                          <td>{formatMoney(item.price || item.unit_price)}</td>
+                          <td>{formatMoney(item.total || item.line_total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+
+                <section className="drawer-section summary">
+                  <h4>Payment Summary</h4>
+                  <div className="summary-grid">
+                    <div>
+                      <span>Total Amount</span>
+                      <strong>{formatMoney(drawerOrder.total_amount)}</strong>
+                    </div>
+                    <div>
+                      <span>Total Paid</span>
+                      <strong>{formatMoney(drawerOrder.total_paid)}</strong>
+                    </div>
+                    <div>
+                      <span>Balance</span>
+                      <strong>{formatMoney(drawerOrder.balance)}</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="drawer-section">
+                  <h4>Payment History</h4>
+                  <table className="drawer-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Method</th>
+                        <th>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentHistory.length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="drawer-empty">No payments recorded.</td>
+                        </tr>
+                      )}
+                      {paymentHistory.map((payment, idx) => (
+                        <tr key={`payment-${idx}`}>
+                          <td>{formatDate(payment.date || payment.paid_at)}</td>
+                          <td>{payment.method || payment.mode || '-'}</td>
+                          <td>{formatMoney(payment.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+
+                <section className="drawer-section actions">
+                  {balance > 0 ? (
+                    <button
+                      className="btn btn-primary"
+                      onClick={(event) => handlePaymentAction(event, drawerOrder)}
+                    >
+                      Add Payment
+                    </button>
+                  ) : (
+                    <span className="payment-badge paid">Fully Paid</span>
+                  )}
+                  <button
+                    className="btn btn-outline-light"
+                    type="button"
+                    onClick={openGstModal}
+                    disabled={drawerLoading || !gstInvoiceEnabled}
+                    title={!gstInvoiceEnabled ? 'Available on Pro plan' : undefined}
+                  >
+                    Download GST Invoice
+                    {!gstInvoiceEnabled && <span className="lock-tag">PRO</span>}
+                  </button>
+                  <button
+                    className="btn btn-outline-danger"
+                    onClick={(event) => openDeleteModal(event, drawerOrder)}
+                    disabled={drawerOrder.payment_status === 'paid'}
+                  >
+                    Delete Order
+                  </button>
+                </section>
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
+      {deleteModalOpen && (
+        <div className="delete-modal-overlay" onClick={closeDeleteModal}>
+          <div className="delete-modal" onClick={(event) => event.stopPropagation()}>
+            <h4>Delete order?</h4>
+            <p>Are you sure you want to delete order #{deleteTarget?.id}?</p>
+            {Number(deleteTarget?.total_paid || 0) > 0 && (
+              <p className="delete-warning">Warning: This order has payments recorded.</p>
+            )}
+            <div className="delete-actions">
+              <button className="btn btn-outline-secondary" onClick={closeDeleteModal}>
+                Cancel
+              </button>
+              <button className="btn btn-danger" onClick={handleDeleteOrder} disabled={deletingId === deleteTarget?.id}>
+                {deletingId === deleteTarget?.id ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {gstModalOpen && (
+        <div className="delete-modal-overlay" onClick={closeGstModal}>
+          <div className="delete-modal" onClick={(event) => event.stopPropagation()}>
+            <h4>GST Invoice Details</h4>
+            {shopDetails && (
+              <p className="mb-2">
+                <strong>{shopDetails.shop_name || shopDetails.name || shopDetails.business_name}</strong>
+                {(shopDetails.gst_number || shopDetails.gstin || shopDetails.gstin_number) && (
+                  <> · GST: {shopDetails.gst_number || shopDetails.gstin || shopDetails.gstin_number}</>
+                )}
+              </p>
+            )}
+            <form onSubmit={handleGstSubmit}>
+              <div className="mb-2">
+                <label className="form-label">Customer Name</label>
+                <input
+                  className="form-control"
+                  value={gstCustomer.name}
+                  onChange={(event) =>
+                    setGstCustomer((prev) => ({ ...prev, name: event.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div className="mb-2">
+                <label className="form-label">Mobile Number</label>
+                <input
+                  className="form-control"
+                  value={gstCustomer.mobile}
+                  onChange={(event) =>
+                    setGstCustomer((prev) => ({ ...prev, mobile: event.target.value }))
+                  }
+                  required
+                />
+              </div>
+              <div className="mb-2">
+                <label className="form-label">Address (optional)</label>
+                <textarea
+                  className="form-control"
+                  rows={3}
+                  value={gstCustomer.address}
+                  onChange={(event) =>
+                    setGstCustomer((prev) => ({ ...prev, address: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="delete-actions">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={closeGstModal}
+                  disabled={gstSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={gstSubmitting}
+                >
+                  {gstSubmitting ? 'Generating...' : 'Download PDF'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
-  </div>
-</div>
-</td>
-<td>
-  <button id={order.id+"delete"} onClick={() => handleOrderDelete(order.id)} className='btn btn-sm btn-danger' disabled={order.order_status === 'completed'}>Delete</button>
-</td>
-</tr>
-           ))}
-{offlineOrdersList.length > 0 && renderOfflineRows(offlineOrdersList)}
-{filteredOrders.length === 0 && (
-<tr>
-<td colSpan={userRole === 'admin' ? 11 : 10}>No orders found.</td>
-</tr>
-           )}
-</tbody>
-</table>
-</div>
-{/* <!-- Button trigger modal --> */}
-
-
-
-</div>
-</>
-
- );
+  );
 };
+
 export default OrdersPage;
