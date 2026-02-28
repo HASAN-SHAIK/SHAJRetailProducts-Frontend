@@ -9,6 +9,9 @@ const api = axios.create({
 // 🔐 REGISTER INTERCEPTOR HERE (ONCE)
 api.interceptors.request.use(
   (config) => {
+    config.metadata = {
+      startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+    };
     const deviceId = getDeviceId();
     console.log('Sending device id:', deviceId); // 🔍 DEBUG
     config.headers['x-device-id'] = deviceId;
@@ -30,6 +33,14 @@ api.interceptors.request.use(
 // Normalize network errors so callers don't crash on err.response being undefined.
 api.interceptors.response.use(
   (response) => {
+    const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const startTime = response?.config?.metadata?.startTime ?? endTime;
+    const durationMs = Math.round(endTime - startTime);
+    if (response?.config?.url) {
+      console.log(`[API] ${response.config.method?.toUpperCase() || 'GET'} ${response.config.url} - ${durationMs}ms`);
+    } else {
+      console.log(`[API] Response time - ${durationMs}ms`);
+    }
     if (typeof window !== 'undefined') {
       window.__serverOffline = false;
       window.dispatchEvent(new CustomEvent('server-status', { detail: { offline: false } }));
@@ -37,6 +48,14 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
+    const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const startTime = error?.config?.metadata?.startTime ?? endTime;
+    const durationMs = Math.round(endTime - startTime);
+    if (error?.config?.url) {
+      console.log(`[API] ${error.config.method?.toUpperCase() || 'GET'} ${error.config.url} - ${durationMs}ms (error)`);
+    } else {
+      console.log(`[API] Error response time - ${durationMs}ms`);
+    }
     if (!error?.response) {
       error.isNetworkError = true;
       error.response = {
