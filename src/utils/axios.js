@@ -84,4 +84,25 @@ api.interceptors.response.use(
   }
 );
 
+
+const HEALTHCHECK_INTERVAL_MS = 5 * 60 * 1000;
+
+const startHealthCheck = () => {
+  if (typeof window === 'undefined') return;
+  if (window.__healthCheckInterval) return;
+
+  const baseURL = api.defaults.baseURL || '';
+  const healthUrl = baseURL.replace(/\/$/, '') + '/health';
+
+  window.__healthCheckInterval = setInterval(() => {
+    axios
+      .get(healthUrl, { withCredentials: true, timeout: 5000 })
+      .catch(() => {
+        // Keepalive should be silent; failures are ignored.
+      });
+  }, HEALTHCHECK_INTERVAL_MS);
+};
+
+startHealthCheck();
+
 export default api;
