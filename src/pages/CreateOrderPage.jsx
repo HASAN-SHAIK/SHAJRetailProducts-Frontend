@@ -519,7 +519,6 @@ const handlePurchaseProductSelect = (product, index) => {
         calculateTotal(updated);
       }
       setBarcodeInput('');
-      showPopup('Product added via barcode', 'Success');
     } catch (err) {
       showPopup('Barcode lookup failed', 'Error');
     } finally {
