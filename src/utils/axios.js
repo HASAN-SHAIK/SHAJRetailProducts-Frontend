@@ -85,10 +85,12 @@ api.interceptors.response.use(
 );
 
 
-const HEALTHCHECK_INTERVAL_MS = 5 * 60 * 1000;
+const HEALTHCHECK_INTERVAL_MS = Number(process.env.REACT_APP_HEALTHCHECK_INTERVAL_MS) || 5 * 60 * 1000;
+const HEALTHCHECK_ENABLED = String(process.env.REACT_APP_HEALTHCHECK_ENABLED || '').toLowerCase() === 'true';
 
 const startHealthCheck = () => {
   if (typeof window === 'undefined') return;
+  if (!HEALTHCHECK_ENABLED) return;
   if (window.__healthCheckInterval) return;
 
   const baseURL = api.defaults.baseURL || '';

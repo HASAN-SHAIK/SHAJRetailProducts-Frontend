@@ -24,7 +24,16 @@ const TransactionsPage = ({navigate}) => {
     return Number.isFinite(num) && num > 0;
   };
 
-  const formatToIST = (utcDate) => {
+  const formatMoney = (value) => {
+    const amount = Number(value || 0);
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 2,
+    }).format(Number.isFinite(amount) ? amount : 0);
+  };
+
+const formatToIST = (utcDate) => {
     if (!utcDate) return '';
     const date = new Date(utcDate);
     if (Number.isNaN(date.getTime())) return '';
@@ -138,13 +147,16 @@ const TransactionsPage = ({navigate}) => {
     { !transactions ? '': <>
       <div className="row mb-4">
         {hasNonZeroValue(transactions?.total_income) && (
-          <InfoCard title="Total Revenue" value={transactions.total_income} icon="bi text-info bi-bank fs-1" />
+          <InfoCard title="Total Revenue" value={formatMoney(transactions.total_income)} icon="bi text-info bi-bank fs-1" />
         )}
         {hasNonZeroValue(transactions?.total_cash) && (
-          <InfoCard title="Total Cash"  value={transactions.total_cash} icon="bi text-light bi-cash-stack fs-1" />
+          <InfoCard title="Total Cash"  value={formatMoney(transactions.total_cash)} icon="bi text-light bi-cash-stack fs-1" />
         )}
         {hasNonZeroValue(transactions?.total_online) && (
-          <InfoCard title="Total Online" value={transactions.total_online} icon="bi text-primary bi-phone-flip fs-1" />
+          <InfoCard title="Total Online" value={formatMoney(transactions.total_online)} icon="bi text-primary bi-phone-flip fs-1" />
+        )}
+        {hasNonZeroValue(transactions?.profit) && (
+          <InfoCard title="Total Profit" value={formatMoney(transactions.profit)} icon="bi text-success bi-graph-up-arrow fs-1" />
         )}
         {totalTransactions > 0 && (
           <InfoCard title="Total Transactions" value={totalTransactions} icon="bi bi-arrow-down-up text-warning fs-1" />
@@ -155,17 +167,17 @@ const TransactionsPage = ({navigate}) => {
       </div>
       <HighlightedTable
         title={'Transactions'}
-        columns={['OrderId', 'User', 'Amount(Mode)','Type', 'Status', 'Date']}
-        data={transactions.transactions && transactions.transactions.map(txn => ({
-          OrderId: txn.order_id,
-          User: txn.user,
-          'Amount(Mode)': `₹${txn.total_price}(${txn.payment_mode})`,
-          Type: txn.transaction_type,
+        columns={['Order ID', 'Amount', 'Profit', 'Payment Mode', 'Status', 'Date']}
+        data={(transactions?.transactions || []).map(txn => ({
+          'Order ID': txn.order_id,
+          Amount: formatMoney(txn.total_price),
+          Profit: formatMoney(txn.profit),
+          'Payment Mode': txn.payment_mode,
           Status: <BadgeStatus status={txn.order_status} />,
-          Date: formatToIST(txn.transaction_date)
+          Date: formatToIST(txn.created_at),
         }))}
       // <HighlightedTable
-      //   columns={['OrderId', 'User', 'Amount(Mode)','Type', 'Status', 'Date']}
+      //   columns={['Order ID', 'Amount', 'Profit', 'Payment Mode', 'Status', 'Date']}
       //   data={transactions.transactions && transactions.transactions.map(txn => ({
       //     OrderId: txn.order_id,
       //     User: txn.user,

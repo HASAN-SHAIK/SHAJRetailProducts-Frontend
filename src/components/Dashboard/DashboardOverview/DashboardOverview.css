@@ -2,7 +2,7 @@
   display: block;
   grid-template-columns: none;
   gap: 0;
-  padding: calc(var(--nav-height) + 16px) 240px 24px;
+  padding: 4vh 17vw 24px;
   margin: 0;
   min-height: 100vh;
   color: #e2e8f0;
@@ -676,7 +676,7 @@
 @media (max-width: 1100px) {
   .dashboard-v2 {
     grid-template-columns: none;
-    padding: calc(var(--nav-height) + 12px) 16px 16px;
+    padding: calc(var(--nav-height) + 6px) 16px 16px;
     margin: 0;
   }
 
@@ -696,7 +696,7 @@
 
 @media (max-width: 768px) {
   .dashboard-v2 {
-    padding: calc(var(--nav-height) + 8px) 16px 16px;
+    padding: calc(var(--nav-height) + 4px) 16px 16px;
   }
 
   .dashboard-header {

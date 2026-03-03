@@ -3,7 +3,7 @@ import './AddProductModalComponent.css'; // Add this CSS file
 import api from '../../../utils/axios';
 import { usePopup } from '../../common/PopUp/PopupProvider';
 
-const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, onSubmit, navigate }) => {
+const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, onSubmit, navigate, isSubmitting }) => {
   const [categories, setCategories] = useState([]);
   const { showPopup } = usePopup();
   useEffect(() => {
@@ -38,7 +38,7 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
             </div>
 
             <div className="modal-body">
-              {fields.map(({ label, name, type, options }) => (
+              {fields.map(({ label, name, type, options, required, autoFocus }) => (
                 <div className="form-group mb-3" key={name}>
                   <label htmlFor={name} className="form-label text-light">{label}</label>
                   {
@@ -49,7 +49,7 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
                         name={name}
                         value={formData[name] || ''}
                         onChange={onChange}
-                        required
+                        required={required !== false}
                       >
                         {options.map((option) => (
                           <option key={option.value} value={option.value}>{option.label}</option>
@@ -64,8 +64,9 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
                         name={name}
                         value={formData[name] || ''}
                         onChange={onChange}
-                        required
+                        required={required !== false}
                         placeholder={`Select or type ${label}`}
+                        autoFocus={autoFocus === true}
                       />
                       <datalist id="categories-list">
                         {categories && categories.map((option) => (
@@ -81,7 +82,8 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
                     name={name}
                     value={formData[name] || ''}
                     onChange={onChange}
-                    required
+                    required={required !== false}
+                    autoFocus={autoFocus === true}
                   />)
                 }
                 </div>
@@ -90,7 +92,9 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
 
             <div className="modal-footer border-0">
               <button type="button" className="btn btn-light custom-btn" data-bs-dismiss="modal">Cancel</button>
-              <button type="submit" className="btn btn-primary custom-btn">Save</button>
+              <button type="submit" className="btn btn-primary custom-btn" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving...' : 'Save'}
+              </button>
             </div>
           </div>
         </form>

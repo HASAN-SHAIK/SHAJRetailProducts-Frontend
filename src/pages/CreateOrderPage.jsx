@@ -14,7 +14,7 @@ const CreateOrderPage = () => {
   const [saleMethods, setSaleMethods] = useState(['sale', 'purchase', 'personal']);
   const userDetails = useSelector((state) => state.user.userDetails);
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
-  const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
+  const features = tenantConfig?.features || tenantConfig?.plan_features || tenantConfig || {};
   const [transactionType, setTransactionType] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [products, setProducts] = useState([]);
@@ -26,6 +26,8 @@ const CreateOrderPage = () => {
   const [customerLocation, setCustomerLocation] = useState('');
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [isBarcodeAdding, setIsBarcodeAdding] = useState(false);
+  const barcodeInputRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
   const orderDetails = useSelector((state) => state.order.orderDetails);
   const dispatch = useDispatch();
@@ -120,17 +122,25 @@ useEffect(() => {
   };
 
   const requireCustomerDetails =
-    planFeatures.customer_details_enabled === true ||
-    tenantConfig?.customer_details_enabled === true ||
+    features.CUSTOMER_MODULE === true ||
+    tenantConfig?.CUSTOMER_MODULE === true ||
     tenantConfig?.require_customer_details === true;
   const weightBasedEnabled =
-    planFeatures.enable_weight_based !== false &&
+    features.enable_weight_based !== false &&
     tenantConfig?.enable_weight_based !== false;
   const pieceBasedEnabled =
-    planFeatures.enable_piece_based !== false &&
+    features.enable_piece_based !== false &&
     tenantConfig?.enable_piece_based !== false;
   const creditEnabled = tenantConfig?.enable_credit_sales === true;
-  const barcodeEnabled = tenantConfig?.enable_barcode === true;
+  const barcodeEnabled = features.enable_barcode === true;
+
+  useEffect(() => {
+    if (!barcodeEnabled) return;
+    if (transactionType !== 'sale' && transactionType !== 'purchase') return;
+    if (barcodeInputRef.current) {
+      barcodeInputRef.current.focus();
+    }
+  }, [barcodeEnabled, transactionType]);
 
   const handlePaymentMethodChange = (e) => setPaymentMethod(e.target.value);
 
@@ -416,23 +426,18 @@ const handlePurchaseProductSelect = (product, index) => {
   const handleBarcodeSearch = async () => {
     const code = barcodeInput.trim();
     if (!code) return;
-    if (transactionType !== 'sale') {
-      showPopup('Barcode search is only for sales.', 'Validation');
+    if (isBarcodeAdding) return;
+    if (transactionType !== 'sale' && transactionType !== 'purchase') {
+      showPopup('Barcode search is only for sales or purchases.', 'Validation');
       return;
     }
     try {
-      let product = null;
-      try {
-        const res = await api.get(`/products/barcode?code=${encodeURIComponent(code)}`);
-        product = res?.data?.product || res?.data?.data || res?.data;
-        if (Array.isArray(product)) product = product[0];
-      } catch (err) {
-        const res = await api.get(`/products/search?barcode=${encodeURIComponent(code)}`);
-        const results = res?.data?.products || res?.data?.data || res?.data || [];
-        product = Array.isArray(results) ? results[0] : null;
-      }
+      setIsBarcodeAdding(true);
+      const res = await api.get(`/products/barcode/${encodeURIComponent(code)}`);
+      let product = res?.data?.product || res?.data?.data || res?.data;
+      if (Array.isArray(product)) product = product[0];
       if (!product) {
-        showPopup('No product found for this barcode', 'Validation');
+        showPopup('Product not found', 'Validation');
         return;
       }
       const isWeight = Number(product?.is_weight_based) === 1;
@@ -444,22 +449,46 @@ const handlePurchaseProductSelect = (product, index) => {
         showPopup('Piece-based products are disabled for this tenant.', 'Feature');
         return;
       }
-      const updated = [
-        ...products,
-        {
-          product_name: product.name,
-          id: product.id,
-          quantity: '',
-          suggestions: [],
-          selling_price: product.selling_price,
-          is_weight_based: product.is_weight_based ?? 0,
-          stock_quantity: product.stock_quantity ?? null,
-        },
-      ];
-      setProducts(updated);
+      if (transactionType === 'sale') {
+        const updated = [
+          ...products,
+          {
+            product_name: product.name,
+            id: product.id,
+            quantity: '',
+            suggestions: [],
+            selling_price: product.selling_price,
+            is_weight_based: product.is_weight_based ?? 0,
+            stock_quantity: product.stock_quantity ?? null,
+          },
+        ];
+        setProducts(updated);
+        calculateTotal(updated);
+      } else {
+        const updated = [
+          ...products,
+          {
+            product_name: product.name,
+            company: product.company,
+            quantity: 1,
+            actual_price: product.actual_price,
+            selling_price: product.selling_price,
+            category: product.category,
+            time_for_delivery: '',
+            suggestions: [],
+            is_weight_based: product.is_weight_based ?? 0,
+            stock_quantity: product.stock_quantity ?? null,
+          },
+        ];
+        setProducts(updated);
+        calculateTotal(updated);
+      }
       setBarcodeInput('');
+      showPopup('Product added via barcode', 'Success');
     } catch (err) {
       showPopup('Barcode lookup failed', 'Error');
+    } finally {
+      setIsBarcodeAdding(false);
     }
   };
 
@@ -838,7 +867,7 @@ const handlePurchaseProductSelect = (product, index) => {
         </div>
       )}
 
-      {barcodeEnabled && transactionType === 'sale' && (
+      {barcodeEnabled && (transactionType === 'sale' || transactionType === 'purchase') && (
         <div className="mb-3">
           <label>Barcode:</label>
           <div className="d-flex gap-2">
@@ -847,6 +876,7 @@ const handlePurchaseProductSelect = (product, index) => {
               placeholder="Scan or enter barcode"
               value={barcodeInput}
               onChange={(e) => setBarcodeInput(e.target.value)}
+              ref={barcodeInputRef}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -854,8 +884,13 @@ const handlePurchaseProductSelect = (product, index) => {
                 }
               }}
             />
-            <button className="btn btn-outline-primary" type="button" onClick={handleBarcodeSearch}>
-              Add
+            <button
+              className="btn btn-outline-primary"
+              type="button"
+              onClick={handleBarcodeSearch}
+              disabled={isBarcodeAdding}
+            >
+              {isBarcodeAdding ? 'Adding...' : 'Add'}
             </button>
           </div>
         </div>

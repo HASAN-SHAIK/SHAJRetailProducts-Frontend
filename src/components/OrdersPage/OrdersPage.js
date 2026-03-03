@@ -32,6 +32,7 @@ const OrdersPage = ({ navigate }) => {
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [drawerError, setDrawerError] = useState('');
   const [drawerOrder, setDrawerOrder] = useState(null);
+  const [paymentSubmittingId, setPaymentSubmittingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -187,6 +188,7 @@ const OrdersPage = ({ navigate }) => {
     }
     const order = targetOrder || drawerOrder;
     if (!order?.id) return;
+    if (paymentSubmittingId === order.id) return;
 
     const paymentMode =
       order.payment_method ||
@@ -195,6 +197,7 @@ const OrdersPage = ({ navigate }) => {
       'cash';
 
     try {
+      setPaymentSubmittingId(order.id);
       await api.post('/orders/mark-paid', {
         order_id: order.id,
         payment_mode: paymentMode,
@@ -211,6 +214,8 @@ const OrdersPage = ({ navigate }) => {
           return;
         }
       showPopup('Failed to mark order as paid.', 'Error');
+    } finally {
+      setPaymentSubmittingId((current) => (current === order.id ? null : current));
     }
   };
 
@@ -325,7 +330,7 @@ const OrdersPage = ({ navigate }) => {
 
       const rows = drawerItems.map((item, index) => {
         const qty = Number(item.quantity || item.qty || 0);
-        const rate = Number(item.price || item.unit_price || 0);
+        const rate = Number(item.price || item.selling_price || 0);
         const lineTotal = Number(item.total || item.line_total || qty * rate);
         const hsn = item.hsn || item.hsn_code || 'NA';
         return [
@@ -504,8 +509,9 @@ const OrdersPage = ({ navigate }) => {
         <button
           className="payment-btn warning"
           onClick={(event) => handlePaymentAction(event, order)}
+          disabled={paymentSubmittingId === order.id}
         >
-          Pay Balance
+          {paymentSubmittingId === order.id ? 'Saving...' : 'Pay Balance'}
         </button>
       );
     }
@@ -513,8 +519,9 @@ const OrdersPage = ({ navigate }) => {
       <button
         className="payment-btn danger"
         onClick={(event) => handlePaymentAction(event, order)}
+        disabled={paymentSubmittingId === order.id}
       >
-        Make Payment
+        {paymentSubmittingId === order.id ? 'Saving...' : 'Make Payment'}
       </button>
     );
   };
@@ -765,7 +772,7 @@ const OrdersPage = ({ navigate }) => {
                         <tr key={`item-${idx}`}>
                           <td>{item.name || item.product_name || '-'}</td>
                           <td>{item.quantity || item.qty || '-'}</td>
-                          <td>{formatMoney(item.price || item.unit_price)}</td>
+                          <td>{formatMoney(item.price || item.selling_price)}</td>
                           <td>{formatMoney(item.total || item.line_total)}</td>
                         </tr>
                       ))}
@@ -823,8 +830,9 @@ const OrdersPage = ({ navigate }) => {
                     <button
                       className="btn btn-primary"
                       onClick={(event) => handlePaymentAction(event, drawerOrder)}
+                      disabled={paymentSubmittingId === drawerOrder?.id}
                     >
-                      Add Payment
+                      {paymentSubmittingId === drawerOrder?.id ? 'Saving...' : 'Add Payment'}
                     </button>
                   ) : (
                     <span className="payment-badge paid">Fully Paid</span>

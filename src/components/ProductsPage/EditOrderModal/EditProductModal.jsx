@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './EditProductModal.css';
 
-const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, weightBasedEnabled = true }) => {
+const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, weightBasedEnabled = true, barcodeEnabled = false }) => {
   useEffect(() => {
     // Add Google Font (Orbitron - a cool tech font)
     const link = document.createElement("link");
@@ -20,6 +20,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
   const [companyName, setCompanyName] = useState(
     item.company || item.company_name || item.brand || ''
   );
+  const [barcode, setBarcode] = useState(item.barcode || '');
 
   const isWeightBasedValue = (value) => {
     if (value === true) return true;
@@ -58,6 +59,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
       name: productName,
       product_name: productName,
       company: companyName,
+      barcode: barcodeEnabled ? barcode : undefined,
       selling_price: sellingPrice,
       actual_price:actualPrice,
       stock_quantity: stockQuantity,
@@ -96,6 +98,17 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
               onChange={(e) => setCompanyName(e.target.value)}
             />
           </div>
+          {barcodeEnabled && (
+            <div className="form-group w-100 mb-3 text-center">
+              <label className="form-label w-100">Barcode</label>
+              <input
+                className="form-control text-center neon-input"
+                type="text"
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+              />
+            </div>
+          )}
 
           <div className="form-group w-100 mb-3 text-center">
             <label className="form-label w-100">Actual Price</label>

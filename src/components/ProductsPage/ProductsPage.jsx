@@ -13,13 +13,14 @@ const ProductsPage = ({ navigate }) => {
  const [productUpdateFlag, setProductUpdateFlag] = useState(false);
  const userDetails = useSelector((state) => state.user.userDetails);
  const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
- const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
+ const features = tenantConfig?.features || tenantConfig?.plan_features || tenantConfig || {};
  const weightBasedEnabled =
-  planFeatures.enable_weight_based !== false &&
+  features.enable_weight_based !== false &&
   tenantConfig?.enable_weight_based !== false;
  const pieceBasedEnabled =
-  planFeatures.enable_piece_based !== false &&
+  features.enable_piece_based !== false &&
   tenantConfig?.enable_piece_based !== false;
+ const barcodeEnabled = features.enable_barcode === true;
  const defaultWeightValue = weightBasedEnabled && !pieceBasedEnabled ? '1' : '0';
  const { showPopup } = usePopup();
  const [formData, setFormData] = useState({
@@ -30,7 +31,8 @@ const ProductsPage = ({ navigate }) => {
     stock_quantity: '',
     category: '',
     time_for_delivery: '',
-    is_weight_based: defaultWeightValue
+    is_weight_based: defaultWeightValue,
+    barcode: ''
   });
 
   const handleChange = (e) => {
@@ -53,7 +55,9 @@ const ProductsPage = ({ navigate }) => {
     }
 
     try {
-      await api.post('/products', formData); // Your endpoint
+      setIsAddingProduct(true);
+      const payload = barcodeEnabled ? formData : (({ barcode, ...rest }) => rest)(formData);
+      await api.post('/products', payload); // Your endpoint
       // Optional: show success toast, close modal, refresh product list
       setFormData({
         product_name: '',
@@ -63,7 +67,8 @@ const ProductsPage = ({ navigate }) => {
         actual_price: '',
         stock_quantity: '',
         time_for_delivery: '',
-        is_weight_based: defaultWeightValue
+        is_weight_based: defaultWeightValue,
+        barcode: ''
       });
       const modalElement = document.getElementById('addProductModal');
       const modal = Modal.getInstance(modalElement);
@@ -80,6 +85,8 @@ const ProductsPage = ({ navigate }) => {
       showPopup("Issue while adding please try later", "Error");
       console.error('Error adding product:', err);
       }
+    } finally {
+      setIsAddingProduct(false);
     }
     
   };
@@ -87,6 +94,7 @@ const ProductsPage = ({ navigate }) => {
   const productFields = [
     { label: 'Product Name', name: 'product_name' },
     { label: 'Company', name: 'company' },
+    ...(barcodeEnabled ? [{ label: 'Barcode', name: 'barcode', required: false, autoFocus: true }] : []),
     { label: 'Category', name: 'category', type: 'datalist' },
     { label: 'Selling Price', name: 'selling_price', type: 'number' },
     { label: 'Actual Price', name: 'actual_price', type: 'number' },
@@ -118,6 +126,7 @@ const ProductsPage = ({ navigate }) => {
  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
  const [deleteTarget, setDeleteTarget] = useState(null);
  const [deletingId, setDeletingId] = useState(null);
+ const [isAddingProduct, setIsAddingProduct] = useState(false);
 
   useEffect(() => {
     fetchCategories();
@@ -259,7 +268,8 @@ const ProductsPage = ({ navigate }) => {
       return;
     }
     try {
-      const response = await api.put(`/products/${updatedProduct.id}`, updatedProduct);
+      const payload = barcodeEnabled ? updatedProduct : (({ barcode, ...rest }) => rest)(updatedProduct);
+      const response = await api.put(`/products/${updatedProduct.id}`, payload);
       if (response.status === 200) {
         showPopup('Product updated successfully!', 'Success');
         setEditTarget(null);
@@ -488,6 +498,7 @@ const ProductsPage = ({ navigate }) => {
             formData={formData}
             onChange={handleChange}
             onSubmit={handleSubmit}
+            isSubmitting={isAddingProduct}
             onClose={() => setShowModal(false)}
             onProductAdded={fetchProducts}
           />
@@ -497,6 +508,7 @@ const ProductsPage = ({ navigate }) => {
             item={editTarget}
             pieceBasedEnabled={pieceBasedEnabled}
             weightBasedEnabled={weightBasedEnabled}
+            barcodeEnabled={barcodeEnabled}
             onClose={() => setEditTarget(null)}
             onSubmit={handleSubmitEdit}
           />
