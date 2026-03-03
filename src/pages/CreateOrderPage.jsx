@@ -34,6 +34,8 @@ const CreateOrderPage = () => {
   const navigate = useNavigate();
   const { showPopup } = usePopup();
   const latestSearchRef = useRef({ sale: {}, purchase: {}, customer: '' });
+  const searchTimersRef = useRef({ sale: {}, purchase: {} });
+  const productSearchDelayMs = 350;
 useEffect(() => {
   (async () => {
     try {
@@ -109,6 +111,13 @@ useEffect(() => {
     dispatch(clearOrderDetails()); // Clear order details on mount when not editing
   }
 }, [dispatch, orderDetails]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(searchTimersRef.current.sale).forEach((timer) => clearTimeout(timer));
+      Object.values(searchTimersRef.current.purchase).forEach((timer) => clearTimeout(timer));
+    };
+  }, []);
 
 
 
@@ -295,6 +304,19 @@ useEffect(() => {
     }
   };
 
+  const scheduleSaleProductSearch = (text, index) => {
+    if (searchTimersRef.current.sale[index]) {
+      clearTimeout(searchTimersRef.current.sale[index]);
+    }
+    if (text.length < 2) {
+      handleSaleProductSearch(text, index);
+      return;
+    }
+    searchTimersRef.current.sale[index] = setTimeout(() => {
+      handleSaleProductSearch(text, index);
+    }, productSearchDelayMs);
+  };
+
   const handleSaleProductSelect = (product, index) => {
     const isWeight = Number(product?.is_weight_based) === 1;
     if (isWeight && !weightBasedEnabled) {
@@ -375,6 +397,19 @@ const handlePurchaseProductSearch = async (text, index) => {
       }
     }
   }
+};
+
+const schedulePurchaseProductSearch = (text, index) => {
+  if (searchTimersRef.current.purchase[index]) {
+    clearTimeout(searchTimersRef.current.purchase[index]);
+  }
+  if (text.length < 2) {
+    handlePurchaseProductSearch(text, index);
+    return;
+  }
+  searchTimersRef.current.purchase[index] = setTimeout(() => {
+    handlePurchaseProductSearch(text, index);
+  }, productSearchDelayMs);
 };
 
 const handlePurchaseProductSelect = (product, index) => {
@@ -907,7 +942,7 @@ const handlePurchaseProductSelect = (product, index) => {
                 const updated = [...products];
                 updated[index].product_name = e.target.value;
                 setProducts(updated);
-                handleSaleProductSearch(e.target.value, index);
+                scheduleSaleProductSearch(e.target.value, index);
               }}
             />
             {p.id && (
@@ -984,7 +1019,7 @@ const handlePurchaseProductSelect = (product, index) => {
               value={p.product_name}
               onChange={(e) => {
                 handlePurchaseFieldChange(e.target.value, index, 'product_name');
-                handlePurchaseProductSearch(e.target.value, index);
+                schedulePurchaseProductSearch(e.target.value, index);
               }}
             />
             {p.suggestions?.length > 0 && (
