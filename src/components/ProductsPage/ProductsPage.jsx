@@ -127,6 +127,7 @@ const ProductsPage = ({ navigate }) => {
  const [deleteTarget, setDeleteTarget] = useState(null);
  const [deletingId, setDeletingId] = useState(null);
  const [isAddingProduct, setIsAddingProduct] = useState(false);
+ const [isEditingProduct, setIsEditingProduct] = useState(false);
 
   useEffect(() => {
     fetchCategories();
@@ -268,6 +269,7 @@ const ProductsPage = ({ navigate }) => {
       return;
     }
     try {
+      setIsEditingProduct(true);
       const payload = barcodeEnabled ? updatedProduct : (({ barcode, ...rest }) => rest)(updatedProduct);
       const response = await api.put(`/products/${updatedProduct.id}`, payload);
       if (response.status === 200) {
@@ -278,6 +280,8 @@ const ProductsPage = ({ navigate }) => {
     } catch (error) {
       console.error('Failed to update product:', error);
       showPopup('Error updating product', 'Error');
+    } finally {
+      setIsEditingProduct(false);
     }
   };
 
@@ -511,6 +515,7 @@ const ProductsPage = ({ navigate }) => {
             barcodeEnabled={barcodeEnabled}
             onClose={() => setEditTarget(null)}
             onSubmit={handleSubmitEdit}
+            isSubmitting={isEditingProduct}
           />
         )}
         {deleteModalOpen && (

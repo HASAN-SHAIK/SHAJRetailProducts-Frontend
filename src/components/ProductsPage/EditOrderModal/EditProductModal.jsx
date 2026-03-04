@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './EditProductModal.css';
 
-const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, weightBasedEnabled = true, barcodeEnabled = false }) => {
+const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, weightBasedEnabled = true, barcodeEnabled = false, isSubmitting = false }) => {
   useEffect(() => {
     // Add Google Font (Orbitron - a cool tech font)
     const link = document.createElement("link");
@@ -53,6 +53,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
 
 
   const handleSubmit = () => {
+    if (isSubmitting) return;
     if (!pieceBasedEnabled && isWeightBased === '0') return;
     if (!weightBasedEnabled && isWeightBased === '1') return;
     const updatedProduct = {
@@ -163,6 +164,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
               className="btn btn-outline-danger w-45"
               type="button"
               onClick={onClose}
+              disabled={isSubmitting}
             >
               Cancel
             </button>
@@ -170,8 +172,9 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
               className="btn btn-outline-success w-45"
               type="button"
               onClick={handleSubmit}
+              disabled={isSubmitting}
             >
-              Submit
+              {isSubmitting ? 'Saving...' : 'Submit'}
             </button>
           </div>
         </form>

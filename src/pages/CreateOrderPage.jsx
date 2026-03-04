@@ -29,6 +29,11 @@ const CreateOrderPage = () => {
   const [isBarcodeAdding, setIsBarcodeAdding] = useState(false);
   const barcodeInputRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [purchaseModalData, setPurchaseModalData] = useState({});
+  const [purchaseModalSuggestions, setPurchaseModalSuggestions] = useState([]);
+  const purchaseModalSearchTimerRef = useRef(null);
+  const latestPurchaseModalSearchRef = useRef('');
   const orderDetails = useSelector((state) => state.order.orderDetails);
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -41,7 +46,7 @@ useEffect(() => {
     try {
             // Remove 'personal' if not admin
       if (!orderDetails && userDetails.role !== 'admin') {
-        setSaleMethods((prev) => prev.filter((method) => method !== 'personal'));
+        setSaleMethods((prev) => prev.filter((method) => method !== 'personal' && method !== 'purchase'));
       }
       else if (orderDetails) {
         setSaleMethods((prev) => prev.filter((method) => method === 'sale'));
@@ -107,6 +112,15 @@ useEffect(() => {
   })();
 }, [orderDetails, userDetails.role, navigate, showPopup]);
 useEffect(() => {
+  if (userDetails.role !== 'admin' && (transactionType === 'purchase' || transactionType === 'personal')) {
+    setTransactionType('sale');
+    setProducts([]);
+    setTotalAmount(0);
+    setPaymentMethod('');
+    setPersonalAmount('');
+  }
+}, [transactionType, userDetails.role]);
+useEffect(() => {
   if (!orderDetails) {
     dispatch(clearOrderDetails()); // Clear order details on mount when not editing
   }
@@ -116,6 +130,9 @@ useEffect(() => {
     return () => {
       Object.values(searchTimersRef.current.sale).forEach((timer) => clearTimeout(timer));
       Object.values(searchTimersRef.current.purchase).forEach((timer) => clearTimeout(timer));
+      if (purchaseModalSearchTimerRef.current) {
+        clearTimeout(purchaseModalSearchTimerRef.current);
+      }
     };
   }, []);
 
@@ -143,6 +160,32 @@ useEffect(() => {
   const creditEnabled = tenantConfig?.enable_credit_sales === true;
   const barcodeEnabled = features.enable_barcode === true;
 
+  const buildSearchUrl = (text, mode) => {
+    if (mode === 'purchase') {
+      return `/products/search/purchase?name=${encodeURIComponent(text)}`;
+    }
+    return `/products/search/sale?name=${encodeURIComponent(text)}`;
+  };
+
+  const buildBarcodeUrl = (code, mode) => {
+    if (mode === 'purchase') {
+      return `/products/barcode/purchase/${encodeURIComponent(code)}`;
+    }
+    return `/products/barcode/sale/${encodeURIComponent(code)}`;
+  };
+
+  const getDefaultPurchaseData = () => ({
+    product_name: '',
+    company: '',
+    quantity: '',
+    actual_price: '',
+    selling_price: '',
+    category: '',
+    time_for_delivery: '',
+    is_weight_based: weightBasedEnabled && !pieceBasedEnabled ? 1 : 0,
+    product_id: null,
+  });
+
   useEffect(() => {
     if (!barcodeEnabled) return;
     if (transactionType !== 'sale' && transactionType !== 'purchase') return;
@@ -150,6 +193,13 @@ useEffect(() => {
       barcodeInputRef.current.focus();
     }
   }, [barcodeEnabled, transactionType]);
+
+  useEffect(() => {
+    if (transactionType !== 'purchase') {
+      setPurchaseModalOpen(false);
+      setPurchaseModalSuggestions([]);
+    }
+  }, [transactionType]);
 
   const handlePaymentMethodChange = (e) => setPaymentMethod(e.target.value);
 
@@ -215,18 +265,7 @@ useEffect(() => {
         },
       ]);
     } else if (transactionType === 'purchase') {
-      setProducts([
-        ...products,
-        {
-          product_name: '',
-          company: '',
-          quantity: '',
-          actual_price: '',
-          selling_price: '',
-          category: '',
-          time_for_delivery: '',
-        },
-      ]);
+      openPurchaseModal();
     }
   };
 
@@ -237,9 +276,15 @@ useEffect(() => {
     calculateTotal(updated);
   };
 
+  const resolveIsWeightBased = (product) => {
+    if (product?.is_weight_based != null) return Number(product.is_weight_based) === 1;
+    if (product?.type != null) return Number(product.type) === 1;
+    return false;
+  };
+
   const filterByProductType = (list = []) =>
     list.filter((product) => {
-      const isWeight = Number(product?.is_weight_based) === 1;
+      const isWeight = resolveIsWeightBased(product);
       if (isWeight && !weightBasedEnabled) return false;
       if (!isWeight && !pieceBasedEnabled) return false;
       return true;
@@ -271,7 +316,7 @@ useEffect(() => {
         });
         return;
       }
-      const response = await api.get(`/products/search?name=${encodeURIComponent(text)}`);
+      const response = await api.get(buildSearchUrl(text, 'sale'));
       const results = response?.data?.products || response?.data?.data || response?.data || [];
       const filtered = filterByProductType(results);
       if (latestSearchRef.current.sale[index] !== text) return;
@@ -318,7 +363,7 @@ useEffect(() => {
   };
 
   const handleSaleProductSelect = (product, index) => {
-    const isWeight = Number(product?.is_weight_based) === 1;
+    const isWeight = resolveIsWeightBased(product);
     if (isWeight && !weightBasedEnabled) {
       showPopup('Weight-based products are disabled for this tenant.', 'Feature');
       return;
@@ -334,7 +379,7 @@ useEffect(() => {
       quantity: '',
       suggestions: [],
       selling_price: product.selling_price,
-      is_weight_based: product.is_weight_based ?? 0,
+      is_weight_based: product.is_weight_based ?? product.type ?? 0,
       stock_quantity: product.stock_quantity ?? null,
     };
     setProducts(updated);
@@ -366,7 +411,7 @@ const handlePurchaseProductSearch = async (text, index) => {
       });
       return;
     }
-    const response = await api.get(`/products/search?name=${encodeURIComponent(text)}`);
+    const response = await api.get(buildSearchUrl(text, 'purchase'));
     const results = response?.data?.products || response?.data?.data || response?.data || [];
     const filtered = filterByProductType(results);
     if (latestSearchRef.current.purchase[index] !== text) return;
@@ -412,8 +457,8 @@ const schedulePurchaseProductSearch = (text, index) => {
   }, productSearchDelayMs);
 };
 
-const handlePurchaseProductSelect = (product, index) => {
-  const isWeight = Number(product?.is_weight_based) === 1;
+  const handlePurchaseProductSelect = (product, index) => {
+    const isWeight = resolveIsWeightBased(product);
   if (isWeight && !weightBasedEnabled) {
     showPopup('Weight-based products are disabled for this tenant.', 'Feature');
     return;
@@ -425,6 +470,7 @@ const handlePurchaseProductSelect = (product, index) => {
   const updated = [...products];
   updated[index] = {
     ...updated[index],
+    product_id: product.id ?? null,
     product_name: product.name,
     company: product.company,
     quantity: 1,
@@ -433,15 +479,146 @@ const handlePurchaseProductSelect = (product, index) => {
     category: product.category,
     time_for_delivery: '',
     suggestions: [],
-    is_weight_based: product.is_weight_based ?? 0,
+      is_weight_based: product.is_weight_based ?? product.type ?? 0,
     stock_quantity: product.stock_quantity ?? null,
   };
   setProducts(updated);
   calculateTotal(updated);
 };
 
+  const openPurchaseModal = (prefill = {}) => {
+    if (!pieceBasedEnabled && !weightBasedEnabled) {
+      showPopup('Product types are disabled for this tenant.', 'Feature');
+      return;
+    }
+    const base = getDefaultPurchaseData();
+    setPurchaseModalData({ ...base, ...prefill });
+    setPurchaseModalSuggestions([]);
+    setPurchaseModalOpen(true);
+  };
+
+  const closePurchaseModal = () => {
+    setPurchaseModalOpen(false);
+    setPurchaseModalSuggestions([]);
+  };
+
+  const handlePurchaseModalChange = (field, value) => {
+    setPurchaseModalData((prev) => ({
+      ...prev,
+      [field]: value,
+      ...(field === 'product_name' ? { product_id: null } : null),
+    }));
+  };
+
+  const handlePurchaseModalSearch = async (text) => {
+    latestPurchaseModalSearchRef.current = text;
+    if (text.length < 2) {
+      setPurchaseModalSuggestions([]);
+      return;
+    }
+    try {
+      if (!navigator.onLine) {
+        const suggestions = filterByProductType(searchCachedProducts(text));
+        if (latestPurchaseModalSearchRef.current !== text) return;
+        setPurchaseModalSuggestions(suggestions);
+        return;
+      }
+      const response = await api.get(buildSearchUrl(text, 'purchase'));
+      const results = response?.data?.products || response?.data?.data || response?.data || [];
+      const filtered = filterByProductType(results);
+      if (latestPurchaseModalSearchRef.current !== text) return;
+      setPurchaseModalSuggestions(Array.isArray(filtered) ? filtered : []);
+    } catch (err) {
+      const suggestions = filterByProductType(searchCachedProducts(text));
+      if (latestPurchaseModalSearchRef.current !== text) return;
+      setPurchaseModalSuggestions(suggestions);
+      if (navigator.onLine) {
+        if ((err.response?.data && err.response.data.message === 'Invalid Token') || err.response?.status === 401) {
+          showPopup("Token Expired Please Login Again!", "Session");
+          navigate('/logout');
+        } else {
+          console.log(err);
+        }
+      }
+    }
+  };
+
+  const schedulePurchaseModalSearch = (text) => {
+    if (purchaseModalSearchTimerRef.current) {
+      clearTimeout(purchaseModalSearchTimerRef.current);
+    }
+    if (text.length < 2) {
+      handlePurchaseModalSearch(text);
+      return;
+    }
+    purchaseModalSearchTimerRef.current = setTimeout(() => {
+      handlePurchaseModalSearch(text);
+    }, productSearchDelayMs);
+  };
+
+  const handlePurchaseModalSelect = (product) => {
+    const isWeight = resolveIsWeightBased(product);
+    if (isWeight && !weightBasedEnabled) {
+      showPopup('Weight-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    if (!isWeight && !pieceBasedEnabled) {
+      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    setPurchaseModalData((prev) => ({
+      ...prev,
+      product_name: product.name,
+      company: product.company,
+      quantity: 1,
+      actual_price: product.actual_price,
+      selling_price: product.selling_price,
+      category: product.category,
+      time_for_delivery: '',
+      is_weight_based: product.is_weight_based ?? product.type ?? 0,
+      product_id: product.id ?? null,
+    }));
+    setPurchaseModalSuggestions([]);
+  };
+
+  const handlePurchaseModalSubmit = () => {
+    const data = purchaseModalData || {};
+    const hasExisting = Boolean(data.product_id);
+    if (hasExisting) {
+      if (!data.quantity || !data.actual_price || !data.selling_price) {
+        showPopup('Enter quantity, actual price, and selling price', 'Validation');
+        return;
+      }
+    } else {
+      if (!data.product_name || !data.company || !data.quantity || !data.actual_price || !data.selling_price || !data.category || !data.time_for_delivery) {
+        showPopup('Fill all product details', 'Validation');
+        return;
+      }
+    }
+    const isWeight = Number(data.is_weight_based) === 1;
+    if (isWeight && !weightBasedEnabled) {
+      showPopup('Weight-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    if (!isWeight && !pieceBasedEnabled) {
+      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    if (Number(data.selling_price) < Number(data.actual_price)) {
+      showPopup('Actual Price is Less than Selling price', 'Validation');
+      return;
+    }
+    const updated = [
+      ...products,
+      { ...data, suggestions: [] },
+    ];
+    setProducts(updated);
+    calculateTotal(updated);
+    closePurchaseModal();
+  };
+
   const isWeightBasedProduct = (product) =>
-    Number(product?.is_weight_based) === 1;
+    resolveIsWeightBased(product);
 
   const isValidWeightInput = (value) => {
     if (value === '') return true;
@@ -458,6 +635,17 @@ const handlePurchaseProductSelect = (product, index) => {
   const getQuantityPlaceholder = (product) =>
     isWeightBasedProduct(product) ? 'Weight (kg)' : 'Quantity (pcs)';
 
+  const getPurchaseSuggestionLabel = (product) => {
+    const name = product?.name || '-';
+    const company = product?.company || '-';
+    const selling = product?.selling_price ?? '-';
+    const actual = product?.actual_price ?? '-';
+    const category = product?.category || '-';
+    const delivery = product?.time_for_delivery ?? '-';
+    const typeLabel = resolveIsWeightBased(product) ? 'Weight' : 'Piece';
+    return `${name} | ${company} | Sell: ${selling} | Actual: ${actual} | Type: ${typeLabel} | Delivery: ${delivery} | Cat: ${category}`;
+  };
+
   const handleBarcodeSearch = async () => {
     const code = barcodeInput.trim();
     if (!code) return;
@@ -468,14 +656,15 @@ const handlePurchaseProductSelect = (product, index) => {
     }
     try {
       setIsBarcodeAdding(true);
-      const res = await api.get(`/products/barcode/${encodeURIComponent(code)}`);
+      const barcodeMode = transactionType === 'purchase' ? 'purchase' : 'sale';
+      const res = await api.get(buildBarcodeUrl(code, barcodeMode));
       let product = res?.data?.product || res?.data?.data || res?.data;
       if (Array.isArray(product)) product = product[0];
       if (!product) {
         showPopup('Product not found', 'Validation');
         return;
       }
-      const isWeight = Number(product?.is_weight_based) === 1;
+    const isWeight = resolveIsWeightBased(product);
       if (isWeight && !weightBasedEnabled) {
         showPopup('Weight-based products are disabled for this tenant.', 'Feature');
         return;
@@ -493,30 +682,25 @@ const handlePurchaseProductSelect = (product, index) => {
             quantity: '',
             suggestions: [],
             selling_price: product.selling_price,
-            is_weight_based: product.is_weight_based ?? 0,
+      is_weight_based: product.is_weight_based ?? product.type ?? 0,
             stock_quantity: product.stock_quantity ?? null,
           },
         ];
         setProducts(updated);
         calculateTotal(updated);
       } else {
-        const updated = [
-          ...products,
-          {
-            product_name: product.name,
-            company: product.company,
-            quantity: 1,
-            actual_price: product.actual_price,
-            selling_price: product.selling_price,
-            category: product.category,
-            time_for_delivery: '',
-            suggestions: [],
-            is_weight_based: product.is_weight_based ?? 0,
-            stock_quantity: product.stock_quantity ?? null,
-          },
-        ];
-        setProducts(updated);
-        calculateTotal(updated);
+        openPurchaseModal({
+          product_name: product.name,
+          company: product.company,
+          quantity: 1,
+          actual_price: product.actual_price,
+          selling_price: product.selling_price,
+          category: product.category,
+          time_for_delivery: '',
+          is_weight_based: product.is_weight_based ?? product.type ?? 0,
+          stock_quantity: product.stock_quantity ?? null,
+          product_id: product.id ?? null,
+        });
       }
       setBarcodeInput('');
     } catch (err) {
@@ -651,8 +835,25 @@ const handlePurchaseProductSelect = (product, index) => {
       }
     } else if (transactionType === 'purchase') {
       for (const p of products) {
-        if (!p.product_name || !p.company || !p.quantity || !p.actual_price || !p.selling_price || !p.category || !p.time_for_delivery) {
-          showPopup('Fill all product details', 'Validation');
+        const hasExisting = Boolean(p.product_id);
+        if (hasExisting) {
+          if (!p.quantity || !p.actual_price || !p.selling_price) {
+            showPopup('Enter quantity, actual price, and selling price', 'Validation');
+            return;
+          }
+        } else {
+          if (!p.product_name || !p.company || !p.quantity || !p.actual_price || !p.selling_price || !p.category || !p.time_for_delivery) {
+            showPopup('Fill all product details', 'Validation');
+            return;
+          }
+        }
+        const isWeight = Number(p.is_weight_based) === 1;
+        if (isWeight && !weightBasedEnabled) {
+          showPopup('Weight-based products are disabled for this tenant.', 'Feature');
+          return;
+        }
+        if (!isWeight && !pieceBasedEnabled) {
+          showPopup('Piece-based products are disabled for this tenant.', 'Feature');
           return;
         }
         if (p.selling_price < p.actual_price) {
@@ -962,8 +1163,8 @@ const handlePurchaseProductSelect = (product, index) => {
                     >
                       <div className="d-flex justify-content-between align-items-center gap-2">
                         <span>{s.name + " - " + s.company + '(Rs. ' + s.selling_price + ')'}</span>
-                        <span className={`product-type-badge ${Number(s.is_weight_based) === 1 ? 'badge-weight' : 'badge-piece'}`}>
-                          [{Number(s.is_weight_based) === 1 ? 'Weight' : 'Piece'}]
+                        <span className={`product-type-badge ${resolveIsWeightBased(s) ? 'badge-weight' : 'badge-piece'}`}>
+                          [{resolveIsWeightBased(s) ? 'Weight' : 'Piece'}]
                         </span>
                       </div>
                     </li>
@@ -1008,7 +1209,7 @@ const handlePurchaseProductSelect = (product, index) => {
 
   {transactionType === 'purchase' && products.map((p, index) => (
   <div className="row mb-2" key={index}>
-    {['product_name', 'company', 'quantity', 'actual_price', 'selling_price', 'category', 'time_for_delivery'].map((field) => (
+    {['product_name', 'company', 'is_weight_based', 'quantity', 'actual_price', 'selling_price', 'category', 'time_for_delivery'].map((field) => (
       <div className="col" key={field}>
         {field === 'product_name' ? (
           <>
@@ -1029,7 +1230,7 @@ const handlePurchaseProductSelect = (product, index) => {
                     className="list-group-item list-group-item-action"
                     onClick={() => handlePurchaseProductSelect(s, index)}
                   >
-                    {s.name} - {s.company} (₹{s.actual_price})
+                    {getPurchaseSuggestionLabel(s)}
                   </li>
                 ))}
               </ul>
@@ -1050,6 +1251,16 @@ const handlePurchaseProductSelect = (product, index) => {
               ))}
             </datalist>
           </>
+        ) : field === 'is_weight_based' ? (
+          <select
+            className="form-select"
+            value={String(p.is_weight_based ?? 0)}
+            onChange={(e) => handlePurchaseFieldChange(e.target.value, index, 'is_weight_based')}
+            disabled={!pieceBasedEnabled || !weightBasedEnabled}
+          >
+            {pieceBasedEnabled && <option value="0">Piece</option>}
+            {weightBasedEnabled && <option value="1">Weight</option>}
+          </select>
         ) : (
           <input
             className="form-control"
@@ -1105,8 +1316,123 @@ const handlePurchaseProductSelect = (product, index) => {
       </div>
         </div>
       </div>
+      {purchaseModalOpen && (
+        <div className="purchase-modal-overlay" onClick={closePurchaseModal}>
+          <div className="purchase-modal" onClick={(event) => event.stopPropagation()}>
+            <h4>Add Purchase Product</h4>
+            <div className="row g-3">
+              <div className="col-12">
+                <label>Product Name</label>
+                <input
+                  className="form-control"
+                  placeholder="Product Name"
+                  value={purchaseModalData.product_name || ''}
+                  onChange={(e) => {
+                    handlePurchaseModalChange('product_name', e.target.value);
+                    schedulePurchaseModalSearch(e.target.value);
+                  }}
+                />
+                {purchaseModalSuggestions.length > 0 && (
+                  <ul className="list-group mt-2">
+                    {purchaseModalSuggestions.map((s, i) => (
+                      <li
+                        key={`${s.id || s.name}-${i}`}
+                        className="list-group-item list-group-item-action"
+                        onClick={() => handlePurchaseModalSelect(s)}
+                      >
+                        {getPurchaseSuggestionLabel(s)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="col-md-6">
+                <label>Company</label>
+                <input
+                  className="form-control"
+                  placeholder="Company"
+                  value={purchaseModalData.company || ''}
+                  onChange={(e) => handlePurchaseModalChange('company', e.target.value)}
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Type</label>
+                <select
+                  className="form-select"
+                  value={String(purchaseModalData.is_weight_based ?? 0)}
+                  onChange={(e) => handlePurchaseModalChange('is_weight_based', e.target.value)}
+                  disabled={!pieceBasedEnabled || !weightBasedEnabled}
+                >
+                  {pieceBasedEnabled && <option value="0">Piece</option>}
+                  {weightBasedEnabled && <option value="1">Weight</option>}
+                </select>
+              </div>
+              <div className="col-md-4">
+                <label>Quantity</label>
+                <input
+                  className="form-control"
+                  placeholder="Quantity"
+                  value={purchaseModalData.quantity || ''}
+                  onChange={(e) => handlePurchaseModalChange('quantity', e.target.value)}
+                />
+              </div>
+              <div className="col-md-4">
+                <label>Actual Price</label>
+                <input
+                  className="form-control"
+                  placeholder="Actual Price"
+                  value={purchaseModalData.actual_price || ''}
+                  onChange={(e) => handlePurchaseModalChange('actual_price', e.target.value)}
+                />
+              </div>
+              <div className="col-md-4">
+                <label>Selling Price</label>
+                <input
+                  className="form-control"
+                  placeholder="Selling Price"
+                  value={purchaseModalData.selling_price || ''}
+                  onChange={(e) => handlePurchaseModalChange('selling_price', e.target.value)}
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Category</label>
+                <input
+                  list="purchase-categories-list"
+                  className="form-control"
+                  placeholder="Category"
+                  value={purchaseModalData.category || ''}
+                  onChange={(e) => handlePurchaseModalChange('category', e.target.value)}
+                />
+                <datalist id="purchase-categories-list">
+                  {categories.data && categories.data.map((cat, idx) => (
+                    <option key={idx} value={cat.category} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="col-md-6">
+                <label>Time For Delivery</label>
+                <input
+                  className="form-control"
+                  placeholder="Time For Delivery"
+                  value={purchaseModalData.time_for_delivery || ''}
+                  onChange={(e) => handlePurchaseModalChange('time_for_delivery', e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="purchase-modal-actions">
+              <button className="btn btn-outline-secondary" onClick={closePurchaseModal}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={handlePurchaseModalSubmit}>
+                Add Product
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default CreateOrderPage;
+

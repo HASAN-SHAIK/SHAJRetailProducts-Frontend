@@ -19,7 +19,7 @@ const Navbar = () => {
     tenantConfig?.shop_name ||
     tenantConfig?.tenant_name ||
     tenantConfig?.display_name ||
-    'SHAJ NextGen Technologies';
+    'SHAJRetail NextGen';
   const navigateTo = (route) => {
     navigate(route);
   };
