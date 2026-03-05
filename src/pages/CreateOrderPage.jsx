@@ -1146,10 +1146,15 @@ const schedulePurchaseProductSearch = (text, index) => {
               }}
             />
             {p.id && (
-              <div className="mt-2">
+              <div className="mt-2 d-flex align-items-center gap-2 flex-wrap">
                 <span className={`product-type-badge ${isWeightBasedProduct(p) ? 'badge-weight' : 'badge-piece'}`}>
                   [{getProductTypeLabel(p)}]
                 </span>
+                {p.stock_quantity != null && p.stock_quantity !== '' && (
+                  <small className={Number(p.stock_quantity) < 5 ? 'text-danger' : 'text-muted'}>
+                    Stock: {Number(p.stock_quantity)}
+                  </small>
+                )}
               </div>
             )}
             {p.suggestions?.length > 0 && (
@@ -1167,6 +1172,14 @@ const schedulePurchaseProductSearch = (text, index) => {
                           [{resolveIsWeightBased(s) ? 'Weight' : 'Piece'}]
                         </span>
                       </div>
+                      {s.stock_quantity != null &&
+                        s.stock_quantity !== '' &&
+                        Number(s.stock_quantity) > 0 &&
+                        Number(s.stock_quantity) < 5 && (
+                          <small className="text-danger">
+                            Only {Number(s.stock_quantity)} left
+                          </small>
+                        )}
                     </li>
                     : <li className="list-group-item list-group-item-action text-danger" disabled>
                       {s.name + '(Out Of Stock)'}
@@ -1187,6 +1200,11 @@ const schedulePurchaseProductSearch = (text, index) => {
               onChange={(e) => handleQuantityChange(e.target.value, index)}
               disabled={!p.id}
               step={isWeightBasedProduct(p) ? '0.01' : '1'}
+              max={
+                p.stock_quantity != null && p.stock_quantity !== ''
+                  ? Number(p.stock_quantity)
+                  : undefined
+              }
               inputMode={isWeightBasedProduct(p) ? 'decimal' : 'numeric'}
               data-testid="sale-quantity-input"
             />
