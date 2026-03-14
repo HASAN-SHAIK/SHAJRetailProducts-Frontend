@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./DashboardOverview.css";
 import api from "../../../utils/axios";
 import LoadingSpinner from "../../common/LoadingSpinner/LoadingSpinner";
 import { usePopup } from "../../common/PopUp/PopupProvider";
 import { Line, Pie } from "react-chartjs-2";
 import { useSelector } from "react-redux";
+import { useLocation } from "react-router-dom";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -57,6 +58,8 @@ const formatValue = (value, format) => {
 };
 
 const DashboardOverview = ({ navigate }) => {
+  const sidebarRef = useRef(null);
+  const location = useLocation();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const userDetails = useSelector((state) => state.user.userDetails);
   const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
@@ -792,6 +795,16 @@ const DashboardOverview = ({ navigate }) => {
     return Array.from(new Set(apiList)).filter(Boolean);
   }, [locations]);
 
+  useEffect(() => {
+    if (sidebarRef.current) {
+      sidebarRef.current.scrollTop = 0;
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activeSection]);
+
   const getInsightIcon = (type) => {
     const normalized = String(type || "").toLowerCase();
     if (normalized.includes("growth")) return "bi bi-graph-up";
@@ -812,7 +825,7 @@ const DashboardOverview = ({ navigate }) => {
 
   return (
     <div className="dashboard-v2">
-      <aside className="dashboard-sidebar">
+      <aside className="dashboard-sidebar" ref={sidebarRef}>
         <nav className="sidebar-nav">
             <button
               type="button"

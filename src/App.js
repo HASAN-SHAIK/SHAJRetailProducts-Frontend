@@ -5,7 +5,7 @@ import ProtectedRoute from './components/common/protectedRoute';
 import { ThemeProvider } from './ThemeContext';
 import Orders from './pages/Orders';
 import Navbar from './components/common/Navbar/Navbar';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ProductsPage from './components/ProductsPage/ProductsPage';
 import Transactions from './pages/Transactions';
 import CreateOrderPage from './pages/CreateOrderPage';
@@ -22,8 +22,17 @@ import { decodeJwtPayload } from './utils/jwt';
 import Support from './pages/Support';
 import { usePopup } from './components/common/PopUp/PopupProvider';
 
+const AUTH_PAGES = ['/', '/register', '/logout'];
+
+const ScrollToTop = () => {
+  const location = useLocation();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
+  return null;
+};
+
 function App() {
-  const authPages = ['/', '/register', '/logout'];
   const userDetails = useSelector((state) => state.user.userDetails);
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const tenantConfigStatus = useSelector((state) => state.tenant.configStatus);
@@ -33,6 +42,7 @@ function App() {
     typeof window !== 'undefined' && window.__serverOffline === true
   );
   const [tenantBanner, setTenantBanner] = useState(null);
+  const bannerFetchRef = useRef({ userId: null, inFlight: false });
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const location = useLocation();
@@ -47,6 +57,7 @@ useEffect(() => {
   const checkSession = async () => {
     try {
       if (!navigator.onLine) return;
+      if (AUTH_PAGES.includes(location.pathname)) return;
       const res = await api.get('/auth/getLogin');
       dispatch(setUserDetails(res.data.user)); // optional (for username)
       if (res?.data?.user) {
@@ -61,14 +72,16 @@ useEffect(() => {
       const status = err?.response?.status;
       if (status === 401) {
         console.error('Session check failed:', err);
-        navigate('/logout');
+        if (!AUTH_PAGES.includes(location.pathname)) {
+          navigate('/logout');
+        }
       } else {
         console.error('Session check failed:', err);
       }
     }
   };
   checkSession();
-}, []);
+}, [dispatch, location.pathname, navigate]);
 
 useEffect(() => {
   if (typeof window === 'undefined') return;
@@ -115,7 +128,11 @@ useEffect(() => {
 
 useEffect(() => {
   const fetchTenantBanner = async () => {
-    if (!userDetails || !navigator.onLine) return;
+    const userId = userDetails?.id;
+    if (!userId || !navigator.onLine) return;
+    if (bannerFetchRef.current.inFlight) return;
+    if (bannerFetchRef.current.userId === userId) return;
+    bannerFetchRef.current = { userId, inFlight: true };
     try {
       const res = await api.get('/banner');
       const payload = res?.data?.data || res?.data || {};
@@ -129,10 +146,12 @@ useEffect(() => {
     } catch (err) {
       console.error('Failed to fetch tenant banner', err);
       setTenantBanner(null);
+    } finally {
+      bannerFetchRef.current.inFlight = false;
     }
   };
   fetchTenantBanner();
-}, [userDetails]);
+}, [userDetails?.id]);
 
 useEffect(() => {
   const syncOfflineOrders = async () => {
@@ -174,7 +193,9 @@ useEffect(() => {
 
 useEffect(() => {
   const handleAuthExpired = () => {
-    navigate('/logout');
+    if (!AUTH_PAGES.includes(location.pathname)) {
+      navigate('/logout');
+    }
   };
   const handleSubscriptionExpired = () => {
     navigate('/subscription-expired');
@@ -191,7 +212,7 @@ useEffect(() => {
     window.removeEventListener('subscription-expired', handleSubscriptionExpired);
     window.removeEventListener('forbidden', handleForbidden);
   };
-}, [navigate, showPopup]);
+}, [location.pathname, navigate, showPopup]);
 
 const showServerDownBanner = !isOnline || serverOffline;
 const showTenantBanner = tenantBanner?.enabled === true;
@@ -206,7 +227,8 @@ const tenantBannerColor = (() => {
 })();
   return (
     <>
-      {userDetails && !authPages.includes(location.pathname) && 
+      <ScrollToTop />
+      {userDetails && !AUTH_PAGES.includes(location.pathname) && 
       <div className='sticky-top'>
         <Navbar user_name={userDetails && userDetails.user_name} />
         

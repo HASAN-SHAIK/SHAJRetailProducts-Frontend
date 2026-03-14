@@ -34,7 +34,16 @@ const Logout = () => {
           // Ignore storage failures
         }
         if (logoutError) {
-          showPopup('Logout failed on the server. You have been signed out locally.', 'Error');
+          const status = logoutError?.response?.status;
+          const message = logoutError?.response?.data?.message;
+          const isAuthFailure =
+            status === 401 ||
+            status === 403 ||
+            status === 404 ||
+            message === 'Invalid Token';
+          if (!isAuthFailure) {
+            showPopup('Logout failed on the server. You have been signed out locally.', 'Error');
+          }
         }
         navigate('/');
       }

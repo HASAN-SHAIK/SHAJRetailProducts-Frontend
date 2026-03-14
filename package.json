@@ -8,7 +8,7 @@
     "bootstrap": "^5.3.5",
     "bootstrap-icons": "^1.13.1",
     "chart.js": "^4.4.6",
-    "cypress": "^14.5.1",
+    "cypress": "^14.5.4",
     "dayjs": "^1.11.13",
     "js-cookie": "^3.0.5",
     "jsonwebtoken": "latest",

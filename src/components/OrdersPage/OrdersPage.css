@@ -446,3 +446,86 @@
   gap: 10px;
   margin-top: 16px;
 }
+
+.receipt-modal {
+  width: min(90vw, 420px);
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 16px;
+  padding: 16px;
+  color: #e2e8f0;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+}
+
+.receipt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.receipt-preview {
+  background: #ffffff;
+  color: #000000;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px dashed rgba(15, 23, 42, 0.3);
+  width: 80mm;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.receipt-preview pre {
+  margin: 0;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: pre-wrap;
+}
+
+.receipt-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.receipt-loading,
+.receipt-error {
+  text-align: center;
+  padding: 12px;
+  color: #cbd5f5;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .receipt-modal,
+  .receipt-modal * {
+    visibility: visible;
+  }
+  .delete-modal-overlay {
+    background: transparent;
+  }
+  .receipt-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: 80mm;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    background: #ffffff;
+  }
+  .receipt-header,
+  .receipt-actions {
+    display: none;
+  }
+  .receipt-preview {
+    border: none;
+    padding: 0;
+  }
+}

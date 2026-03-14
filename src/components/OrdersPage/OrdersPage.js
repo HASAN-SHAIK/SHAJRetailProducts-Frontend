@@ -11,6 +11,13 @@ const OrdersPage = ({ navigate }) => {
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
   const gstInvoiceEnabled = planFeatures.GST_invoice_enabled === true;
+  const receiptModuleEnabled = [
+    planFeatures.receipt_module_enabled,
+    planFeatures.receipt_module,
+    planFeatures.enable_receipt,
+    tenantConfig?.receipt_module_enabled,
+    tenantConfig?.features?.receipt_module,
+  ].some((value) => value === true || value === 1 || value === '1' || String(value || '').toLowerCase() === 'true');
   const [orders, setOrders] = useState([]);
   const [pagination, setPagination] = useState({
     page: 1,
@@ -46,6 +53,10 @@ const OrdersPage = ({ navigate }) => {
     address: '',
   });
   const [gstSubmitting, setGstSubmitting] = useState(false);
+  const [receiptOpen, setReceiptOpen] = useState(false);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptError, setReceiptError] = useState('');
+  const [receiptOrder, setReceiptOrder] = useState(null);
 
   const formatDate = useCallback((value) => {
     if (!value) return '-';
@@ -228,6 +239,138 @@ const OrdersPage = ({ navigate }) => {
       address: customer.address || drawerOrder.customer_address || '',
     });
     setGstModalOpen(true);
+  };
+
+  const openReceipt = () => {
+    setReceiptOpen(true);
+  };
+
+  const closeReceipt = () => {
+    setReceiptOpen(false);
+    setReceiptLoading(false);
+    setReceiptError('');
+    setReceiptOrder(null);
+  };
+
+  const formatReceiptAmount = (value) => {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric)) return '0';
+    return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2);
+  };
+
+  const padRight = (value, width) => String(value ?? '').padEnd(width, ' ');
+  const padLeft = (value, width) => String(value ?? '').padStart(width, ' ');
+
+  const wrapText = (value, width) => {
+    const text = String(value ?? '');
+    if (!text) return [''];
+    const lines = [];
+    for (let i = 0; i < text.length; i += width) {
+      lines.push(text.slice(i, i + width));
+    }
+    return lines;
+  };
+
+  const buildReceiptLines = (order) => {
+    const shop = order?.shop_details || order?.shop || order?.store || {};
+    const shopName =
+      shop.shop_name ||
+      shop.name ||
+      shop.business_name ||
+      tenantConfig?.shop_name ||
+      tenantConfig?.name ||
+      'Your Shop';
+    const shopAddress =
+      shop.address_line ||
+      shop.address ||
+      shop.shop_address ||
+      shop.address1 ||
+      tenantConfig?.address ||
+      '';
+    const shopPhone =
+      shop.phone ||
+      shop.mobile ||
+      shop.mobile_number ||
+      shop.contact_number ||
+      tenantConfig?.phone ||
+      '';
+
+    const orderId = order?.id || '-';
+    const orderDate = formatDate(order?.created_at);
+    const paymentMode =
+      order?.payment_method ||
+      order?.payment_mode ||
+      order?.payment ||
+      'Cash';
+
+    const items = Array.isArray(order?.items)
+      ? order.items
+      : Array.isArray(order?.products)
+        ? order.products
+        : [];
+
+    const headerLine = `${padRight('Item Name', 20)}${padLeft('Qty', 4)}${padLeft('Rate', 6)}${padLeft('Net', 8)}`;
+    const lines = [
+      shopName,
+      shopAddress,
+      shopPhone,
+      '',
+      `Order ID: ${orderId}`,
+      `Date: ${orderDate}`,
+      `Payment: ${paymentMode}`,
+      '',
+      headerLine,
+    ];
+
+    items.forEach((item) => {
+      const name = item?.product_name || item?.name || '-';
+      const qty = formatReceiptAmount(item?.quantity || item?.qty || 0);
+      const rate = formatReceiptAmount(item?.price || item?.selling_price || 0);
+      const netValue = item?.total || item?.line_total || (Number(item?.quantity || item?.qty || 0) * Number(item?.price || item?.selling_price || 0));
+      const net = formatReceiptAmount(netValue);
+      const nameLines = wrapText(name, 20);
+      nameLines.forEach((line, index) => {
+        if (index === 0) {
+          lines.push(`${padRight(line, 20)}${padLeft(qty, 4)}${padLeft(rate, 6)}${padLeft(net, 8)}`);
+        } else {
+          lines.push(`${padRight(line, 20)}${padRight('', 4)}${padRight('', 6)}${padRight('', 8)}`);
+        }
+      });
+    });
+
+    lines.push('');
+    lines.push('---');
+    lines.push(`Total: ${formatReceiptAmount(order?.total_amount || order?.total || 0)}`);
+    lines.push(`Payment: ${paymentMode}`);
+    lines.push('');
+    lines.push('Thank You Visit Again');
+
+    return lines.join('\n');
+  };
+
+  const handleReceiptPrint = () => {
+    window.print();
+  };
+
+  const handlePrintAction = async (event, order) => {
+    if (event) {
+      event.stopPropagation();
+    }
+    if (!receiptModuleEnabled) return;
+    if (!order?.id) return;
+    setReceiptLoading(true);
+    setReceiptError('');
+    setReceiptOrder(null);
+    openReceipt();
+    try {
+      const res = await api.get(`/orders/${order.id}`);
+      const payload = res?.data || {};
+      setReceiptOrder(payload.order || payload);
+    } catch (err) {
+      setReceiptError('Unable to load receipt.');
+    } finally {
+      setReceiptLoading(false);
+    }
   };
 
   const closeGstModal = () => {
@@ -541,6 +684,10 @@ const OrdersPage = ({ navigate }) => {
   const customer = drawerOrder?.customer || {};
   const balance = Number(drawerOrder?.balance || 0);
 
+  const hasActions = orders.some(
+    (order) => String(order.order_status || '').toLowerCase() === 'completed'
+  ) && receiptModuleEnabled;
+
   return (
     <div className="orders-page">
       <div className="orders-page-header">
@@ -629,6 +776,7 @@ const OrdersPage = ({ navigate }) => {
                 <th role="button" onClick={() => handleSortToggle('created_at')} className="sortable">
                   Date <span className="sort-indicator">{getSortIndicator('created_at')}</span>
                 </th>
+                {hasActions && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -640,16 +788,17 @@ const OrdersPage = ({ navigate }) => {
                   <td><span className="skeleton-block" /></td>
                   <td><span className="skeleton-block" /></td>
                   <td><span className="skeleton-block" /></td>
+                  {hasActions && <td><span className="skeleton-block" /></td>}
                 </tr>
               ))}
               {!isLoading && errorMessage && (
                 <tr>
-                  <td colSpan={customerDetailsEnabled ? 6 : 5} className="empty-state">{errorMessage}</td>
+                  <td colSpan={customerDetailsEnabled ? (hasActions ? 7 : 6) : (hasActions ? 6 : 5)} className="empty-state">{errorMessage}</td>
                 </tr>
               )}
               {!isLoading && !errorMessage && orders.length === 0 && (
                 <tr>
-                  <td colSpan={customerDetailsEnabled ? 6 : 5} className="empty-state">No orders found.</td>
+                  <td colSpan={customerDetailsEnabled ? (hasActions ? 7 : 6) : (hasActions ? 6 : 5)} className="empty-state">No orders found.</td>
                 </tr>
               )}
               {!isLoading && !errorMessage && orders.map((order) => (
@@ -671,6 +820,19 @@ const OrdersPage = ({ navigate }) => {
                   <td>{formatMoney(order.total_amount)}</td>
                   <td>{renderPaymentCell(order)}</td>
                   <td>{formatDate(order.created_at)}</td>
+                  {hasActions && (
+                    <td>
+                      {String(order.order_status || '').toLowerCase() === 'completed' && receiptModuleEnabled && (
+                        <button
+                          className="btn btn-outline-primary btn-sm"
+                          type="button"
+                          onClick={(event) => handlePrintAction(event, order)}
+                        >
+                          Print
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -943,6 +1105,32 @@ const OrdersPage = ({ navigate }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {receiptOpen && (
+        <div className="delete-modal-overlay" onClick={closeReceipt}>
+          <div className="receipt-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="receipt-header">
+              <h4>Receipt Preview</h4>
+              <button className="btn btn-outline-secondary btn-sm" onClick={closeReceipt} type="button">
+                Close
+              </button>
+            </div>
+            {receiptLoading && <div className="receipt-loading">Loading receipt...</div>}
+            {!receiptLoading && receiptError && <div className="receipt-error">{receiptError}</div>}
+            {!receiptLoading && !receiptError && receiptOrder && (
+              <>
+                <div className="receipt-preview">
+                  <pre>{buildReceiptLines(receiptOrder)}</pre>
+                </div>
+                <div className="receipt-actions">
+                  <button className="btn btn-primary" onClick={handleReceiptPrint} type="button">
+                    Print
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

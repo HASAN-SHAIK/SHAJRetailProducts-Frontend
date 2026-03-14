@@ -28,6 +28,11 @@ const CreateOrderPage = () => {
   const [barcodeInput, setBarcodeInput] = useState('');
   const [isBarcodeAdding, setIsBarcodeAdding] = useState(false);
   const barcodeInputRef = useRef(null);
+  const [barcodeCreateOpen, setBarcodeCreateOpen] = useState(false);
+  const [barcodeCreateData, setBarcodeCreateData] = useState({});
+  const [isBarcodeCreating, setIsBarcodeCreating] = useState(false);
+  const barcodeBufferRef = useRef('');
+  const barcodeTimerRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [purchaseModalData, setPurchaseModalData] = useState({});
@@ -184,6 +189,18 @@ useEffect(() => {
     time_for_delivery: '',
     is_weight_based: weightBasedEnabled && !pieceBasedEnabled ? 1 : 0,
     product_id: null,
+  });
+
+  const getDefaultBarcodeCreateData = (barcode = '') => ({
+    product_name: '',
+    company: '',
+    selling_price: '',
+    actual_price: '',
+    stock_quantity: '',
+    category: '',
+    barcode,
+    is_weight_based: 0,
+    time_for_delivery: 0,
   });
 
   useEffect(() => {
@@ -617,6 +634,83 @@ const schedulePurchaseProductSearch = (text, index) => {
     closePurchaseModal();
   };
 
+  const openBarcodeCreateModal = (barcode, prefill = {}) => {
+    if (!pieceBasedEnabled) {
+      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    setBarcodeCreateData({ ...getDefaultBarcodeCreateData(barcode), ...prefill, barcode });
+    setBarcodeCreateOpen(true);
+  };
+
+  const closeBarcodeCreateModal = () => {
+    setBarcodeCreateOpen(false);
+  };
+
+  const handleBarcodeCreateChange = (field, value) => {
+    setBarcodeCreateData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const addOrIncrementSaleProduct = (product) => {
+    const isWeight = resolveIsWeightBased(product);
+    setProducts((prev) => {
+      if (isWeight) {
+        const updated = [
+          ...prev,
+          {
+            product_name: product.name,
+            id: product.id,
+            quantity: '',
+            suggestions: [],
+            selling_price: product.selling_price,
+            is_weight_based: product.is_weight_based ?? product.type ?? 0,
+            stock_quantity: product.stock_quantity ?? null,
+          },
+        ];
+        calculateTotal(updated);
+        showPopup('Enter weight for the scanned item.', 'Validation');
+        return updated;
+      }
+      const existingIndex = prev.findIndex((p) => p.id === product.id);
+      if (existingIndex >= 0) {
+        const updated = [...prev];
+        const currentQty = parseInt(updated[existingIndex].quantity || '0', 10) || 0;
+        const nextQty = currentQty + 1;
+        if (
+          updated[existingIndex].stock_quantity != null &&
+          updated[existingIndex].stock_quantity !== '' &&
+          nextQty > Number(updated[existingIndex].stock_quantity)
+        ) {
+          showPopup('Entered quantity exceeds stock', 'Validation');
+          return prev;
+        }
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          quantity: String(nextQty),
+        };
+        calculateTotal(updated);
+        return updated;
+      }
+      const updated = [
+        ...prev,
+        {
+          product_name: product.name,
+          id: product.id,
+          quantity: '1',
+          suggestions: [],
+          selling_price: product.selling_price,
+          is_weight_based: product.is_weight_based ?? product.type ?? 0,
+          stock_quantity: product.stock_quantity ?? null,
+        },
+      ];
+      calculateTotal(updated);
+      return updated;
+    });
+  };
+
   const isWeightBasedProduct = (product) =>
     resolveIsWeightBased(product);
 
@@ -646,8 +740,12 @@ const schedulePurchaseProductSearch = (text, index) => {
     return `${name} | ${company} | Sell: ${selling} | Actual: ${actual} | Type: ${typeLabel} | Delivery: ${delivery} | Cat: ${category}`;
   };
 
-  const handleBarcodeSearch = async () => {
-    const code = barcodeInput.trim();
+  const handleBarcodeSearch = async (overrideCode) => {
+    const rawCode =
+      typeof overrideCode === 'string' || typeof overrideCode === 'number'
+        ? overrideCode
+        : barcodeInput;
+    const code = String(rawCode || '').trim();
     if (!code) return;
     if (isBarcodeAdding) return;
     if (transactionType !== 'sale' && transactionType !== 'purchase') {
@@ -662,6 +760,7 @@ const schedulePurchaseProductSearch = (text, index) => {
       if (Array.isArray(product)) product = product[0];
       if (!product) {
         showPopup('Product not found', 'Validation');
+        openBarcodeCreateModal(code);
         return;
       }
     const isWeight = resolveIsWeightBased(product);
@@ -674,20 +773,7 @@ const schedulePurchaseProductSearch = (text, index) => {
         return;
       }
       if (transactionType === 'sale') {
-        const updated = [
-          ...products,
-          {
-            product_name: product.name,
-            id: product.id,
-            quantity: '',
-            suggestions: [],
-            selling_price: product.selling_price,
-      is_weight_based: product.is_weight_based ?? product.type ?? 0,
-            stock_quantity: product.stock_quantity ?? null,
-          },
-        ];
-        setProducts(updated);
-        calculateTotal(updated);
+        addOrIncrementSaleProduct(product);
       } else {
         openPurchaseModal({
           product_name: product.name,
@@ -704,9 +790,134 @@ const schedulePurchaseProductSearch = (text, index) => {
       }
       setBarcodeInput('');
     } catch (err) {
+      const status = err?.response?.status;
+      if (status === 404) {
+        showPopup('Product not found', 'Validation');
+        openBarcodeCreateModal(code);
+        return;
+      }
       showPopup('Barcode lookup failed', 'Error');
     } finally {
       setIsBarcodeAdding(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!barcodeEnabled) return;
+    if (transactionType !== 'sale' && transactionType !== 'purchase') return;
+
+    const handleKeyDown = (event) => {
+      if (event.defaultPrevented) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target;
+      const tag = target?.tagName?.toLowerCase();
+      const isEditable = target?.isContentEditable === true;
+      const isFormField = ['input', 'textarea', 'select'].includes(tag);
+      const isBarcodeInput = barcodeInputRef.current && target === barcodeInputRef.current;
+      if (isBarcodeInput) return;
+      if (isFormField || isEditable) return;
+
+      if (event.key === 'Enter') {
+        const code = barcodeBufferRef.current.trim();
+        if (code) {
+          barcodeBufferRef.current = '';
+          handleBarcodeSearch(code);
+        }
+        return;
+      }
+
+      if (event.key && event.key.length === 1) {
+        barcodeBufferRef.current += event.key;
+        if (barcodeTimerRef.current) {
+          clearTimeout(barcodeTimerRef.current);
+        }
+        barcodeTimerRef.current = setTimeout(() => {
+          barcodeBufferRef.current = '';
+        }, 60);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (barcodeTimerRef.current) {
+        clearTimeout(barcodeTimerRef.current);
+        barcodeTimerRef.current = null;
+      }
+      barcodeBufferRef.current = '';
+    };
+  }, [barcodeEnabled, transactionType]);
+
+  const handleBarcodeCreateSubmit = async () => {
+    if (isBarcodeCreating) return;
+    if (!pieceBasedEnabled) {
+      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    const data = barcodeCreateData || {};
+    if (!data.barcode) {
+      showPopup('Barcode is required', 'Validation');
+      return;
+    }
+    if (!data.product_name || !data.category || !data.selling_price || !data.actual_price || !data.company || !data.stock_quantity) {
+      showPopup('Fill all product details', 'Validation');
+      return;
+    }
+    if (Number(data.selling_price) < Number(data.actual_price)) {
+      showPopup('Actual Price is Less than Selling price', 'Validation');
+      return;
+    }
+    try {
+      setIsBarcodeCreating(true);
+      const payload = {
+        product_name: data.product_name,
+        company: data.company,
+        selling_price: data.selling_price,
+        actual_price: data.actual_price,
+        stock_quantity: data.stock_quantity,
+        category: data.category,
+        barcode: data.barcode,
+        is_weight_based: 0,
+        time_for_delivery: data.time_for_delivery ?? 0,
+      };
+      await api.post('/products', payload);
+      closeBarcodeCreateModal();
+      const mode = transactionType === 'purchase' ? 'purchase' : 'sale';
+      const res = await api.get(buildBarcodeUrl(data.barcode, mode));
+      let created = res?.data?.product || res?.data?.data || res?.data;
+      if (Array.isArray(created)) created = created[0];
+      if (!created || !created.id) {
+        showPopup('Product created, but could not load for billing.', 'Error');
+        return;
+      }
+      if (transactionType === 'purchase') {
+        openPurchaseModal({
+          product_name: created.name,
+          company: created.company,
+          quantity: 1,
+          actual_price: created.actual_price,
+          selling_price: created.selling_price,
+          category: created.category,
+          time_for_delivery: '',
+          is_weight_based: created.is_weight_based ?? created.type ?? 0,
+          stock_quantity: created.stock_quantity ?? null,
+          product_id: created.id ?? null,
+        });
+      } else {
+        addOrIncrementSaleProduct(created);
+      }
+      setBarcodeInput('');
+      showPopup('Product added successfully!', 'Success');
+    } catch (err) {
+      if (err?.response?.status === 401) {
+        showPopup("Token Expired Please Login Again!", "Session");
+        navigate('/logout');
+      } else {
+        showPopup('Issue while adding product. Please try again.', 'Error');
+        console.error('Error adding product from barcode:', err);
+      }
+    } finally {
+      setIsBarcodeCreating(false);
     }
   };
 
@@ -1443,6 +1654,94 @@ const schedulePurchaseProductSearch = (text, index) => {
               </button>
               <button className="btn btn-primary" onClick={handlePurchaseModalSubmit}>
                 Add Product
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {barcodeCreateOpen && (
+        <div className="purchase-modal-overlay" onClick={closeBarcodeCreateModal}>
+          <div className="purchase-modal" onClick={(event) => event.stopPropagation()}>
+            <h4>Create Product</h4>
+            <div className="row g-3">
+              <div className="col-12">
+                <label>Barcode</label>
+                <input
+                  className="form-control"
+                  value={barcodeCreateData.barcode || ''}
+                  readOnly
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Name</label>
+                <input
+                  className="form-control"
+                  placeholder="Product Name"
+                  value={barcodeCreateData.product_name || ''}
+                  onChange={(e) => handleBarcodeCreateChange('product_name', e.target.value)}
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Company</label>
+                <input
+                  className="form-control"
+                  placeholder="Company"
+                  value={barcodeCreateData.company || ''}
+                  onChange={(e) => handleBarcodeCreateChange('company', e.target.value)}
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Category</label>
+                <input
+                  list="barcode-categories-list"
+                  className="form-control"
+                  placeholder="Category"
+                  value={barcodeCreateData.category || ''}
+                  onChange={(e) => handleBarcodeCreateChange('category', e.target.value)}
+                />
+                <datalist id="barcode-categories-list">
+                  {categories.data && categories.data.map((cat, idx) => (
+                    <option key={idx} value={cat.category} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="col-md-6">
+                <label>Stock Quantity</label>
+                <input
+                  className="form-control"
+                  type="number"
+                  placeholder="Stock Quantity"
+                  value={barcodeCreateData.stock_quantity || ''}
+                  onChange={(e) => handleBarcodeCreateChange('stock_quantity', e.target.value)}
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Selling Price</label>
+                <input
+                  className="form-control"
+                  type="number"
+                  placeholder="Selling Price"
+                  value={barcodeCreateData.selling_price || ''}
+                  onChange={(e) => handleBarcodeCreateChange('selling_price', e.target.value)}
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Actual Price</label>
+                <input
+                  className="form-control"
+                  type="number"
+                  placeholder="Actual Price"
+                  value={barcodeCreateData.actual_price || ''}
+                  onChange={(e) => handleBarcodeCreateChange('actual_price', e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="purchase-modal-actions">
+              <button className="btn btn-outline-secondary" onClick={closeBarcodeCreateModal}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={handleBarcodeCreateSubmit} disabled={isBarcodeCreating}>
+                {isBarcodeCreating ? 'Saving...' : 'Create & Add'}
               </button>
             </div>
           </div>
