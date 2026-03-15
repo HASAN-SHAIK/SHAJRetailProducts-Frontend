@@ -32,7 +32,7 @@ const ReportsMobile = () => {
 
   return (
     <MobileShell title="Reports" subtitle="Sales summary for quick decisions.">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-2 text-center">
         <MetricCard
           label="Today"
           value={loading ? '...' : `₹${formatCurrency(summary?.today)}`}

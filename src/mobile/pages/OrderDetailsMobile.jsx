@@ -35,13 +35,17 @@ const OrderDetailsMobile = () => {
   return (
     <MobileShell title={`Order #${id}`} subtitle="Quick order view for mobile.">
       <SectionCard title="Summary">
-        {loading && <p className="text-sm text-white/60">Loading...</p>}
-        {!loading && !order && <p className="text-sm text-white/60">Order not found.</p>}
+        {loading && <p className="text-[12px] text-white/60">Loading...</p>}
+        {!loading && !order && <p className="text-[12px] text-white/60">Order not found.</p>}
         {!loading && order && (
-          <div className="space-y-2 text-sm text-white/80">
+          <div className="space-y-2 text-[12px] text-white/80">
             <div className="flex items-center justify-between">
               <span>Status</span>
               <span className="font-semibold text-white">{order.status}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Subtotal</span>
+              <span className="font-semibold text-white">₹{formatCurrency(order.total)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span>Total</span>
@@ -53,20 +57,20 @@ const OrderDetailsMobile = () => {
 
       <SectionCard title="Items">
         {!loading && order?.items?.length === 0 && (
-          <p className="text-sm text-white/60">No items for this order.</p>
+          <p className="text-[12px] text-white/60">No items for this order.</p>
         )}
         {!loading &&
           order?.items?.map((item, index) => (
             <div
               key={`${item.product_name}-${index}`}
-              className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+              className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5"
             >
               <div>
-                <p className="text-sm font-semibold text-white">{item.product_name}</p>
-                <p className="text-xs text-white/60">Qty {item.quantity}</p>
+                <p className="text-[13px] font-semibold text-white">{item.product_name}</p>
+                <p className="text-[11px] text-white/60">Qty {item.quantity}</p>
               </div>
-              <p className="text-sm font-semibold text-white">
-                ₹{formatCurrency(item.price)}
+              <p className="text-[11px] text-white/60">
+                {item.quantity} x ₹{formatCurrency(item.price)}
               </p>
             </div>
           ))}
