@@ -55,6 +55,10 @@ function App() {
   const { showPopup } = usePopup();
   const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
   const isMobileRoute = location.pathname.startsWith('/m');
+  const isMobileDevice =
+    typeof window !== 'undefined' &&
+    (window.matchMedia('(max-width: 768px)').matches ||
+      /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
   const reportsEnabled =
     planFeatures.advanced_reports === true ||
     planFeatures.analytical_reports === true ||
@@ -89,6 +93,15 @@ useEffect(() => {
   };
   checkSession();
 }, [dispatch, location.pathname, navigate]);
+
+useEffect(() => {
+  if (!userDetails) return;
+  if (!isMobileDevice) return;
+  if (isMobileRoute) return;
+  if (AUTH_PAGES.includes(location.pathname)) return;
+  if (location.pathname === '/subscription-expired') return;
+  navigate('/m/dashboard', { replace: true });
+}, [userDetails, isMobileDevice, isMobileRoute, location.pathname, navigate]);
 
 useEffect(() => {
   if (typeof window === 'undefined') return;
