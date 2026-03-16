@@ -21,6 +21,12 @@ import SubscriptionExpired from './pages/SubscriptionExpired';
 import { decodeJwtPayload } from './utils/jwt';
 import Support from './pages/Support';
 import { usePopup } from './components/common/PopUp/PopupProvider';
+import DashboardMobile from './mobile/pages/DashboardMobile';
+import OrdersMobile from './mobile/pages/OrdersMobile';
+import OrderDetailsMobile from './mobile/pages/OrderDetailsMobile';
+import ProductsMobile from './mobile/pages/ProductsMobile';
+import ReportsMobile from './mobile/pages/ReportsMobile';
+import SettingsMobile from './mobile/pages/SettingsMobile';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
@@ -48,6 +54,11 @@ function App() {
   const location = useLocation();
   const { showPopup } = usePopup();
   const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
+  const isMobileRoute = location.pathname.startsWith('/m');
+  const isMobileDevice =
+    typeof window !== 'undefined' &&
+    (window.matchMedia('(max-width: 768px)').matches ||
+      /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
   const reportsEnabled =
     planFeatures.advanced_reports === true ||
     planFeatures.analytical_reports === true ||
@@ -82,6 +93,15 @@ useEffect(() => {
   };
   checkSession();
 }, [dispatch, location.pathname, navigate]);
+
+useEffect(() => {
+  if (!userDetails) return;
+  if (!isMobileDevice) return;
+  if (isMobileRoute) return;
+  if (AUTH_PAGES.includes(location.pathname)) return;
+  if (location.pathname === '/subscription-expired') return;
+  navigate('/m/dashboard', { replace: true });
+}, [userDetails, isMobileDevice, isMobileRoute, location.pathname, navigate]);
 
 useEffect(() => {
   if (typeof window === 'undefined') return;
@@ -229,10 +249,11 @@ const tenantBannerColor = (() => {
     <>
       <ScrollToTop />
       {userDetails && !AUTH_PAGES.includes(location.pathname) && 
-      <div className='sticky-top'>
-        <Navbar user_name={userDetails && userDetails.user_name} />
-        
-      </div>}
+      !isMobileRoute && (
+        <div className='sticky-top'>
+          <Navbar user_name={userDetails && userDetails.user_name} />
+        </div>
+      )}
       {showServerDownBanner && (
         <div className="server-down-banner">
           Server is Offline You Can Still Create Orders, But Sync Will Happen Once Server is Back Online
@@ -256,6 +277,58 @@ const tenantBannerColor = (() => {
         <Route path="/" element={<LoginPage navigate={navigate} />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/subscription-expired" element={<SubscriptionExpired />} />
+        <Route
+          path="/m"
+          element={<Navigate to="/m/dashboard" replace />}
+        />
+        <Route
+          path="/m/dashboard"
+          element={
+            <ProtectedRoute>
+              <DashboardMobile />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/m/orders"
+          element={
+            <ProtectedRoute>
+              <OrdersMobile />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/m/orders/:id"
+          element={
+            <ProtectedRoute>
+              <OrderDetailsMobile />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/m/products"
+          element={
+            <ProtectedRoute>
+              <ProductsMobile />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/m/reports"
+          element={
+            <ProtectedRoute>
+              <ReportsMobile />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/m/settings"
+          element={
+            <ProtectedRoute>
+              <SettingsMobile />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/dashboard"
           element={
