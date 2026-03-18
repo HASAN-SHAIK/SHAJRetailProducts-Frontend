@@ -100,9 +100,9 @@ const ProductsPage = ({ navigate }) => {
     { label: 'Actual Price', name: 'actual_price', type: 'number' },
     { label: 'Quantity', name: 'stock_quantity', type: 'number' },
     { label: 'Time For Delivery', name:'time_for_delivery', type: 'number'},
-    { label: 'Weight Based', name: 'is_weight_based', type: 'select', options: [
-      ...(pieceBasedEnabled ? [{ label: 'No (Piece)', value: '0' }] : []),
-      ...(weightBasedEnabled ? [{ label: 'Yes (Weight)', value: '1' }] : [])
+    { label: 'Type', name: 'is_weight_based', type: 'select', options: [
+      ...(pieceBasedEnabled ? [{ label: 'Piece-based', value: '0' }] : []),
+      ...(weightBasedEnabled ? [{ label: 'Weight-based', value: '1' }] : [])
     ]},
   ];
 
@@ -187,12 +187,7 @@ const ProductsPage = ({ navigate }) => {
 
   const fetchCategories = async () => {
     try {
-      let res;
-      try {
-        res = await api.get('/categories');
-      } catch (innerErr) {
-        res = await api.get('/orders/getcategories');
-      }
+      const res = await api.get('/orders/getcategories');
       const raw = res?.data?.categories || res?.data?.data || res?.data || [];
       const list = Array.isArray(raw) ? raw : [];
       const normalized = list.map((item) => {

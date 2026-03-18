@@ -34,7 +34,7 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
           <div className="modal-content custom-modal">
             <div className="modal-header border-0">
               <h5 className="modal-title fw-bold text-primary" id={`${modalId}Label`}>{title}</h5>
-              <button type="button" className="btn-close custom-close bg-danger position-absolute end-0 m-5" data-bs-dismiss="modal" aria-label="Close"></button>
+              <button type="button" className="btn-close btn-close-white custom-close bg-danger position-absolute end-0 m-4" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
 
             <div className="modal-body">

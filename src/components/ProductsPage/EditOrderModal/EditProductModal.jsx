@@ -142,14 +142,14 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
           </div>
 
           <div className="form-group w-100 mb-4 text-center">
-            <label className="form-label w-100">Weight Based</label>
+            <label className="form-label w-100">Type</label>
             <select
               className="form-control text-center neon-input"
               value={isWeightBased}
               onChange={(e) => setIsWeightBased(e.target.value)}
             >
-              {pieceBasedEnabled && <option value="0">No (Piece)</option>}
-              {weightBasedEnabled && <option value="1">Yes (Weight)</option>}
+              {pieceBasedEnabled && <option value="0">Piece-based</option>}
+              {weightBasedEnabled && <option value="1">Weight-based</option>}
             </select>
             {!pieceBasedEnabled && (
               <small className="form-text text-warning">Piece-based products are disabled.</small>
