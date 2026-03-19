@@ -9,6 +9,74 @@ import { saveProductsCache, searchCachedProducts } from '../utils/offlineProduct
 import { loadCategoriesCache, saveCategoriesCache } from '../utils/offlineCategories';
 import './CreateOrderPage.css';
 
+const DRAFT_STORAGE_KEY = 'create_order_drafts_v1';
+
+const createDraftId = () =>
+  `draft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const buildEmptyDraft = (label) => ({
+  id: createDraftId(),
+  label,
+  transactionType: '',
+  paymentMethod: '',
+  products: [],
+  totalAmount: 0,
+  personalAmount: '',
+  customerName: '',
+  customerPhone: '',
+  customerAddress: '',
+  customerLocation: '',
+  barcodeInput: '',
+});
+
+const sanitizeDraftForStorage = (draft) => ({
+  ...draft,
+  products: Array.isArray(draft.products)
+    ? draft.products.map((product) => ({
+        ...product,
+        suggestions: [],
+      }))
+    : [],
+});
+
+const loadDraftsFromStorage = () => {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((draft, index) => ({
+      ...draft,
+      label: draft.label || `Order ${index + 1}`,
+      products: Array.isArray(draft.products) ? draft.products : [],
+    }));
+  } catch (err) {
+    return [];
+  }
+};
+
+const saveDraftsToStorage = (drafts) => {
+  try {
+    localStorage.setItem(
+      DRAFT_STORAGE_KEY,
+      JSON.stringify(drafts.map(sanitizeDraftForStorage))
+    );
+  } catch (err) {
+    // ignore storage errors
+  }
+};
+
+const getNextDraftLabel = (drafts) => {
+  const used = drafts
+    .map((draft) => {
+      const match = String(draft.label || '').match(/Order\s+(\d+)/i);
+      return match ? Number(match[1]) : 0;
+    })
+    .filter(Boolean);
+  const nextIndex = used.length ? Math.max(...used) + 1 : drafts.length + 1;
+  return `Order ${nextIndex}`;
+};
+
 const CreateOrderPage = () => {
   const [categories, setCategories] = useState([]);
   const [saleMethods, setSaleMethods] = useState(['sale', 'purchase', 'personal']);
@@ -39,7 +107,37 @@ const CreateOrderPage = () => {
   const [purchaseModalSuggestions, setPurchaseModalSuggestions] = useState([]);
   const purchaseModalSearchTimerRef = useRef(null);
   const latestPurchaseModalSearchRef = useRef('');
+  const initialDraftStateRef = useRef(null);
+  const hasPlanSyncRef = useRef(false);
   const orderDetails = useSelector((state) => state.order.orderDetails);
+  const isEditing = Boolean(orderDetails);
+  const planType = String(
+    tenantConfig?.plan_type ||
+      tenantConfig?.planType ||
+      userDetails?.tenant_plan ||
+      userDetails?.plan ||
+      ''
+  )
+    .toLowerCase()
+    .trim();
+  const isPremiumPlan = planType.includes('premium');
+  const multiDraftEnabled = !isEditing && isPremiumPlan;
+  if (!initialDraftStateRef.current) {
+    const storedDrafts = loadDraftsFromStorage();
+    if (storedDrafts.length) {
+      initialDraftStateRef.current = {
+        drafts: storedDrafts,
+        activeId: storedDrafts[0].id,
+      };
+    } else {
+      const seed = buildEmptyDraft('Order 1');
+      initialDraftStateRef.current = { drafts: [seed], activeId: seed.id };
+    }
+  }
+  const [drafts, setDrafts] = useState(initialDraftStateRef.current.drafts);
+  const [activeDraftId, setActiveDraftId] = useState(
+    initialDraftStateRef.current.activeId
+  );
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { showPopup } = usePopup();
@@ -76,6 +174,20 @@ useEffect(() => {
         setCustomerPhone(orderDetails.customer_phone || '');
         setCustomerAddress(orderDetails.customer_address || '');
         setCustomerLocation(orderDetails.customer_location || orderDetails.location || '');
+        const editDraft = {
+          ...buildEmptyDraft(`Order #${orderDetails.id}`),
+          transactionType: orderDetails.type || '',
+          paymentMethod: orderDetails.payment || '',
+          products: reconstructedProducts,
+          totalAmount: parseFloat(orderDetails.total_price || 0),
+          personalAmount: orderDetails.personal_amount || '',
+          customerName: orderDetails.customer_name || '',
+          customerPhone: orderDetails.customer_phone || '',
+          customerAddress: orderDetails.customer_address || '',
+          customerLocation: orderDetails.customer_location || orderDetails.location || '',
+        };
+        setDrafts([editDraft]);
+        setActiveDraftId(editDraft.id);
       }
       try {
         const res = await api.get('/orders/getcategories');
@@ -132,6 +244,94 @@ useEffect(() => {
 }, [dispatch, orderDetails]);
 
   useEffect(() => {
+    if (hasPlanSyncRef.current) return;
+    if (!tenantConfig) return;
+    hasPlanSyncRef.current = true;
+    if (!isPremiumPlan || isEditing) {
+      setDrafts((prev) => {
+        const base = prev[0] ? { ...prev[0], label: prev[0].label || 'Order 1' } : buildEmptyDraft('Order 1');
+        setActiveDraftId(base.id);
+        return [base];
+      });
+      return;
+    }
+    const stored = loadDraftsFromStorage();
+    if (stored.length) {
+      setDrafts(stored);
+      setActiveDraftId(stored[0].id);
+    }
+  }, [tenantConfig, isPremiumPlan, isEditing]);
+
+  useEffect(() => {
+    if (!drafts.length) return;
+    const activeExists = drafts.some((draft) => draft.id === activeDraftId);
+    if (!activeExists) {
+      setActiveDraftId(drafts[0].id);
+    }
+  }, [drafts, activeDraftId]);
+
+  useEffect(() => {
+    if (!activeDraftId) return;
+    const active = drafts.find((draft) => draft.id === activeDraftId);
+    if (!active) return;
+    setTransactionType(active.transactionType || '');
+    setPaymentMethod(active.paymentMethod || '');
+    setProducts(Array.isArray(active.products) ? active.products : []);
+    setTotalAmount(Number(active.totalAmount || 0));
+    setPersonalAmount(active.personalAmount || '');
+    setCustomerName(active.customerName || '');
+    setCustomerPhone(active.customerPhone || '');
+    setCustomerAddress(active.customerAddress || '');
+    setCustomerLocation(active.customerLocation || '');
+    setBarcodeInput(active.barcodeInput || '');
+    setCustomerSuggestions([]);
+    setPurchaseModalOpen(false);
+    setPurchaseModalSuggestions([]);
+    setBarcodeCreateOpen(false);
+    setBarcodeCreateData({});
+  }, [activeDraftId]);
+
+  useEffect(() => {
+    if (!activeDraftId) return;
+    setDrafts((prev) =>
+      prev.map((draft) =>
+        draft.id === activeDraftId
+          ? {
+              ...draft,
+              transactionType,
+              paymentMethod,
+              products,
+              totalAmount,
+              personalAmount,
+              customerName,
+              customerPhone,
+              customerAddress,
+              customerLocation,
+              barcodeInput,
+            }
+          : draft
+      )
+    );
+  }, [
+    activeDraftId,
+    transactionType,
+    paymentMethod,
+    products,
+    totalAmount,
+    personalAmount,
+    customerName,
+    customerPhone,
+    customerAddress,
+    customerLocation,
+    barcodeInput,
+  ]);
+
+  useEffect(() => {
+    if (!multiDraftEnabled) return;
+    saveDraftsToStorage(drafts);
+  }, [drafts, multiDraftEnabled]);
+
+  useEffect(() => {
     return () => {
       Object.values(searchTimersRef.current.sale).forEach((timer) => clearTimeout(timer));
       Object.values(searchTimersRef.current.purchase).forEach((timer) => clearTimeout(timer));
@@ -150,6 +350,54 @@ useEffect(() => {
     setTotalAmount(0);
     setPaymentMethod('');
     setPersonalAmount('');
+  };
+
+  const scrollToTop = () => {
+    if (typeof window === 'undefined') return;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleAddDraft = () => {
+    if (!multiDraftEnabled) return;
+    const nextDraft = buildEmptyDraft(getNextDraftLabel(drafts));
+    setDrafts((prev) => [...prev, nextDraft]);
+    setActiveDraftId(nextDraft.id);
+    scrollToTop();
+  };
+
+  const handleSelectDraft = (draftId) => {
+    if (!draftId || draftId === activeDraftId) return;
+    setActiveDraftId(draftId);
+    scrollToTop();
+  };
+
+  const handleDiscardDraft = (draftId) => {
+    if (!draftId) return;
+    if (!multiDraftEnabled) {
+      navigate('/orders');
+      dispatch(clearOrderDetails());
+      return;
+    }
+    setDrafts((prev) => {
+      const remaining = prev.filter((draft) => draft.id !== draftId);
+      if (remaining.length === 0) {
+        const seed = buildEmptyDraft('Order 1');
+        setActiveDraftId(seed.id);
+        return [seed];
+      }
+      if (draftId === activeDraftId) {
+        setActiveDraftId(remaining[0].id);
+      }
+      return remaining;
+    });
+  };
+
+  const getDraftTotal = (draft) => {
+    if (!draft) return 0;
+    if (draft.transactionType === 'personal') {
+      return Number(draft.personalAmount || 0);
+    }
+    return Number(draft.totalAmount || 0);
   };
 
   const requireCustomerDetails =
@@ -993,8 +1241,13 @@ const schedulePurchaseProductSearch = (text, index) => {
 
   const handleSubmit = async (key) => {
     if(key === 0) {
-      navigate('/orders');
-      dispatch(clearOrderDetails());
+      if (orderDetails || !multiDraftEnabled) {
+        navigate('/orders');
+        dispatch(clearOrderDetails());
+        return;
+      }
+      handleDiscardDraft(activeDraftId);
+      showPopup('Draft order discarded.', 'Info');
       return;
     }
     if (!transactionType) {
@@ -1145,7 +1398,12 @@ const schedulePurchaseProductSearch = (text, index) => {
       enqueueOfflineOrder(entry);
       showPopup('Offline: Order saved and will sync when you are online.', 'Offline');
       dispatch(clearOrderDetails());
-      navigate('/orders');
+      if (isUpdate || !multiDraftEnabled) {
+        navigate('/orders');
+      } else {
+        handleDiscardDraft(activeDraftId);
+        scrollToTop();
+      }
     };
 
     try {
@@ -1167,7 +1425,12 @@ const schedulePurchaseProductSearch = (text, index) => {
       // For new orders
       await api.post('/orders', createPayload);
       showPopup('Order Placed!!', 'Success');
-      navigate('/orders');
+      if (multiDraftEnabled) {
+        handleDiscardDraft(activeDraftId);
+        scrollToTop();
+      } else {
+        navigate('/orders');
+      }
     } catch (err) {
       if (!err?.response) {
         enqueueAndExit(Boolean(orderDetails));
@@ -1204,9 +1467,44 @@ const schedulePurchaseProductSearch = (text, index) => {
         <span className="wow-ring ring-b"></span>
         <span className="wow-pulse"></span>
       </div>
-      <div className="order-shell wow-content">
+      <div className={`order-shell wow-content ${multiDraftEnabled ? 'order-shell--split' : ''}`}>
+        {multiDraftEnabled && (
+          <aside className="order-sidebar">
+            <div className="order-sidebar-header">
+              <div>
+                <p className="order-sidebar-kicker">Draft Orders</p>
+                <h3 className="order-sidebar-title-text">Orders</h3>
+              </div>
+              <button
+                className="btn btn-outline-light btn-sm order-sidebar-add"
+                type="button"
+                onClick={handleAddDraft}
+              >
+                New Order
+              </button>
+            </div>
+            <div className="order-sidebar-list">
+              {drafts.map((draft) => (
+                <button
+                  key={draft.id}
+                  type="button"
+                  className={`order-sidebar-item ${draft.id === activeDraftId ? 'active' : ''}`}
+                  onClick={() => handleSelectDraft(draft.id)}
+                >
+                  <div className="order-sidebar-title">{draft.label}</div>
+                  <div className="order-sidebar-meta">
+                    <span>{draft.transactionType || 'No type'}</span>
+                    <span className="order-sidebar-dot">•</span>
+                    <span>₹{getDraftTotal(draft).toFixed(2)}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </aside>
+        )}
+        <div className="order-main">
         {/* <div className="order-hero">
-          <div>
+            <div>
             <div className="order-kicker">SHAJ Retail Products</div>
             <h3 className='order-title'>
               {orderDetails ? 'Update Order' : 'Create New Order'}
@@ -1543,6 +1841,7 @@ const schedulePurchaseProductSearch = (text, index) => {
           )}
         </button>
       </div>
+        </div>
         </div>
       </div>
       {purchaseModalOpen && (
