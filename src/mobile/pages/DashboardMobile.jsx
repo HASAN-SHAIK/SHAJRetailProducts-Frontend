@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { preloadProductsToIndexedDb } from '../../utils/indexedDb';
 import dayjs from 'dayjs';
 import api from '../../utils/axios';
 import MobileShell from '../components/MobileShell';
@@ -10,6 +11,22 @@ const formatCurrency = (value) =>
   Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
 const DashboardMobile = () => {
+  const preloadRef = useRef(false);
+  useEffect(() => {
+    console.log('[cacheDB] DashboardMobile mounted');
+  }, []);
+
+  useEffect(() => {
+    console.log('[cacheDB] DashboardMobile preload check', { already: preloadRef.current });
+    if (preloadRef.current) return;
+    preloadRef.current = true;
+    console.log('[cacheDB] DashboardMobile preload start');
+    preloadProductsToIndexedDb()
+      .then(() => console.log('[cacheDB] DashboardMobile preload success'))
+      .catch((err) => {
+        console.error('[cacheDB] DashboardMobile preload failed', err);
+      });
+  }, []);
   const [dashboard, setDashboard] = useState(null);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);

@@ -1,5 +1,9 @@
 import axios from 'axios';
 import { getDeviceId } from './device';
+import { preloadProductsViaFetch } from './cacheDbPreload';
+
+console.log('[cacheDB] axios module loaded');
+
 
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
@@ -44,6 +48,26 @@ api.interceptors.response.use(
     if (typeof window !== 'undefined') {
       window.__serverOffline = false;
       window.dispatchEvent(new CustomEvent('server-status', { detail: { offline: false } }));
+    }
+    if (typeof window !== 'undefined') {
+      const url = response?.config?.url || '';
+      if (url.includes('/platform/config')) {
+        console.log('[cacheDB] platform/config detected');
+        preloadProductsViaFetch(api.defaults.baseURL).catch((err) => {
+          console.error('[cacheDB] preload failed', err);
+        });
+      }
+      if (url.includes('/auth/logout')) {
+        window.__cacheDbPreloadFired = false;
+        console.log('[cacheDB] reset preload flag on logout');
+      }
+      if (url.includes('/auth/login')) {
+        window.dispatchEvent(new CustomEvent('login-success'));
+        console.log('[cacheDB] login success detected');
+        preloadProductsViaFetch(api.defaults.baseURL).catch((err) => {
+          console.error('[cacheDB] preload failed', err);
+        });
+      }
     }
     return response;
   },

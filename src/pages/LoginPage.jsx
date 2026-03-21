@@ -2,6 +2,7 @@ import { useState } from 'react';
 import api from '../utils/axios';
 import { useNavigate } from 'react-router-dom';
 import Login from '../components/Login/Login';
+import { preloadProductsToIndexedDb } from '../utils/indexedDb';
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -24,6 +25,11 @@ const LoginPage = () => {
         } catch (err) {
           // Ignore storage failures (private mode / blocked storage)
         }
+      }
+      try {
+        await preloadProductsToIndexedDb();
+      } catch (err) {
+        console.error('IndexedDB preload failed', err);
       }
       navigate('/dashboard'); // redirect on success
     } catch (err) {

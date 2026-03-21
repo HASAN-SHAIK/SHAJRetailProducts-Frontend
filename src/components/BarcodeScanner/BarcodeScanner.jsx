@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../../utils/axios';
+import { getProductByBarcode } from '../../core/db';
+import { normalizeDisplayProduct } from '../../utils/localProductSearch';
 
 const BarcodeScanner = () => {
   const inputRef = useRef(null);
@@ -37,12 +39,20 @@ const BarcodeScanner = () => {
     setProduct(null);
     setShowCreate(false);
     try {
-      const res = await api.get(`/products/barcode/${encodeURIComponent(code)}`);
-      if (res?.data?.found === false) {
+      const localProduct = await getProductByBarcode(code);
+      let payload = localProduct ? normalizeDisplayProduct(localProduct) : null;
+      if (!payload) {
+        const res = await api.get(`/products/barcode/${encodeURIComponent(code)}`);
+        payload = res?.data || null;
+        if (res?.data?.found === false) {
+          payload = null;
+        }
+      }
+      if (!payload) {
         setShowCreate(true);
         setCreateData((prev) => ({ ...prev, barcode: code }));
       } else {
-        setProduct(res?.data || null);
+        setProduct(payload || null);
       }
     } catch (err) {
       setShowCreate(true);

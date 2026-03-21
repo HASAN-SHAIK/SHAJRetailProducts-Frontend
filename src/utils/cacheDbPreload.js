@@ -1,0 +1,54 @@
+import { getDeviceId } from './device';
+import { saveProductsBulk } from '../core/db';
+
+const extractProductsPayload = async (response) => {
+  const payload = response?.data ?? response;
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.products)) return payload.products;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
+
+const getBarcodeKey = (product) =>
+  product?.barcode ||
+  product?.barcode_number ||
+  product?.barcodeNumber ||
+  product?.product_barcode ||
+  product?.productBarcode ||
+  product?.code ||
+  product?.product_code ||
+  product?.productCode ||
+  null;
+
+const normalizeProduct = (product) => {
+  const barcode = getBarcodeKey(product);
+  if (!barcode) return null;
+  return { ...product, barcode };
+};
+
+export const preloadProductsViaFetch = async (baseURL) => {
+  const resolvedBase = baseURL ? baseURL.replace(/\/$/, '') : `${window.location.origin}/api`;
+  const url = `${resolvedBase}/products/cache-db`;
+  console.log('[cacheDB] fetch start', url);
+
+  const deviceId = getDeviceId();
+  let token = null;
+  try {
+    token = localStorage.getItem('auth_token');
+  } catch (err) {
+    token = null;
+  }
+  const headers = { 'x-device-id': deviceId };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
+  const json = await res.json();
+  const products = await extractProductsPayload(json);
+  const normalizedProducts = products.map((product) => normalizeProduct(product));
+  if (normalizedProducts.some((product) => !product)) {
+    throw new Error('Missing barcode in product payload');
+  }
+  console.log('[cacheDB] saving products', normalizedProducts.length);
+  const savedCount = await saveProductsBulk(normalizedProducts);
+  console.log('[cacheDB] preload complete', savedCount);
+};

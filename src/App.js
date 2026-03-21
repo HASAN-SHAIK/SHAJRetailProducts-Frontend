@@ -15,6 +15,7 @@ import Logout from './pages/Logout';
 import Footer from './components/Footer/Footer';
 import { setUserDetails } from './store/userSlice';
 import api from './utils/axios';
+import { preloadProductsToIndexedDb } from './utils/indexedDb';
 import { processOfflineQueue } from './utils/offlineOrders';
 import { setTenantConfig, setTenantConfigStatus, setSubscriptionStatus, setTenantIdentity } from './store/tenantSlice';
 import SubscriptionExpired from './pages/SubscriptionExpired';
@@ -49,6 +50,7 @@ function App() {
   );
   const [tenantBanner, setTenantBanner] = useState(null);
   const bannerFetchRef = useRef({ userId: null, inFlight: false });
+  const preloadOnceRef = useRef(false);
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const location = useLocation();
@@ -93,6 +95,15 @@ useEffect(() => {
   };
   checkSession();
 }, [dispatch, location.pathname, navigate]);
+
+useEffect(() => {
+  if (!location.pathname.startsWith('/dashboard')) return;
+  if (preloadOnceRef.current) return;
+  preloadOnceRef.current = true;
+  preloadProductsToIndexedDb().catch((err) => {
+    console.error('IndexedDB preload failed', err);
+  });
+}, [location.pathname]);
 
 useEffect(() => {
   if (!userDetails) return;
@@ -196,6 +207,16 @@ useEffect(() => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
   };
+}, []);
+
+useEffect(() => {
+  const handleLoginSuccess = () => {
+    preloadProductsToIndexedDb().catch((err) => {
+      console.error('IndexedDB preload failed', err);
+    });
+  };
+  window.addEventListener('login-success', handleLoginSuccess);
+  return () => window.removeEventListener('login-success', handleLoginSuccess);
 }, []);
 
 useEffect(() => {

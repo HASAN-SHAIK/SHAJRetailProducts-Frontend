@@ -213,7 +213,6 @@ const OrdersPage = ({ navigate }) => {
         order_id: order.id,
         payment_mode: paymentMode,
       });
-      showPopup('Order marked as paid.', 'Success');
       fetchOrders();
       if (drawerOpen) {
         fetchOrderDetails(order.id);

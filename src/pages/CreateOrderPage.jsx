@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../utils/axios';
+import { getProductByBarcode, updateProductsBulk } from '../core/db';
+import { searchLocalProducts, normalizeDisplayProduct } from '../utils/localProductSearch';
 import { useNavigate } from 'react-router-dom';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
 import { useDispatch, useSelector } from 'react-redux';
@@ -17,8 +19,8 @@ const createDraftId = () =>
 const buildEmptyDraft = (label) => ({
   id: createDraftId(),
   label,
-  transactionType: '',
-  paymentMethod: '',
+  transactionType: 'sale',
+  paymentMethod: 'cash',
   products: [],
   totalAmount: 0,
   personalAmount: '',
@@ -83,8 +85,8 @@ const CreateOrderPage = () => {
   const userDetails = useSelector((state) => state.user.userDetails);
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const features = tenantConfig?.features || tenantConfig?.plan_features || tenantConfig || {};
-  const [transactionType, setTransactionType] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('');
+  const [transactionType, setTransactionType] = useState('sale');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
   const [products, setProducts] = useState([]);
   const [totalAmount, setTotalAmount] = useState(0);
   const [personalAmount, setPersonalAmount] = useState('');
@@ -166,9 +168,9 @@ useEffect(() => {
           };
         });
         setProducts(reconstructedProducts);
-        setTransactionType(orderDetails.type);
+        setTransactionType(orderDetails.type || 'sale');
         setTotalAmount(parseFloat(orderDetails.total_price));
-        setPaymentMethod(orderDetails.payment);
+        setPaymentMethod(orderDetails.payment || 'cash');
         setPersonalAmount(orderDetails.personal_amount || '');
         setCustomerName(orderDetails.customer_name || '');
         setCustomerPhone(orderDetails.customer_phone || '');
@@ -176,8 +178,8 @@ useEffect(() => {
         setCustomerLocation(orderDetails.customer_location || orderDetails.location || '');
         const editDraft = {
           ...buildEmptyDraft(`Order #${orderDetails.id}`),
-          transactionType: orderDetails.type || '',
-          paymentMethod: orderDetails.payment || '',
+          transactionType: orderDetails.type || 'sale',
+          paymentMethod: orderDetails.payment || 'cash',
           products: reconstructedProducts,
           totalAmount: parseFloat(orderDetails.total_price || 0),
           personalAmount: orderDetails.personal_amount || '',
@@ -233,7 +235,7 @@ useEffect(() => {
     setTransactionType('sale');
     setProducts([]);
     setTotalAmount(0);
-    setPaymentMethod('');
+    setPaymentMethod('cash');
     setPersonalAmount('');
   }
 }, [transactionType, userDetails.role]);
@@ -274,8 +276,10 @@ useEffect(() => {
     if (!activeDraftId) return;
     const active = drafts.find((draft) => draft.id === activeDraftId);
     if (!active) return;
-    setTransactionType(active.transactionType || '');
-    setPaymentMethod(active.paymentMethod || '');
+    const nextType = active.transactionType || 'sale';
+    const nextPayment = active.paymentMethod || (nextType === 'sale' ? 'cash' : '');
+    setTransactionType(nextType);
+    setPaymentMethod(nextPayment);
     setProducts(Array.isArray(active.products) ? active.products : []);
     setTotalAmount(Number(active.totalAmount || 0));
     setPersonalAmount(active.personalAmount || '');
@@ -345,10 +349,11 @@ useEffect(() => {
 
 
   const handleTransactionTypeChange = (e) => {
-    setTransactionType(e.target.value);
+    const nextType = e.target.value;
+    setTransactionType(nextType);
     setProducts([]);
     setTotalAmount(0);
-    setPaymentMethod('');
+    setPaymentMethod(nextType === 'sale' ? 'cash' : '');
     setPersonalAmount('');
   };
 
@@ -568,6 +573,19 @@ useEffect(() => {
       return;
     }
     try {
+      const localSuggestions = await searchLocalProducts(text);
+      if (localSuggestions.length) {
+        const filtered = filterByProductType(localSuggestions.map(normalizeDisplayProduct));
+        if (latestSearchRef.current.sale[index] !== text) return;
+        setProducts((prev) => {
+          const updated = [...prev];
+          if (updated[index]) {
+            updated[index] = { ...updated[index], suggestions: filtered };
+          }
+          return updated;
+        });
+        return;
+      }
       if (!navigator.onLine) {
         const suggestions = searchCachedProducts(text);
         const filtered = filterByProductType(suggestions);
@@ -664,6 +682,19 @@ const handlePurchaseProductSearch = async (text, index) => {
     return;
   }
   try {
+    const localSuggestions = await searchLocalProducts(text);
+    if (localSuggestions.length) {
+      const suggestions = filterByProductType(localSuggestions.map(normalizeDisplayProduct));
+      if (latestSearchRef.current.purchase[index] !== text) return;
+      setProducts((prev) => {
+        const updated = [...prev];
+        if (updated[index]) {
+          updated[index] = { ...updated[index], suggestions };
+        }
+        return updated;
+      });
+      return;
+    }
     if (!navigator.onLine) {
       const suggestions = filterByProductType(searchCachedProducts(text));
       if (latestSearchRef.current.purchase[index] !== text) return;
@@ -782,6 +813,13 @@ const schedulePurchaseProductSearch = (text, index) => {
       return;
     }
     try {
+      const localSuggestions = await searchLocalProducts(text);
+      if (localSuggestions.length) {
+        const suggestions = filterByProductType(localSuggestions.map(normalizeDisplayProduct));
+        if (latestPurchaseModalSearchRef.current !== text) return;
+        setPurchaseModalSuggestions(suggestions);
+        return;
+      }
       if (!navigator.onLine) {
         const suggestions = filterByProductType(searchCachedProducts(text));
         if (latestPurchaseModalSearchRef.current !== text) return;
@@ -919,7 +957,6 @@ const schedulePurchaseProductSearch = (text, index) => {
           },
         ];
         calculateTotal(updated);
-        showPopup('Enter weight for the scanned item.', 'Validation');
         return updated;
       }
       const existingIndex = prev.findIndex((p) => p.id === product.id);
@@ -1002,9 +1039,13 @@ const schedulePurchaseProductSearch = (text, index) => {
     }
     try {
       setIsBarcodeAdding(true);
-      const barcodeMode = transactionType === 'purchase' ? 'purchase' : 'sale';
-      const res = await api.get(buildBarcodeUrl(code, barcodeMode));
-      let product = res?.data?.product || res?.data?.data || res?.data;
+      const localProduct = await getProductByBarcode(code);
+      let product = localProduct ? normalizeDisplayProduct(localProduct) : null;
+      if (!product) {
+        const barcodeMode = transactionType === 'purchase' ? 'purchase' : 'sale';
+        const res = await api.get(buildBarcodeUrl(code, barcodeMode));
+        product = res?.data?.product || res?.data?.data || res?.data;
+      }
       if (Array.isArray(product)) product = product[0];
       if (!product) {
         showPopup('Product not found', 'Validation');
@@ -1247,7 +1288,6 @@ const schedulePurchaseProductSearch = (text, index) => {
         return;
       }
       handleDiscardDraft(activeDraftId);
-      showPopup('Draft order discarded.', 'Info');
       return;
     }
     if (!transactionType) {
@@ -1415,7 +1455,15 @@ const schedulePurchaseProductSearch = (text, index) => {
 
       setIsLoading(true);
       if(orderDetails) {
-        await api.put(`/orders/${orderDetails.id}`, updatePayload);
+        const updateRes = await api.put(`/orders/${orderDetails.id}`, updatePayload);
+        const updatedProducts = updateRes?.data?.updated_products;
+        if (Array.isArray(updatedProducts) && updatedProducts.length) {
+          try {
+            await updateProductsBulk(updatedProducts);
+          } catch (err) {
+            console.error('Failed to sync updated products', err);
+          }
+        }
         dispatch(clearOrderDetails());
         navigate('/orders');
         showPopup('Order Updated!!', 'Success');
@@ -1423,7 +1471,15 @@ const schedulePurchaseProductSearch = (text, index) => {
       }
       
       // For new orders
-      await api.post('/orders', createPayload);
+      const createRes = await api.post('/orders', createPayload);
+      const updatedProducts = createRes?.data?.updated_products;
+      if (Array.isArray(updatedProducts) && updatedProducts.length) {
+        try {
+          await updateProductsBulk(updatedProducts);
+        } catch (err) {
+          console.error('Failed to sync updated products', err);
+        }
+      }
       showPopup('Order Placed!!', 'Success');
       if (multiDraftEnabled) {
         handleDiscardDraft(activeDraftId);

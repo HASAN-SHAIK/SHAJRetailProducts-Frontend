@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../utils/axios';
+import { searchLocalProducts, normalizeDisplayProduct } from '../../utils/localProductSearch';
 import MobileShell from '../components/MobileShell';
 import SectionCard from '../components/SectionCard';
 import ProductItem from '../components/ProductItem';
@@ -18,6 +19,16 @@ const ProductsMobile = () => {
     const handler = setTimeout(async () => {
       setLoading(true);
       try {
+        const localResults = await searchLocalProducts(query.trim());
+        if (localResults.length) {
+          const mapped = localResults.map(normalizeDisplayProduct).map((product) => ({
+            ...product,
+            price: product.price ?? product.selling_price ?? product.actual_price ?? 0,
+            stock: product.stock ?? product.stock_quantity ?? 0,
+          }));
+          setProducts(mapped);
+          return;
+        }
         const res = await api.get('/products/search', {
           params: {
             view: 'mobile',

@@ -10,6 +10,7 @@ import logo from '../../Images/logo.png';
 import { getDeviceId } from '../../utils/device';
 import { decodeJwtPayload } from '../../utils/jwt';
 import { setTenantConfig, setTenantConfigStatus, setTenantIdentity, setSubscriptionStatus } from '../../store/tenantSlice';
+import { preloadProductsToIndexedDb } from '../../utils/indexedDb';
 const Login = ( ) => {
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState({ email: '', password: '' });
@@ -71,6 +72,11 @@ const Login = ( ) => {
         }
         dispatch(setTenantConfigStatus('error'));
         console.error('Failed to fetch tenant config', err);
+      }
+      try {
+        await preloadProductsToIndexedDb();
+      } catch (err) {
+        console.error('IndexedDB preload failed', err);
       }
       setIsLoading(false);
       navigate('/dashboard');
