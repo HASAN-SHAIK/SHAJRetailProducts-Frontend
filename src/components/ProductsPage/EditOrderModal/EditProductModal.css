@@ -44,6 +44,42 @@
   background-color: #182c60;
 }
 
+.edit-details-banner {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #e2e8f0;
+}
+
+.edit-details-banner.loading {
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #bae6fd;
+}
+
+.edit-details-banner.ready {
+  border-color: rgba(34, 197, 94, 0.6);
+  color: #bbf7d0;
+}
+
+.edit-details-banner.error,
+.edit-details-banner.offline {
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #fecaca;
+}
+
+.edit-details-banner .details-source {
+  color: #cbd5f5;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .w-45 {
   width: 45%;
 }
@@ -71,4 +107,31 @@
     flex-direction: column;
     gap: 10px;
   }
+}
+
+.edit-product-modal .modal-content {
+  padding: 24px !important;
+  margin-top: 16px;
+}
+
+.edit-product-modal form {
+  width: 100%;
+  align-items: stretch;
+}
+
+.edit-product-modal .form-group {
+  width: 100%;
+  text-align: left;
+}
+
+.edit-product-modal .form-label {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+.edit-product-modal .form-control,
+.edit-product-modal .neon-input,
+.edit-product-modal select {
+  width: 100%;
 }

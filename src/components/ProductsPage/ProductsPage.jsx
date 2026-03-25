@@ -5,6 +5,7 @@ import { Modal } from 'bootstrap';
 import AddProductModalComponent from './AddModalComponent/AddProductModalComponent';
 import { useSelector } from 'react-redux';
 import { saveProductsCache } from '../../utils/offlineProducts';
+import { getAllProducts, updateProduct } from '../../core/db';
 import { usePopup } from '../common/PopUp/PopupProvider';
 import EditProductModal from './EditOrderModal/EditProductModal';
 
@@ -30,6 +31,7 @@ const ProductsPage = ({ navigate }) => {
     actual_price: '',
     stock_quantity: '',
     category: '',
+    expiry_date: '',
     time_for_delivery: '',
     is_weight_based: defaultWeightValue,
     barcode: ''
@@ -57,12 +59,18 @@ const ProductsPage = ({ navigate }) => {
     try {
       setIsAddingProduct(true);
       const payload = barcodeEnabled ? formData : (({ barcode, ...rest }) => rest)(formData);
-      await api.post('/products', payload); // Your endpoint
+      if (payload.expiry_date === '') payload.expiry_date = null;
+      const createRes = await api.post('/products', payload); // Your endpoint
+      const createdProduct = extractProductFromResponse(createRes);
+      if (createdProduct) {
+        updateProduct(createdProduct).catch(() => {});
+      }
       // Optional: show success toast, close modal, refresh product list
       setFormData({
         product_name: '',
         company: '',
         category:'',
+        expiry_date: '',
         selling_price: '',
         actual_price: '',
         stock_quantity: '',
@@ -74,7 +82,8 @@ const ProductsPage = ({ navigate }) => {
       const modal = Modal.getInstance(modalElement);
       modal.hide();
       showPopup("Product added successfully!", "Success");
-    setProductUpdateFlag(true)
+      setForceApiFetch(true);
+      setProductUpdateFlag(true)
 
     } catch (err) {
       if(err.response.data.message === 'Invalid Token' || err.response.status === 401){
@@ -98,6 +107,7 @@ const ProductsPage = ({ navigate }) => {
     { label: 'Category', name: 'category', type: 'datalist' },
     { label: 'Selling Price', name: 'selling_price', type: 'number' },
     { label: 'Actual Price', name: 'actual_price', type: 'number' },
+    { label: 'Expiry Date', name: 'expiry_date', type: 'date', required: false },
     { label: 'Quantity', name: 'stock_quantity', type: 'number' },
     { label: 'Time For Delivery', name:'time_for_delivery', type: 'number'},
     { label: 'Type', name: 'is_weight_based', type: 'select', options: [
@@ -128,10 +138,51 @@ const ProductsPage = ({ navigate }) => {
  const [deletingId, setDeletingId] = useState(null);
  const [isAddingProduct, setIsAddingProduct] = useState(false);
  const [isEditingProduct, setIsEditingProduct] = useState(false);
+ const [forceApiFetch, setForceApiFetch] = useState(false);
+ const [extraDetailsByBarcode, setExtraDetailsByBarcode] = useState({});
+ const [dataSource, setDataSource] = useState('server');
+ const [cacheMeta, setCacheMeta] = useState({ total: 0, shown: 0 });
+ const [editDetailsStatus, setEditDetailsStatus] = useState({
+  state: 'idle',
+  message: '',
+  source: 'indexeddb',
+ });
 
   useEffect(() => {
     fetchCategories();
   }, []);
+
+  useEffect(() => {
+    const fetchExtraDetails = async () => {
+      if (!navigator.onLine || window.__serverOffline) return;
+      const barcodes = products
+        .map((item) => item?.barcode)
+        .filter((barcode) => barcode);
+      if (barcodes.length === 0) {
+        setExtraDetailsByBarcode({});
+        return;
+      }
+      try {
+        const res = await api.post('/products/extra-details', { barcodes });
+        const payload = res?.data?.products ?? res?.data ?? [];
+        const list = Array.isArray(payload) ? payload : [];
+        if (list.length === 0) {
+          setExtraDetailsByBarcode({});
+          return;
+        }
+        const map = list.reduce((acc, item) => {
+          if (item?.barcode) {
+            acc[item.barcode] = item;
+          }
+          return acc;
+        }, {});
+        setExtraDetailsByBarcode(map);
+      } catch (err) {
+        console.warn('[Products] Failed to fetch extra details', err);
+      }
+    };
+    fetchExtraDetails();
+  }, [products]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -157,15 +208,88 @@ const ProductsPage = ({ navigate }) => {
     return params;
   }, [pagination.page, pagination.limit, searchQuery, selectedCategory, sortBy, sortOrder]);
 
+  const normalizeValue = (value) => String(value ?? '').toLowerCase();
+
+  const applyLocalFilters = useCallback((items) => {
+    let filtered = Array.isArray(items) ? items : [];
+
+    if (searchQuery) {
+      const query = normalizeValue(searchQuery);
+      filtered = filtered.filter((item) => {
+        const name = normalizeValue(item.name ?? item.product_name);
+        const company = normalizeValue(item.company ?? item.company_name);
+        const barcode = normalizeValue(item.barcode);
+        return name.includes(query) || company.includes(query) || barcode.includes(query);
+      });
+    }
+
+    if (selectedCategory) {
+      const categoryKey = normalizeValue(selectedCategory);
+      filtered = filtered.filter((item) => {
+        const categoryId = normalizeValue(item.category_id ?? item.categoryId);
+        const categoryName = normalizeValue(item.category ?? item.category_name);
+        return categoryId === categoryKey || categoryName === categoryKey;
+      });
+    }
+
+    const sortField = sortBy;
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    const sorted = [...filtered].sort((a, b) => {
+      const aValue = a?.[sortField];
+      const bValue = b?.[sortField];
+      const aNumeric = Number(aValue);
+      const bNumeric = Number(bValue);
+      if (!Number.isNaN(aNumeric) && !Number.isNaN(bNumeric)) {
+        return (aNumeric - bNumeric) * direction;
+      }
+      return normalizeValue(aValue).localeCompare(normalizeValue(bValue)) * direction;
+    });
+
+    return sorted;
+  }, [searchQuery, selectedCategory, sortBy, sortOrder]);
+
+  const paginateItems = (items) => {
+    const totalRecords = items.length;
+    const totalPages = Math.max(1, Math.ceil(totalRecords / pagination.limit));
+    const page = Math.min(Math.max(1, pagination.page), totalPages);
+    const start = (page - 1) * pagination.limit;
+    const paged = items.slice(start, start + pagination.limit);
+    return { paged, totalRecords, totalPages, page };
+  };
+
   const fetchProducts = async () => {
     setIsLoading(true);
     setErrorMessage('');
     try {
+      if (!forceApiFetch) {
+        const localAll = await getAllProducts();
+        const localList = Array.isArray(localAll) ? localAll : [];
+        if (localList.length > 0) {
+          const localFiltered = applyLocalFilters(localList);
+          if (localFiltered.length > 0 || (!searchQuery && !selectedCategory)) {
+            const { paged, totalRecords, totalPages, page } = paginateItems(localFiltered);
+            setProducts(paged);
+            setDataSource('indexeddb');
+            setCacheMeta({ total: localList.length, shown: paged.length });
+            setPagination((prev) => ({
+              ...prev,
+              page,
+              total_pages: totalPages,
+              total_records: totalRecords,
+            }));
+            return;
+          }
+        }
+      }
+
       const response = await api.get('/products', { params: buildParams() });
       const payload = response?.data || {};
       const list = Array.isArray(payload.products) ? payload.products : [];
       setProducts(list);
+      setDataSource('server');
+      setCacheMeta({ total: payload.pagination?.total_records ?? list.length, shown: list.length });
       saveProductsCache(list);
+      setForceApiFetch(false);
       setPagination((prev) => ({
         ...prev,
         page: payload.pagination?.page || prev.page,
@@ -181,6 +305,9 @@ const ProductsPage = ({ navigate }) => {
         setErrorMessage('Unable to load products. Please try again.');
       }
     } finally {
+      if (forceApiFetch) {
+        setForceApiFetch(false);
+      }
       setIsLoading(false);
     }
   };
@@ -214,6 +341,19 @@ const ProductsPage = ({ navigate }) => {
     () => categories,
     [categories]
   );
+
+  const formatDate = (value) => {
+    if (!value) return '-';
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [year, month, day] = value.split('-').map(Number);
+      const date = new Date(year, month - 1, day);
+      if (Number.isNaN(date.getTime())) return '-';
+      return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
 
   const formatMoney = (value) => {
     const amount = Number(value || 0);
@@ -250,8 +390,61 @@ const ProductsPage = ({ navigate }) => {
     bootstrapModal.show();
   };
 
-  const handleEditClick = (product) => {
-    setEditTarget(product);
+  const extractProductFromResponse = (response) => {
+    if (!response) return null;
+    const data = response?.data;
+    if (!data) return null;
+    if (Array.isArray(data)) return data[0] || null;
+    if (Array.isArray(data.products)) return data.products[0] || null;
+    return data.product || data.data || data;
+  };
+
+  const handleEditClick = async (product) => {
+    setEditDetailsStatus({
+      state: 'loading',
+      message: 'Getting latest details from server...',
+      source: 'server',
+    });
+
+    if (!navigator.onLine) {
+      setEditDetailsStatus({
+        state: 'offline',
+        message: 'Offline mode: cannot fetch latest details.',
+        source: 'indexeddb',
+      });
+      return;
+    }
+
+    try {
+      let response = null;
+      const productId = product?.id ?? product?.product_id ?? product?.productId;
+      if (productId) {
+        response = await api.get(`/products/${productId}`);
+      }
+      const serverItem = extractProductFromResponse(response);
+      if (serverItem) {
+        setEditTarget({ ...product, ...serverItem });
+        updateProduct(serverItem).catch(() => {});
+        setEditDetailsStatus({
+          state: 'ready',
+          message: 'Latest details loaded from server.',
+          source: 'server',
+        });
+      } else {
+        setEditDetailsStatus({
+          state: 'error',
+          message: productId ? 'No server details found.' : 'Missing product id.',
+          source: 'server',
+        });
+      }
+    } catch (error) {
+      console.warn('[Products] Failed to fetch product details', error);
+      setEditDetailsStatus({
+        state: 'error',
+        message: 'Unable to fetch latest details.',
+        source: 'server',
+      });
+    }
   };
 
   const handleSubmitEdit = async (updatedProduct) => {
@@ -270,6 +463,7 @@ const ProductsPage = ({ navigate }) => {
       if (response.status === 200) {
         showPopup('Product updated successfully!', 'Success');
         setEditTarget(null);
+        setForceApiFetch(true);
         setProductUpdateFlag((prev) => !prev);
       }
     } catch (error) {
@@ -298,6 +492,7 @@ const ProductsPage = ({ navigate }) => {
       await api.delete(`/products/${productId}`);
       showPopup('Product deleted', 'Success');
       closeDeleteModal();
+      setForceApiFetch(true);
       setProductUpdateFlag((prev) => !prev);
     } catch (err) {
       showPopup('Failed to delete product', 'Error');
@@ -322,11 +517,23 @@ const ProductsPage = ({ navigate }) => {
             {/* <h2 className="products-title">Products</h2> */}
             <p className="products-subtitle">Search, filter, and manage inventory.</p>
           </div>
-          {userDetails.role === 'admin' && (
-            <button className="btn btn-success" onClick={handleOpenModal}>
-              Add Product
+          <div className="d-flex gap-2">
+            <button
+              className="btn btn-outline-light"
+              onClick={() => {
+                setForceApiFetch(true);
+                setProductUpdateFlag((prev) => !prev);
+              }}
+              type="button"
+            >
+              Refresh from Server
             </button>
-          )}
+            {userDetails.role === 'admin' && (
+              <button className="btn btn-success" onClick={handleOpenModal}>
+                Add Product
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="products-controls">
@@ -377,6 +584,7 @@ const ProductsPage = ({ navigate }) => {
           </div>
         </div>
 
+
         <div className="products-card">
           <div className="products-table-wrapper">
             <table className="products-table">
@@ -395,6 +603,7 @@ const ProductsPage = ({ navigate }) => {
                   <th role="button" onClick={() => handleSortToggle('stock_quantity')} className="sortable">
                     Stock <span className="sort-indicator">{getSortIndicator('stock_quantity')}</span>
                   </th>
+                  <th>Expiry Date</th>
                   <th>Status</th>
                   {userDetails.role === 'admin' && <th>Actions</th>}
                 </tr>
@@ -408,34 +617,38 @@ const ProductsPage = ({ navigate }) => {
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
                     {userDetails.role === 'admin' && <td><span className="skeleton-block" /></td>}
                   </tr>
                 ))}
                 {!isLoading && errorMessage && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 7 : 6} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 8 : 7} className="empty-state">
                       {errorMessage}
                     </td>
                   </tr>
                 )}
                 {!isLoading && !errorMessage && products.length === 0 && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 7 : 6} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 8 : 7} className="empty-state">
                       No products found.
                     </td>
                   </tr>
                 )}
                 {!isLoading && !errorMessage && products.map((product) => {
-                  const stock = Number(product.stock_quantity ?? product.quantity ?? 0);
-                  const minStock = Number(product.min_stock_level ?? 0);
+                  const extra = extraDetailsByBarcode?.[product?.barcode] || {};
+                  const displayProduct = { ...product, ...extra };
+                  const stock = Number(displayProduct.stock_quantity ?? displayProduct.quantity ?? 0);
+                  const minStock = Number(displayProduct.min_stock_level ?? 0);
                   const lowStock = minStock > 0 && stock <= minStock;
                   return (
-                    <tr key={product.id} className="products-row">
-                      <td>{product.name || product.product_name || '-'}</td>
-                      <td>{product.company_name || product.company || '-'}</td>
-                      <td>{product.category_name || product.category || '-'}</td>
-                      <td>{formatMoney(product.selling_price)}</td>
+                    <tr key={displayProduct.id || displayProduct.barcode} className="products-row">
+                      <td>{displayProduct.name || displayProduct.product_name || '-'}</td>
+                      <td>{displayProduct.company_name || displayProduct.company || '-'}</td>
+                      <td>{displayProduct.category_name || displayProduct.category || '-'}</td>
+                      <td>{formatMoney(displayProduct.selling_price)}</td>
                       <td>{stock}</td>
+                      <td>{formatDate(displayProduct.expiry_date || displayProduct.expiryDate)}</td>
                       <td>
                         <span className={`stock-badge ${lowStock ? 'low' : 'ok'}`}>
                           {lowStock ? 'Low Stock' : 'In Stock'}
@@ -508,9 +721,13 @@ const ProductsPage = ({ navigate }) => {
             pieceBasedEnabled={pieceBasedEnabled}
             weightBasedEnabled={weightBasedEnabled}
             barcodeEnabled={barcodeEnabled}
-            onClose={() => setEditTarget(null)}
+            onClose={() => {
+              setEditTarget(null);
+              setEditDetailsStatus({ state: 'idle', message: '', source: 'indexeddb' });
+            }}
             onSubmit={handleSubmitEdit}
             isSubmitting={isEditingProduct}
+            detailsStatus={editDetailsStatus}
           />
         )}
         {deleteModalOpen && (
@@ -535,3 +752,11 @@ const ProductsPage = ({ navigate }) => {
 };
 
 export default ProductsPage;
+
+
+
+
+
+
+
+

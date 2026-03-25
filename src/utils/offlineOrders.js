@@ -1,6 +1,9 @@
-const STORAGE_KEY = 'offline_order_queue_v1';
+import { getOfflineOrders, saveOfflineOrdersBulk, upsertOfflineOrder } from '../core/db';
 
-const readQueue = () => {
+const STORAGE_KEY = 'offline_order_queue_v1';
+let migrationDone = false;
+
+const readLegacyQueue = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -10,11 +13,51 @@ const readQueue = () => {
   }
 };
 
-const writeQueue = (queue) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
+const clearLegacyQueue = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 };
 
-export const getOfflineOrderQueue = () => readQueue();
+const migrateLegacyQueue = async () => {
+  if (migrationDone) return;
+  migrationDone = true;
+  const legacy = readLegacyQueue();
+  if (!legacy.length) return;
+  try {
+    await saveOfflineOrdersBulk(legacy);
+    clearLegacyQueue();
+  } catch {
+    // fallback: keep legacy localStorage
+  }
+};
+
+const readQueue = async () => {
+  await migrateLegacyQueue();
+  try {
+    const list = await getOfflineOrders();
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return readLegacyQueue();
+  }
+};
+
+const writeQueue = async (queue) => {
+  const list = Array.isArray(queue) ? queue : [];
+  try {
+    await saveOfflineOrdersBulk(list);
+  } catch {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    } catch {
+      // ignore
+    }
+  }
+};
+
+export const getOfflineOrderQueue = async () => readQueue();
 
 const generateUuidV4 = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -28,8 +71,7 @@ const generateUuidV4 = () => {
   });
 };
 
-export const enqueueOfflineOrder = (entry) => {
-  const queue = readQueue();
+export const enqueueOfflineOrder = async (entry) => {
   const payload = { ...(entry.payload || {}) };
   if (entry.type === 'create' && !payload.client_order_id) {
     payload.client_order_id = generateUuidV4();
@@ -40,8 +82,13 @@ export const enqueueOfflineOrder = (entry) => {
     ...entry,
     payload,
   };
-  queue.push(withMeta);
-  writeQueue(queue);
+  try {
+    await upsertOfflineOrder(withMeta);
+  } catch {
+    const queue = await readQueue();
+    queue.push(withMeta);
+    await writeQueue(queue);
+  }
   return withMeta;
 };
 
@@ -71,9 +118,9 @@ const buildOfflineSyncOrder = (entry) => {
 };
 
 export const processOfflineQueue = async (api) => {
-  if (!navigator.onLine) return { processed: 0, failed: 0, remaining: readQueue().length };
+  if (!navigator.onLine) return { processed: 0, failed: 0, remaining: (await readQueue()).length };
 
-  const queue = readQueue();
+  const queue = await readQueue();
   const remaining = [];
   let processed = 0;
   let failed = 0;
@@ -121,6 +168,6 @@ export const processOfflineQueue = async (api) => {
     }
   }
 
-  writeQueue(remaining);
+  await writeQueue(remaining);
   return { processed, failed, remaining: remaining.length };
 };

@@ -93,6 +93,7 @@ const DashboardOverview = ({ navigate }) => {
   const [isFetchingLocationPerf, setIsFetchingLocationPerf] = useState(false);
   const [activeSection, setActiveSection] = useState("overview");
   const [activeProductsTab, setActiveProductsTab] = useState("quantity");
+  const [activeExpiryTab, setActiveExpiryTab] = useState("expiring_30_days");
   const { showPopup } = usePopup();
 
   useEffect(() => {
@@ -158,7 +159,7 @@ const DashboardOverview = ({ navigate }) => {
         setOverview(payload);
       } catch (err) {
         if (isNetworkError(err)) {
-          showPopup("Network error. Please check your connection.", "Network");
+          console.warn("[Network] Request failed - connection issue");
           return;
         }
         if (
@@ -197,7 +198,7 @@ const DashboardOverview = ({ navigate }) => {
         setBasicOverview(payload);
       } catch (err) {
         if (isNetworkError(err)) {
-          showPopup("Network error. Please check your connection.", "Network");
+          console.warn("[Network] Request failed - connection issue");
           return;
         }
         if (
@@ -260,7 +261,7 @@ const DashboardOverview = ({ navigate }) => {
         setGrowthData(payload);
       } catch (err) {
         if (isNetworkError(err)) {
-          showPopup("Network error. Please check your connection.", "Network");
+          console.warn("[Network] Request failed - connection issue");
           return;
         }
         if (
@@ -301,7 +302,7 @@ const DashboardOverview = ({ navigate }) => {
         setInventoryData(payload);
       } catch (err) {
         if (isNetworkError(err)) {
-          showPopup("Network error. Please check your connection.", "Network");
+          console.warn("[Network] Request failed - connection issue");
           return;
         }
         if (
@@ -342,7 +343,7 @@ const DashboardOverview = ({ navigate }) => {
         setCustomerCredit(payload);
       } catch (err) {
         if (isNetworkError(err)) {
-          showPopup("Network error. Please check your connection.", "Network");
+          console.warn("[Network] Request failed - connection issue");
           return;
         }
         if (
@@ -383,7 +384,7 @@ const DashboardOverview = ({ navigate }) => {
         setSmartInsights(payload);
       } catch (err) {
         if (isNetworkError(err)) {
-          showPopup("Network error. Please check your connection.", "Network");
+          console.warn("[Network] Request failed - connection issue");
           return;
         }
         if (
@@ -425,7 +426,7 @@ const DashboardOverview = ({ navigate }) => {
         setSalesTrend(payload);
       } catch (err) {
         if (isNetworkError(err)) {
-          showPopup("Network error. Please check your connection.", "Network");
+          console.warn("[Network] Request failed - connection issue");
           return;
         }
         if (
@@ -466,7 +467,7 @@ const DashboardOverview = ({ navigate }) => {
         setCategoryData(payload);
       } catch (err) {
         if (isNetworkError(err)) {
-          showPopup("Network error. Please check your connection.", "Network");
+          console.warn("[Network] Request failed - connection issue");
           return;
         }
         if (
@@ -587,6 +588,24 @@ const DashboardOverview = ({ navigate }) => {
         value: products.low_stock,
         format: "number",
         icon: "bi bi-exclamation-triangle",
+      },
+      {
+        label: "Expiring in 30 Days",
+        value: products.expiring_30_days,
+        format: "number",
+        icon: "bi bi-calendar2-week",
+      },
+      {
+        label: "Expiring in 7 Days",
+        value: products.expiring_7_days,
+        format: "number",
+        icon: "bi bi-calendar2-event",
+      },
+      {
+        label: "Expired Products",
+        value: products.expired,
+        format: "number",
+        icon: "bi bi-exclamation-octagon",
       },
       {
         label: "Total Orders",
@@ -793,6 +812,8 @@ const DashboardOverview = ({ navigate }) => {
   const lowStockRows = inventoryData?.low_stock || [];
   const deadStockRows = inventoryData?.dead_stock || [];
   const fastMovingRows = inventoryData?.fast_moving || [];
+  const expirySummary = inventoryData?.expiry_summary || {};
+  const expiryDetails = inventoryData?.expiry_details || [];
   const topCustomers = customerCredit?.top_customers || [];
   const creditSummary = customerCredit?.credit_summary || {};
   const customerMetrics = customerCredit?.customer_metrics || {};
@@ -804,6 +825,32 @@ const DashboardOverview = ({ navigate }) => {
       : [];
     return Array.from(new Set(apiList)).filter(Boolean);
   }, [locations]);
+
+  const expiryBuckets = useMemo(() => {
+    const buckets = {
+      expiring_30_days: [],
+      expiring_7_days: [],
+      expired: []
+    };
+    expiryDetails.forEach((row) => {
+      const status = row?.status;
+      if (status === 'expiring_7_days') {
+        buckets.expiring_7_days.push(row);
+        return;
+      }
+      if (status === 'expiring_30_days') {
+        buckets.expiring_30_days.push(row);
+        return;
+      }
+      if (status === 'expired') {
+        buckets.expired.push(row);
+        return;
+      }
+    });
+    return buckets;
+  }, [expiryDetails]);
+
+  const expiryRows = expiryBuckets[activeExpiryTab] || [];
 
   useEffect(() => {
     if (sidebarRef.current) {
@@ -1526,6 +1573,65 @@ const DashboardOverview = ({ navigate }) => {
                 </div>
               </div>
             </div>
+
+            <div className="table-card table-info">
+              <div className="table-title">
+                <i className="bi bi-calendar2-week"></i> Expiry Tracker
+              </div>
+              <div className="tab-switch">
+                <button
+                  type="button"
+                  className={activeExpiryTab === "expiring_30_days" ? "active" : ""}
+                  onClick={() => setActiveExpiryTab("expiring_30_days")}
+                >
+                  Expiring in 30 Days ({formatValue(expirySummary.expiring_30_days)})
+                </button>
+                <button
+                  type="button"
+                  className={activeExpiryTab === "expiring_7_days" ? "active" : ""}
+                  onClick={() => setActiveExpiryTab("expiring_7_days")}
+                >
+                  Expiring in 7 Days ({formatValue(expirySummary.expiring_7_days)})
+                </button>
+                <button
+                  type="button"
+                  className={activeExpiryTab === "expired" ? "active" : ""}
+                  onClick={() => setActiveExpiryTab("expired")}
+                >
+                  Expired ({formatValue(expirySummary.expired)})
+                </button>
+              </div>
+              <div className="table-wrapper scroll-y">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Expiry Date</th>
+                      <th>Stock</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {isFetchingInventory ? (
+                      <tr>
+                        <td colSpan={3}>Loading...</td>
+                      </tr>
+                    ) : expiryRows.length > 0 ? (
+                      expiryRows.map((row) => (
+                        <tr key={`${row?.product_id}-${row?.expiry_date || "na"}`}>
+                          <td>{row?.product_name}</td>
+                          <td>{formatDate(row?.expiry_date)}</td>
+                          <td>{formatValue(row?.current_stock)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={3}>No expiry alerts.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </section>
         )}
 
@@ -1710,3 +1816,8 @@ const DashboardOverview = ({ navigate }) => {
 };
 
 export default DashboardOverview;
+
+
+
+
+

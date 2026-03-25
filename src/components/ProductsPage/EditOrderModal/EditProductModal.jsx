@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './EditProductModal.css';
 
-const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, weightBasedEnabled = true, barcodeEnabled = false, isSubmitting = false }) => {
+const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, weightBasedEnabled = true, barcodeEnabled = false, isSubmitting = false, detailsStatus = {} }) => {
   useEffect(() => {
     // Add Google Font (Orbitron - a cool tech font)
     const link = document.createElement("link");
@@ -11,16 +11,26 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
     document.head.appendChild(link);
   }, []);
 
+  const formatExpiryDate = (value) => {
+    if (!value) return '';
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
+  };
+
   const [productName, setProductName] = useState(item.name || item.product_name || '');
   const [sellingPrice, setSellingPrice] = useState(item.selling_price);
   const [actualPrice, setActualPrice] = useState(item.actual_price);
   const [stockQuantity, setStockQuantity] = useState(
     item.stock_quantity ?? item.quantity ?? item.stock ?? ''
   );
+  const [expiryDate, setExpiryDate] = useState(formatExpiryDate(item.expiry_date ?? item.expiryDate));
   const [companyName, setCompanyName] = useState(
     item.company || item.company_name || item.brand || ''
   );
   const [barcode, setBarcode] = useState(item.barcode || '');
+  const [hasTouched, setHasTouched] = useState(false);
 
   const isWeightBasedValue = (value) => {
     if (value === true) return true;
@@ -30,24 +40,48 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
     return ['1', 'true', 'yes', 'y', 'weight', 'weighted', 'kg'].includes(normalized);
   };
 
-  const weightSource =
-    item.is_weight_based ??
-    item.type ??
-    item.product_type ??
-    item.unit ??
-    item.unit_type ??
-    item.measure;
-
-  const [isWeightBased, setIsWeightBased] = useState(
-    isWeightBasedValue(weightSource) ||
-      (typeof item?.name === 'string' && item.name.toLowerCase().includes('kg')) ||
-      (typeof item?.product_name === 'string' && item.product_name.toLowerCase().includes('kg'))
+  const deriveIsWeightBased = (sourceItem) => {
+    const weightSource =
+      sourceItem?.is_weight_based ??
+      sourceItem?.type ??
+      sourceItem?.product_type ??
+      sourceItem?.unit ??
+      sourceItem?.unit_type ??
+      sourceItem?.measure;
+    return isWeightBasedValue(weightSource) ||
+      (typeof sourceItem?.name === 'string' && sourceItem.name.toLowerCase().includes('kg')) ||
+      (typeof sourceItem?.product_name === 'string' && sourceItem.product_name.toLowerCase().includes('kg'))
       ? '1'
-      : '0'
-  );
+      : '0';
+  };
+
+  const [isWeightBased, setIsWeightBased] = useState(deriveIsWeightBased(item));
+
+  const syncFromItem = (sourceItem) => {
+    if (!sourceItem) return;
+    setProductName(sourceItem.name || sourceItem.product_name || '');
+    setSellingPrice(sourceItem.selling_price);
+    setActualPrice(sourceItem.actual_price);
+    setStockQuantity(sourceItem.stock_quantity ?? sourceItem.quantity ?? sourceItem.stock ?? '');
+    setExpiryDate(formatExpiryDate(sourceItem.expiry_date ?? sourceItem.expiryDate));
+    setCompanyName(sourceItem.company || sourceItem.company_name || sourceItem.brand || '');
+    setBarcode(sourceItem.barcode || '');
+    setIsWeightBased(deriveIsWeightBased(sourceItem));
+  };
+
+  useEffect(() => {
+    setHasTouched(false);
+    syncFromItem(item);
+  }, [item?.id]);
+
+  useEffect(() => {
+    if (hasTouched) return;
+    syncFromItem(item);
+  }, [item, hasTouched]);
 
 
   const handlePriceChange = (value, index = 0) => {
+    setHasTouched(true);
     index === 0?setActualPrice(value): index == 1? setSellingPrice(value): setStockQuantity(value);
   };
 
@@ -64,6 +98,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
       selling_price: sellingPrice,
       actual_price:actualPrice,
       stock_quantity: stockQuantity,
+      expiry_date: expiryDate || null,
       is_weight_based: isWeightBased,
       id: item.id
     };
@@ -79,6 +114,14 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
         className="modal-content p-4 text-white shadow"
       >
         <h3 className="text-center mb-4 text-info">Edit Product</h3>
+        {detailsStatus?.message && (
+          <div className={`edit-details-banner ${detailsStatus.state || ''}`}>
+            <span>{detailsStatus.message}</span>
+            <span className="details-source">
+              Source: {detailsStatus.source === 'server' ? 'Server' : 'IndexedDB'}
+            </span>
+          </div>
+        )}
         <form className="d-flex flex-column align-items-center">
           <div className="form-group w-100 mb-3 text-center">
             <label className="form-label w-100">Product Name</label>
@@ -86,7 +129,10 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
               className="form-control text-center neon-input"
               type="text"
               value={productName}
-              onChange={(e) => setProductName(e.target.value)}
+              onChange={(e) => {
+                setHasTouched(true);
+                setProductName(e.target.value);
+              }}
             />
           </div>
 
@@ -96,7 +142,10 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
               className="form-control text-center neon-input"
               type="text"
               value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
+              onChange={(e) => {
+                setHasTouched(true);
+                setCompanyName(e.target.value);
+              }}
             />
           </div>
           {barcodeEnabled && (
@@ -104,11 +153,14 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
               <label className="form-label w-100">Barcode</label>
               <input
                 className="form-control text-center neon-input"
-                type="text"
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-              />
-            </div>
+              type="text"
+              value={barcode}
+              onChange={(e) => {
+                setHasTouched(true);
+                setBarcode(e.target.value);
+              }}
+            />
+          </div>
           )}
 
           <div className="form-group w-100 mb-3 text-center">
@@ -142,11 +194,27 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
           </div>
 
           <div className="form-group w-100 mb-4 text-center">
+            <label className="form-label w-100">Expiry Date</label>
+            <input
+              className="form-control text-center neon-input"
+              type="date"
+              value={expiryDate}
+              onChange={(e) => {
+                setHasTouched(true);
+                setExpiryDate(e.target.value);
+              }}
+            />
+          </div>
+
+          <div className="form-group w-100 mb-4 text-center">
             <label className="form-label w-100">Type</label>
             <select
               className="form-control text-center neon-input"
               value={isWeightBased}
-              onChange={(e) => setIsWeightBased(e.target.value)}
+              onChange={(e) => {
+                setHasTouched(true);
+                setIsWeightBased(e.target.value);
+              }}
             >
               {pieceBasedEnabled && <option value="0">Piece-based</option>}
               {weightBasedEnabled && <option value="1">Weight-based</option>}
@@ -185,3 +253,8 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
 };
 
 export default EditProductModal;
+
+
+
+
+

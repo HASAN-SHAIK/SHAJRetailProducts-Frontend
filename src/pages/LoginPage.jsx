@@ -3,6 +3,7 @@ import api from '../utils/axios';
 import { useNavigate } from 'react-router-dom';
 import Login from '../components/Login/Login';
 import { preloadProductsToIndexedDb } from '../utils/indexedDb';
+import { saveAuthToken, saveSessionInfo } from '../utils/sessionStorage';
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -21,7 +22,8 @@ const LoginPage = () => {
       const res = await api.post('/auth/login', form); // cookie is auto-stored
       if (res.data?.token && typeof window !== 'undefined') {
         try {
-          localStorage.setItem('auth_token', res.data.token);
+          await saveAuthToken(res.data.token);
+          await saveSessionInfo({ token: res.data.token, user: res.data.user || null });
         } catch (err) {
           // Ignore storage failures (private mode / blocked storage)
         }

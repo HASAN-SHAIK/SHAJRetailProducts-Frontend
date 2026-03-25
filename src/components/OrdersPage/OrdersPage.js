@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../../utils/axios';
 import './OrdersPage.css';
 import { usePopup } from '../common/PopUp/PopupProvider';
+import { getOfflineOrderQueue, processOfflineQueue } from '../../utils/offlineOrders';
 import { useSelector } from 'react-redux';
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -31,7 +32,7 @@ const OrdersPage = ({ navigate }) => {
   const [customRangeKey, setCustomRangeKey] = useState(0);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState('created_at');
+  const [sortBy, setSortBy] = useState('id');
   const [sortOrder, setSortOrder] = useState('desc');
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -57,6 +58,9 @@ const OrdersPage = ({ navigate }) => {
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptError, setReceiptError] = useState('');
   const [receiptOrder, setReceiptOrder] = useState(null);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [offlineOrders, setOfflineOrders] = useState([]);
+  const [syncingOffline, setSyncingOffline] = useState(false);
 
   const formatDate = useCallback((value) => {
     if (!value) return '-';
@@ -128,6 +132,23 @@ const OrdersPage = ({ navigate }) => {
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders, customRangeKey]);
+
+  useEffect(() => {
+    const refreshPending = async () => {
+      try {
+        const queue = await getOfflineOrderQueue();
+        const list = Array.isArray(queue) ? queue : [];
+        setPendingSyncCount(list.length);
+        setOfflineOrders(list);
+      } catch {
+        setPendingSyncCount(0);
+        setOfflineOrders([]);
+      }
+    };
+    refreshPending();
+    window.addEventListener('focus', refreshPending);
+    return () => window.removeEventListener('focus', refreshPending);
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -249,6 +270,29 @@ const OrdersPage = ({ navigate }) => {
     setReceiptLoading(false);
     setReceiptError('');
     setReceiptOrder(null);
+  };
+
+  const handleOfflineSync = async () => {
+    if (!navigator.onLine) return;
+    if (syncingOffline) return;
+    try {
+      setSyncingOffline(true);
+      await processOfflineQueue(api);
+    } catch (err) {
+      console.error('Offline order sync failed', err);
+    } finally {
+      setSyncingOffline(false);
+      try {
+        const queue = await getOfflineOrderQueue();
+        const list = Array.isArray(queue) ? queue : [];
+        setPendingSyncCount(list.length);
+        setOfflineOrders(list);
+      } catch {
+        setPendingSyncCount(0);
+        setOfflineOrders([]);
+      }
+      fetchOrders();
+    }
   };
 
   const formatReceiptAmount = (value) => {
@@ -689,6 +733,63 @@ const OrdersPage = ({ navigate }) => {
 
   return (
     <div className="orders-page">
+      <div className="mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div className="text-muted">
+          Offline queue: {pendingSyncCount}
+        </div>
+        <button
+          type="button"
+          className="btn btn-outline-primary"
+          onClick={handleOfflineSync}
+          disabled={!navigator.onLine || syncingOffline || pendingSyncCount === 0}
+        >
+          {syncingOffline ? 'Syncing...' : 'Sync Offline Orders'}
+        </button>
+      </div>
+      {offlineOrders.length > 0 && (
+        <div className="orders-card mb-3">
+          <div className="orders-card-header">
+            <h5 className="mb-0">Pending Offline Orders</h5>
+          </div>
+          <div className="orders-table-wrapper">
+            <table className="orders-table">
+              <thead>
+                <tr>
+                  <th>Local ID</th>
+                  <th>Type</th>
+                  <th>Total</th>
+                  <th>Payment</th>
+                  <th>Created</th>
+                  <th>Items</th>
+                </tr>
+              </thead>
+              <tbody>
+                {offlineOrders.map((entry) => {
+                  const payload = entry.payload || {};
+                  const items = Array.isArray(payload.products) ? payload.products : [];
+                  const total = payload.total_amount ?? payload.total_price ?? 0;
+                  const payment =
+                    payload.payment_method ||
+                    payload.payment_mode ||
+                    payload.payment ||
+                    '-';
+                  const type = payload.transaction_type || payload.type || entry.type || '-';
+                  return (
+                    <tr key={entry.id}>
+                      <td>{entry.id}</td>
+                      <td>{type}</td>
+                      <td>{formatMoney(total)}</td>
+                      <td>{payment}</td>
+                      <td>{formatDate(entry.createdAt)}</td>
+                      <td>{items.length}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       <div className="orders-page-header">
         <div>
           {/* <h2 className="orders-title">Orders</h2> */}
@@ -708,6 +809,7 @@ const OrdersPage = ({ navigate }) => {
                 value={sortBy}
                 onChange={(event) => handleSortToggle(event.target.value)}
               >
+                <option value="id">Sort by Order ID</option>
                 <option value="created_at">Sort by Date</option>
                 <option value="total_amount">Sort by Total Amount</option>
                 <option value="total_paid">Sort by Total Paid</option>

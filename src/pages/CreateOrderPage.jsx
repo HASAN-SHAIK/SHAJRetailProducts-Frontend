@@ -1431,11 +1431,11 @@ const schedulePurchaseProductSearch = (text, index) => {
         })
       };
 
-    const enqueueAndExit = (isUpdate) => {
+    const enqueueAndExit = async (isUpdate) => {
       const entry = isUpdate
         ? { type: 'update', orderId: orderDetails.id, payload: updatePayload }
         : { type: 'create', payload: createPayload };
-      enqueueOfflineOrder(entry);
+      await enqueueOfflineOrder(entry);
       showPopup('Offline: Order saved and will sync when you are online.', 'Offline');
       dispatch(clearOrderDetails());
       if (isUpdate || !multiDraftEnabled) {
@@ -1447,9 +1447,12 @@ const schedulePurchaseProductSearch = (text, index) => {
     };
 
     try {
+      const serverOffline =
+        !navigator.onLine ||
+        (typeof window !== 'undefined' && window.__serverOffline === true);
 
-      if (!navigator.onLine) {
-        enqueueAndExit(Boolean(orderDetails));
+      if (serverOffline) {
+        await enqueueAndExit(Boolean(orderDetails));
         return;
       }
 
@@ -1489,7 +1492,7 @@ const schedulePurchaseProductSearch = (text, index) => {
       }
     } catch (err) {
       if (!err?.response) {
-        enqueueAndExit(Boolean(orderDetails));
+        await enqueueAndExit(Boolean(orderDetails));
         return;
       }
       const message = err?.response?.data?.message;

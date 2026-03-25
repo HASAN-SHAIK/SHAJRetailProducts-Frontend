@@ -11,6 +11,7 @@ import { getDeviceId } from '../../utils/device';
 import { decodeJwtPayload } from '../../utils/jwt';
 import { setTenantConfig, setTenantConfigStatus, setTenantIdentity, setSubscriptionStatus } from '../../store/tenantSlice';
 import { preloadProductsToIndexedDb } from '../../utils/indexedDb';
+import { saveAuthToken, saveSessionInfo } from '../../utils/sessionStorage';
 const Login = ( ) => {
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState({ email: '', password: '' });
@@ -32,7 +33,7 @@ const Login = ( ) => {
       let decoded = null;
       if (res.data?.token && typeof window !== 'undefined') {
         try {
-          localStorage.setItem('auth_token', res.data.token);
+          await saveAuthToken(res.data.token);
           decoded = decodeJwtPayload(res.data.token);
         } catch (err) {
           // Ignore storage failures (private mode / blocked storage)
@@ -50,6 +51,14 @@ const Login = ( ) => {
         role: decoded.role,
         tenant_id: decoded.tenant_id,
       } : null);
+      try {
+        await saveSessionInfo({
+          token: res.data?.token || null,
+          user: userPayload,
+        });
+      } catch (err) {
+        // Ignore storage failures
+      }
       dispatch(setUserDetails(userPayload)); // Dispatch user details to Redux store
 
       dispatch(setTenantConfigStatus('loading'));

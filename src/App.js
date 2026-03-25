@@ -20,6 +20,7 @@ import { processOfflineQueue } from './utils/offlineOrders';
 import { setTenantConfig, setTenantConfigStatus, setSubscriptionStatus, setTenantIdentity } from './store/tenantSlice';
 import SubscriptionExpired from './pages/SubscriptionExpired';
 import { decodeJwtPayload } from './utils/jwt';
+import { getAuthToken, migrateAuthTokenFromLocalStorage } from './utils/sessionStorage';
 import Support from './pages/Support';
 import { usePopup } from './components/common/PopUp/PopupProvider';
 import DashboardMobile from './mobile/pages/DashboardMobile';
@@ -116,19 +117,27 @@ useEffect(() => {
 
 useEffect(() => {
   if (typeof window === 'undefined') return;
-  try {
-    const token = localStorage.getItem('auth_token');
-    const decoded = decodeJwtPayload(token);
-    if (decoded) {
-      dispatch(setTenantIdentity({
-        tenantId: decoded.tenant_id,
-        role: decoded.role,
-        userId: decoded.user_id,
-      }));
+  let active = true;
+  const loadToken = async () => {
+    try {
+      await migrateAuthTokenFromLocalStorage();
+      const token = await getAuthToken();
+      const decoded = decodeJwtPayload(token);
+      if (decoded && active) {
+        dispatch(setTenantIdentity({
+          tenantId: decoded.tenant_id,
+          role: decoded.role,
+          userId: decoded.user_id,
+        }));
+      }
+    } catch (err) {
+      // ignore
     }
-  } catch (err) {
-    // ignore
-  }
+  };
+  loadToken();
+  return () => {
+    active = false;
+  };
 }, [dispatch]);
 
   useEffect(() => {
@@ -276,8 +285,9 @@ const tenantBannerColor = (() => {
         </div>
       )}
       {showServerDownBanner && (
-        <div className="server-down-banner">
-          Server is Offline You Can Still Create Orders, But Sync Will Happen Once Server is Back Online
+        <div className="server-offline-indicator" title="Server is offline. You can still place orders at the same speed.">
+          <span className="server-offline-dot" />
+          <span className="server-offline-text">Offline Mode</span>
         </div>
       )}
       {showTenantBanner && (

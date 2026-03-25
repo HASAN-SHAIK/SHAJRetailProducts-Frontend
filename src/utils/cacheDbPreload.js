@@ -1,4 +1,5 @@
 import { getDeviceId } from './device';
+import { getAuthToken } from './sessionStorage';
 import { saveProductsBulk } from '../core/db';
 
 const extractProductsPayload = async (response) => {
@@ -34,7 +35,7 @@ export const preloadProductsViaFetch = async (baseURL) => {
   const deviceId = getDeviceId();
   let token = null;
   try {
-    token = localStorage.getItem('auth_token');
+    token = await getAuthToken();
   } catch (err) {
     token = null;
   }

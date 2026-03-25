@@ -343,14 +343,50 @@ html, body{
   max-height: 60vh;
   overflow-y: auto;
 }
-.server-down-banner {
-  background: linear-gradient(120deg, rgba(239, 68, 68, 0.92), rgba(245, 158, 11, 0.92));
-  color: #0b0b0f;
-  text-align: center;
-  padding: 10px 16px;
+.server-offline-indicator {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
   font-weight: 700;
-  letter-spacing: 0.01em;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(248, 113, 113, 0.6);
+  box-shadow: 0 10px 24px rgba(239, 68, 68, 0.35);
+  z-index: 2500;
+  text-transform: uppercase;
+  font-size: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.server-offline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  animation: offline-pulse 1.6s infinite;
+}
+
+.server-offline-text {
+  white-space: nowrap;
+}
+
+@keyframes offline-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
 }
 .tenant-status-banner {
   background: linear-gradient(120deg, rgba(59, 130, 246, 0.92), rgba(14, 165, 233, 0.92));

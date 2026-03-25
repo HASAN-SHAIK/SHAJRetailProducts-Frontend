@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getDeviceId } from './device';
+import { getAuthToken } from './sessionStorage';
 import { preloadProductsViaFetch } from './cacheDbPreload';
 
 console.log('[cacheDB] axios module loaded');
@@ -12,7 +13,7 @@ const api = axios.create({
 
 // 🔐 REGISTER INTERCEPTOR HERE (ONCE)
 api.interceptors.request.use(
-  (config) => {
+  async (config) => {
     config.metadata = {
       startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
     };
@@ -21,7 +22,7 @@ api.interceptors.request.use(
     config.headers['x-device-id'] = deviceId;
     if (typeof window !== 'undefined') {
       try {
-        const token = localStorage.getItem('auth_token');
+        const token = await getAuthToken();
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }

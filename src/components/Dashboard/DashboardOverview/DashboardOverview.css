@@ -616,6 +616,11 @@
   background: rgba(74, 222, 128, 0.08);
 }
 
+.table-info {
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.08);
+}
+
 .tab-switch {
   display: flex;
   gap: 10px;
@@ -704,3 +709,4 @@
     align-items: flex-start;
   }
 }
+

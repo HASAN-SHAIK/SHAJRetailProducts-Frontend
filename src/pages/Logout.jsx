@@ -9,6 +9,7 @@ import api from '../utils/axios';
 import LoadingSpinner from '../components/common/LoadingSpinner/LoadingSpinner';
 import { clearOrderDetails } from '../store/orderSlice';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
+import { clearAuthToken, clearSessionInfo } from '../utils/sessionStorage';
 
 const Logout = () => {
   const navigate = useNavigate();
@@ -29,7 +30,8 @@ const Logout = () => {
         dispatch(clearTenantState());
         Cookies.remove('token');
         try {
-          localStorage.removeItem('auth_token');
+          await clearAuthToken();
+          await clearSessionInfo();
         } catch (err) {
           // Ignore storage failures
         }
