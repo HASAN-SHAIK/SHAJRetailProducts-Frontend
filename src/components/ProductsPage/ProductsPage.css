@@ -99,6 +99,11 @@
 .products-table td {
   padding: 14px 16px;
   text-align: left;
+  border-bottom: none;
+}
+
+.products-table thead tr,
+.products-table tbody tr {
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
@@ -120,6 +125,35 @@
 .products-row:hover {
   background: rgba(59, 130, 246, 0.08);
   transform: translateY(-1px);
+}
+
+.dirty-row {
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.editable-cell {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+  cursor: text;
+}
+
+.editable-cell:hover {
+  color: #e2e8f0;
+  text-decoration: underline;
+}
+
+.editable-input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  padding: 6px 10px;
 }
 
 .sortable {
@@ -157,6 +191,47 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.product-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.product-name-text {
+  display: inline-block;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-type-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.product-type-tag.weight {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.product-type-tag.piece {
+  background: rgba(34, 197, 94, 0.15);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.35);
 }
 
 .products-pagination {
@@ -221,9 +296,10 @@
   inset: 0;
   background: rgba(6, 8, 16, 0.65);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: stretch;
   z-index: 3000;
+  overflow: hidden;
 }
 
 .delete-modal {
@@ -234,6 +310,37 @@
   padding: 20px;
   color: #e2e8f0;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+}
+
+.stock-modal {
+  width: min(720px, 96vw);
+}
+
+.import-modal {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0;
+  padding: 18px 20px;
+  min-height: 100vh;
+}
+
+.import-preview-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  height: calc(100vh - 240px);
+  overflow: auto;
+  margin-bottom: 12px;
+}
+.import-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
 .delete-modal h4 {

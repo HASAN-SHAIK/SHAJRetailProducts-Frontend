@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { getDeviceId } from './device';
 import { getAuthToken } from './sessionStorage';
-import { preloadProductsViaFetch } from './cacheDbPreload';
+import { preloadAllCaches } from './indexedDb';
 
 console.log('[cacheDB] axios module loaded');
 
@@ -20,6 +20,14 @@ api.interceptors.request.use(
     const deviceId = getDeviceId();
     console.log('Sending device id:', deviceId); // 🔍 DEBUG
     config.headers['x-device-id'] = deviceId;
+    try {
+      const selectedBranchId = localStorage.getItem('selected_branch_id');
+      if (selectedBranchId && selectedBranchId !== 'all') {
+        config.headers['x-branch-id'] = selectedBranchId;
+      }
+    } catch (err) {
+      // ignore storage access issues
+    }
     if (typeof window !== 'undefined') {
       try {
         const token = await getAuthToken();
@@ -54,7 +62,7 @@ api.interceptors.response.use(
       const url = response?.config?.url || '';
       if (url.includes('/platform/config')) {
         console.log('[cacheDB] platform/config detected');
-        preloadProductsViaFetch(api.defaults.baseURL).catch((err) => {
+        preloadAllCaches().catch((err) => {
           console.error('[cacheDB] preload failed', err);
         });
       }
@@ -65,7 +73,7 @@ api.interceptors.response.use(
       if (url.includes('/auth/login')) {
         window.dispatchEvent(new CustomEvent('login-success'));
         console.log('[cacheDB] login success detected');
-        preloadProductsViaFetch(api.defaults.baseURL).catch((err) => {
+        preloadAllCaches().catch((err) => {
           console.error('[cacheDB] preload failed', err);
         });
       }

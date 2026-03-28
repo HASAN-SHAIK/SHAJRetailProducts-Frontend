@@ -4,9 +4,10 @@ import Dashboard from './pages/Dashboard';
 import ProtectedRoute from './components/common/protectedRoute';
 import { ThemeProvider } from './ThemeContext';
 import Orders from './pages/Orders';
+import Expenses from './pages/Expenses';
 import Navbar from './components/common/Navbar/Navbar';
 import { useEffect, useRef, useState } from 'react';
-import ProductsPage from './components/ProductsPage/ProductsPage';
+import ProductsPage from './components/ProductsPage';
 import Transactions from './pages/Transactions';
 import CreateOrderPage from './pages/CreateOrderPage';
 import './App.css';
@@ -15,7 +16,7 @@ import Logout from './pages/Logout';
 import Footer from './components/Footer/Footer';
 import { setUserDetails } from './store/userSlice';
 import api from './utils/axios';
-import { preloadProductsToIndexedDb } from './utils/indexedDb';
+import { preloadAllCaches, preloadProductsToIndexedDb } from './utils/indexedDb';
 import { processOfflineQueue } from './utils/offlineOrders';
 import { setTenantConfig, setTenantConfigStatus, setSubscriptionStatus, setTenantIdentity } from './store/tenantSlice';
 import SubscriptionExpired from './pages/SubscriptionExpired';
@@ -23,12 +24,17 @@ import { decodeJwtPayload } from './utils/jwt';
 import { getAuthToken, migrateAuthTokenFromLocalStorage } from './utils/sessionStorage';
 import Support from './pages/Support';
 import { usePopup } from './components/common/PopUp/PopupProvider';
+import { getSettings } from './services/settingsService';
+import { useWhatsappStore } from './store/whatsappStore';
+import { getBranches } from './services/branchService';
+import { useBranchStore } from './store/branchStore';
 import DashboardMobile from './mobile/pages/DashboardMobile';
 import OrdersMobile from './mobile/pages/OrdersMobile';
 import OrderDetailsMobile from './mobile/pages/OrderDetailsMobile';
 import ProductsMobile from './mobile/pages/ProductsMobile';
 import ReportsMobile from './mobile/pages/ReportsMobile';
 import SettingsMobile from './mobile/pages/SettingsMobile';
+import BillingPage from './pages/BillingPage';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
@@ -56,6 +62,10 @@ function App() {
   const dispatch = useDispatch();
   const location = useLocation();
   const { showPopup } = usePopup();
+  const setWhatsappEnabled = useWhatsappStore((state) => state.setWhatsappEnabled);
+  const setBranches = useBranchStore((state) => state.setBranches);
+  const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
+  const setSelectedBranchId = useBranchStore((state) => state.setSelectedBranchId);
   const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
   const isMobileRoute = location.pathname.startsWith('/m');
   const isMobileDevice =
@@ -101,7 +111,7 @@ useEffect(() => {
   if (!location.pathname.startsWith('/dashboard')) return;
   if (preloadOnceRef.current) return;
   preloadOnceRef.current = true;
-  preloadProductsToIndexedDb().catch((err) => {
+  preloadAllCaches().catch((err) => {
     console.error('IndexedDB preload failed', err);
   });
 }, [location.pathname]);
@@ -140,11 +150,11 @@ useEffect(() => {
   };
 }, [dispatch]);
 
-  useEffect(() => {
-    const fetchTenantConfig = async () => {
-      if (!userDetails || tenantConfigStatus === 'loading' || tenantConfigStatus === 'loaded') return;
-      dispatch(setTenantConfigStatus('loading'));
-      try {
+useEffect(() => {
+  const fetchTenantConfig = async () => {
+    if (!userDetails || tenantConfigStatus === 'loading' || tenantConfigStatus === 'loaded') return;
+    dispatch(setTenantConfigStatus('loading'));
+    try {
         const res = await api.get('/platform/config');
         const payload = res?.data?.data || res?.data || {};
         dispatch(setTenantConfig(payload));
@@ -161,10 +171,60 @@ useEffect(() => {
           dispatch(setTenantConfigStatus('error'));
           console.error('Failed to fetch tenant config', err);
         }
+    }
+  };
+  fetchTenantConfig();
+}, [userDetails, tenantConfigStatus, dispatch]);
+
+useEffect(() => {
+  const fetchSettings = async () => {
+    if (!userDetails) return;
+    if (!navigator.onLine) return;
+    try {
+      const payload = await getSettings();
+      const features = payload?.plan_features || payload?.features || payload || {};
+      setWhatsappEnabled(
+        payload?.whatsapp_bill_module === true ||
+        features?.whatsapp_bill_module === true ||
+        features?.WHATSAPP_BILL === true
+      );
+    } catch (err) {
+      setWhatsappEnabled(false);
+    }
+  };
+  fetchSettings();
+}, [userDetails, setWhatsappEnabled]);
+
+useEffect(() => {
+  const fetchBranches = async () => {
+    if (!userDetails) return;
+    if (!navigator.onLine) return;
+    try {
+      const payload = await getBranches();
+      const list = payload?.branches || payload?.data?.branches || payload?.data || [];
+      const branches = Array.isArray(list) ? list : [];
+      setBranches(branches);
+      if (!selectedBranchId && branches.length > 0) {
+        if (userDetails?.role === 'admin') {
+          setSelectedBranchId('all');
+        } else {
+          setSelectedBranchId(branches[0].id);
+        }
       }
-    };
-    fetchTenantConfig();
-  }, [userDetails, tenantConfigStatus, dispatch]);
+    } catch (err) {
+      setBranches([]);
+    }
+  };
+  fetchBranches();
+}, [userDetails, selectedBranchId, setBranches, setSelectedBranchId]);
+
+useEffect(() => {
+  if (!tenantConfig) return;
+  const features = tenantConfig?.plan_features || tenantConfig?.features || tenantConfig || {};
+  if (features?.WHATSAPP_BILL === true || features?.whatsapp_bill_module === true) {
+    setWhatsappEnabled(true);
+  }
+}, [tenantConfig, setWhatsappEnabled]);
 
 useEffect(() => {
   const fetchTenantBanner = async () => {
@@ -218,15 +278,15 @@ useEffect(() => {
   };
 }, []);
 
-useEffect(() => {
-  const handleLoginSuccess = () => {
-    preloadProductsToIndexedDb().catch((err) => {
+  useEffect(() => {
+    const handleLoginSuccess = () => {
+    preloadAllCaches().catch((err) => {
       console.error('IndexedDB preload failed', err);
     });
-  };
-  window.addEventListener('login-success', handleLoginSuccess);
-  return () => window.removeEventListener('login-success', handleLoginSuccess);
-}, []);
+    };
+    window.addEventListener('login-success', handleLoginSuccess);
+    return () => window.removeEventListener('login-success', handleLoginSuccess);
+  }, []);
 
 useEffect(() => {
   const handleServerStatus = (event) => {
@@ -379,6 +439,14 @@ const tenantBannerColor = (() => {
           }
         />
         <Route
+          path="/expenses"
+          element={
+            <ProtectedRoute>
+              <Expenses />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/products"
           element={
             <ProtectedRoute>
@@ -399,6 +467,14 @@ const tenantBannerColor = (() => {
           element={
             <ProtectedRoute>
               <CreateOrderPage  />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/billing"
+          element={
+            <ProtectedRoute>
+              <BillingPage navigate={navigate} />
             </ProtectedRoute>
           }
         />

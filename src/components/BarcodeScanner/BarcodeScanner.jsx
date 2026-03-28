@@ -14,7 +14,7 @@ const BarcodeScanner = () => {
     category: '',
     company: '',
     selling_price: '',
-    actual_price: '',
+    purchase_price: '',
     stock_quantity: '',
     is_weight_based: '0',
     barcode: '',
@@ -78,7 +78,7 @@ const BarcodeScanner = () => {
         category: createData.category,
         company: createData.company,
         selling_price: createData.selling_price,
-        actual_price: createData.actual_price,
+        purchase_price: createData.purchase_price,
         stock_quantity: createData.stock_quantity,
         is_weight_based: Number(createData.is_weight_based),
         barcode: createData.barcode,
@@ -175,11 +175,11 @@ const BarcodeScanner = () => {
                 onChange={handleCreateChange}
               />
               <input
-                name="actual_price"
-                placeholder="Actual Price"
+                name="purchase_price"
+                placeholder="Purchase Price"
                 type="number"
                 className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400"
-                value={createData.actual_price}
+                value={createData.purchase_price}
                 onChange={handleCreateChange}
               />
               <input
@@ -232,3 +232,5 @@ const BarcodeScanner = () => {
 };
 
 export default BarcodeScanner;
+
+

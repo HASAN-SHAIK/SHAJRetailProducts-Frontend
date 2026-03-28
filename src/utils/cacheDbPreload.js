@@ -46,10 +46,10 @@ export const preloadProductsViaFetch = async (baseURL) => {
   const json = await res.json();
   const products = await extractProductsPayload(json);
   const normalizedProducts = products.map((product) => normalizeProduct(product));
-  if (normalizedProducts.some((product) => !product)) {
-    throw new Error('Missing barcode in product payload');
-  }
-  console.log('[cacheDB] saving products', normalizedProducts.length);
-  const savedCount = await saveProductsBulk(normalizedProducts);
+  // Some products may not have barcodes. Cache what we can instead of failing.
+  const safeProducts = normalizedProducts.filter(Boolean);
+  if (!safeProducts.length) return;
+  console.log('[cacheDB] saving products', safeProducts.length);
+  const savedCount = await saveProductsBulk(safeProducts);
   console.log('[cacheDB] preload complete', savedCount);
 };

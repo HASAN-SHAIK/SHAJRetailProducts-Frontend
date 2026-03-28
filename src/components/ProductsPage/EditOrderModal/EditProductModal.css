@@ -1,47 +1,10 @@
 .modal-overlay.edit-product-modal {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(10, 10, 10, 0.8);
+  inset: 0;
+  background: rgba(10, 12, 22, 0.7);
   z-index: 9000;
   backdrop-filter: blur(4px);
-}
-
-.modal-content{
-    display: flex; 
-    align-items: center;
-    justify-content: center;
-    max-width: 500px;
-    width: 100%;
-    font-family: 'Poppins', sans-serif;
-    border-radius: 1.5rem !important;
-    background: #182c60 !important;
-    border: 1px solid #00ffc8 !important;
-    max-height: 85vh;
-    overflow-y: auto;
-    scrollbar-width: none;
-}
-
-.modal-content::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.neon-input {
-  border: 2px solid #182c60;
-  background-color: #1a1a1a;
-  color: #182c60;
-  box-shadow: 0 0 5px #182c60;
-  transition: all 0.3s ease-in-out;
-  text-align: center;
-}
-
-.neon-input:focus {
-  outline: none;
-  box-shadow: 0 0 10px #182c60, 0 0 20px #182c60;
-  background-color: #182c60;
+  padding: 16px;
 }
 
 .edit-details-banner {
@@ -80,58 +43,10 @@
   white-space: nowrap;
 }
 
-.w-45 {
-  width: 45%;
+.edit-product-modal .modal-dialog {
+  width: min(720px, 96vw);
 }
 
-@media (max-width: 768px) {
-  .modal-overlay.edit-product-modal {
-    padding: 16px;
-  }
-
-  .modal-content {
-    width: 100%;
-    max-width: 95vw;
-    padding: 16px !important;
-  }
-
-  .modal-content .form-control {
-    font-size: 0.9rem;
-  }
-
-  .w-45 {
-    width: 100%;
-  }
-
-  .modal-content .d-flex.justify-content-between {
-    flex-direction: column;
-    gap: 10px;
-  }
-}
-
-.edit-product-modal .modal-content {
-  padding: 24px !important;
-  margin-top: 16px;
-}
-
-.edit-product-modal form {
-  width: 100%;
-  align-items: stretch;
-}
-
-.edit-product-modal .form-group {
-  width: 100%;
-  text-align: left;
-}
-
-.edit-product-modal .form-label {
-  display: block;
-  width: 100%;
-  text-align: left;
-}
-
-.edit-product-modal .form-control,
-.edit-product-modal .neon-input,
-.edit-product-modal select {
-  width: 100%;
+.edit-product-modal .modal-body {
+  padding-top: 4px;
 }

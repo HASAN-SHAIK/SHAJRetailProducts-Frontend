@@ -297,6 +297,51 @@
   margin-top: 20px;
 }
 
+.purchase-invoice-modal {
+  width: min(1100px, 100%);
+}
+
+.invoice-table-wrapper {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+}
+
+.invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.invoice-table th,
+.invoice-table td {
+  padding: 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  vertical-align: top;
+}
+
+.invoice-table th {
+  position: sticky;
+  top: 0;
+  background: #0f172a;
+  z-index: 1;
+  font-weight: 600;
+}
+
+.invoice-table .missing-price td {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.invoice-price-hint {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
 @media (max-width: 768px) {
   .order-shell--split {
     grid-template-columns: 1fr;

@@ -19,7 +19,7 @@ describe('Products Page – End-to-End Tests', () => {
     cy.get('#product_name').type('TestProduct' + Date.now());
     cy.get('#company').type('TestCompany');
     cy.get('#selling_price').type('200');
-    cy.get('#actual_price').type('150');
+    cy.get('#purchase_price').type('150');
     cy.get('#stock_quantity').type('10'); 
     cy.get('#category').select('Electronics');
     cy.get('#time_for_delivery').type('2');

@@ -7,6 +7,7 @@ import HighlightedTable from '../common/HighlightedTable/HighLightedTable';
 import TableComponent from '../common/TableComponent/TableComponent';
 import LoadingSpinner from '../common/LoadingSpinner/LoadingSpinner';
 import { usePopup } from '../common/PopUp/PopupProvider';
+import { useBranchStore } from '../../store/branchStore';
 
 
 
@@ -18,6 +19,7 @@ const TransactionsPage = ({navigate}) => {
   const [customEndDate, setCustomEndDate] = useState('');
   const [customRangeKey, setCustomRangeKey] = useState(0);
   const { showPopup } = usePopup();
+  const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const hasNonZeroValue = (value) => {
     if (value === null || value === undefined) return false;
     const num = Number(value);
@@ -49,7 +51,7 @@ const formatToIST = (utcDate) => {
   
   useEffect(() => {
     fetchTransactions();
-  }, [selectedRange, customRangeKey]);
+  }, [selectedRange, customRangeKey, selectedBranchId]);
 
   const buildRangeParams = () => {
     const params = { range: selectedRange };

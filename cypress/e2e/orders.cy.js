@@ -31,7 +31,7 @@ describe('Orders Page E2E', () => {
           selling_price: 120,
           stock_quantity: 50,
           company: 'E2E Co',
-          actual_price: 90,
+          purchase_price: 90,
           time_for_delivery: '2 days',
         },
       });

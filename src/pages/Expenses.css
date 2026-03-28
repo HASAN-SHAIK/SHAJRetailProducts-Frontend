@@ -1,0 +1,99 @@
+.expenses-page {
+  padding: 20px;
+  margin-top: 10vh;
+  color: #e2e8f0;
+}
+
+.expenses-header {
+  margin-bottom: 16px;
+}
+
+.expense-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+  background-color: transparent;
+}
+
+.summary-card {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+}
+
+.summary-card span {
+  display: block;
+  
+  font-size: 0.9rem;
+}
+
+.summary-card strong {
+  font-size: 1.2rem;
+  color: #7dd3fc;
+}
+
+.expense-filters {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+}
+
+.expense-card {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+}
+
+.expenses-table-wrapper{
+  overflow: auto;
+  max-height: 420px;
+  overflow-y: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.expenses-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 640px;
+}
+
+.expenses-table th,
+.expenses-table td {
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.expenses-table thead tr,
+.expenses-table tbody tr {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.expenses-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(15, 23, 42, 0.92);
+  color: #7dd3fc;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.8rem;
+  z-index: 2;
+}
+
+.expenses-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.expenses-table td.text-end {
+  text-align: right;
+}
