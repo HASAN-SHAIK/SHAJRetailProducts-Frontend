@@ -12,6 +12,7 @@ import { decodeJwtPayload } from '../../utils/jwt';
 import { setTenantConfig, setTenantConfigStatus, setTenantIdentity, setSubscriptionStatus } from '../../store/tenantSlice';
 import { preloadAllCaches } from '../../utils/indexedDb';
 import { saveAuthToken, saveSessionInfo } from '../../utils/sessionStorage';
+
 const Login = ( ) => {
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState({ email: '', password: '' });
@@ -107,6 +108,7 @@ const Login = ( ) => {
        <img className='companyLogo' src={logo} alt="SHAJ Logo" width="30%" height="20%"/>
       <div className="login-container">
         <h2 className="tenant-name">SHAJ NextGen Technologies</h2>
+        { process.env.REACT_APP_FOR_RESUME && <p className='demoCredentials'>Demo credentials: admin@hasan.com / admin</p> }
         {/* <p className='disabled'>Use password 'admin'</p> */}
       <div className="floating-shape logincube green"></div>
       <div className="floating-shape logincircle red"></div>
