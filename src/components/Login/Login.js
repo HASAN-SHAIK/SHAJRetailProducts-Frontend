@@ -10,7 +10,7 @@ import logo from '../../Images/logo.png';
 import { getDeviceId } from '../../utils/device';
 import { decodeJwtPayload } from '../../utils/jwt';
 import { setTenantConfig, setTenantConfigStatus, setTenantIdentity, setSubscriptionStatus } from '../../store/tenantSlice';
-import { preloadProductsToIndexedDb } from '../../utils/indexedDb';
+import { preloadAllCaches } from '../../utils/indexedDb';
 import { saveAuthToken, saveSessionInfo } from '../../utils/sessionStorage';
 const Login = ( ) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -83,7 +83,13 @@ const Login = ( ) => {
         console.error('Failed to fetch tenant config', err);
       }
       try {
-        await preloadProductsToIndexedDb();
+        let branchId = null;
+        try {
+          branchId = localStorage.getItem('selected_branch_id');
+        } catch (err) {
+          branchId = null;
+        }
+        await preloadAllCaches({ branchId });
       } catch (err) {
         console.error('IndexedDB preload failed', err);
       }

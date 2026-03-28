@@ -7,6 +7,7 @@ import { usePopup } from "../../common/PopUp/PopupProvider";
 import { Line, Pie } from "react-chartjs-2";
 import { useSelector } from "react-redux";
 import { useLocation } from "react-router-dom";
+import { useBranchStore } from "../../../store/branchStore";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -64,6 +65,9 @@ const DashboardOverview = ({ navigate }) => {
   const location = useLocation();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const userDetails = useSelector((state) => state.user.userDetails);
+  const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
+  const effectiveBranchId =
+    selectedBranchId && selectedBranchId !== "all" ? selectedBranchId : "";
   const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
   const advancedEnabled = planFeatures.advanced_reports === true;
   const analyticalEnabled = planFeatures.analytical_reports === true;
@@ -105,10 +109,10 @@ const DashboardOverview = ({ navigate }) => {
   useEffect(() => {
     if (preloadRef.current) return;
     preloadRef.current = true;
-    preloadProductsToIndexedDb().catch((err) => {
+    preloadProductsToIndexedDb({ branchId: selectedBranchId }).catch((err) => {
       console.error('IndexedDB preload failed', err);
     });
-  }, []);
+  }, [selectedBranchId]);
 
   useEffect(() => {
     setIsFetching(false);
@@ -150,6 +154,7 @@ const DashboardOverview = ({ navigate }) => {
         const query = new URLSearchParams({
           range,
           ...(selectedLocation ? { location: selectedLocation } : {}),
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
         });
         const res = await api.get(
           `/dashboard/revenue-overview?${query.toString()}`
@@ -181,7 +186,7 @@ const DashboardOverview = ({ navigate }) => {
     return () => {
       isMounted = false;
     };
-  }, [activeSection, advancedEnabled, range, selectedLocation, navigate, showPopup]);
+  }, [activeSection, advancedEnabled, range, selectedLocation, effectiveBranchId, navigate, showPopup]);
 
   useEffect(() => {
     let isMounted = true;
@@ -191,6 +196,7 @@ const DashboardOverview = ({ navigate }) => {
         const query = new URLSearchParams({
           range,
           ...(selectedLocation ? { location: selectedLocation } : {}),
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
         });
         const res = await api.get(`/dashboard?${query.toString()}`);
         if (!isMounted) return;
@@ -219,13 +225,16 @@ const DashboardOverview = ({ navigate }) => {
     return () => {
       isMounted = false;
     };
-  }, [range, selectedLocation, navigate, showPopup]);
+  }, [range, selectedLocation, effectiveBranchId, navigate, showPopup]);
 
   useEffect(() => {
     let isMounted = true;
     const fetchLocations = async () => {
       try {
-        const res = await api.get('/dashboard/locations-list');
+        const query = new URLSearchParams({
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
+        });
+        const res = await api.get(`/dashboard/locations-list?${query.toString()}`);
         const payload = res?.data?.data ?? res?.data ?? [];
         const list = Array.isArray(payload)
           ? payload
@@ -241,7 +250,7 @@ const DashboardOverview = ({ navigate }) => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [effectiveBranchId]);
 
   useEffect(() => {
     if (activeSection !== "growth-comparison" || !advancedEnabled) return;
@@ -252,6 +261,7 @@ const DashboardOverview = ({ navigate }) => {
         const query = new URLSearchParams({
           range,
           ...(selectedLocation ? { location: selectedLocation } : {}),
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
         });
         const res = await api.get(
           `/dashboard/growth-comparison?${query.toString()}`
@@ -282,7 +292,7 @@ const DashboardOverview = ({ navigate }) => {
     return () => {
       isMounted = false;
     };
-  }, [activeSection, advancedEnabled, range, selectedLocation, navigate, showPopup]);
+  }, [activeSection, advancedEnabled, range, selectedLocation, effectiveBranchId, navigate, showPopup]);
 
   useEffect(() => {
     if (activeSection !== "inventory-intelligence" || !analyticalEnabled) return;
@@ -293,6 +303,7 @@ const DashboardOverview = ({ navigate }) => {
         const query = new URLSearchParams({
           range,
           ...(selectedLocation ? { location: selectedLocation } : {}),
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
         });
         const res = await api.get(
           `/dashboard/inventory-intelligence?${query.toString()}`
@@ -323,7 +334,7 @@ const DashboardOverview = ({ navigate }) => {
     return () => {
       isMounted = false;
     };
-  }, [activeSection, analyticalEnabled, range, selectedLocation, navigate, showPopup]);
+  }, [activeSection, analyticalEnabled, range, selectedLocation, effectiveBranchId, navigate, showPopup]);
 
   useEffect(() => {
     if (activeSection !== "customer-credit" || !analyticalEnabled) return;
@@ -334,6 +345,7 @@ const DashboardOverview = ({ navigate }) => {
         const query = new URLSearchParams({
           range,
           ...(selectedLocation ? { location: selectedLocation } : {}),
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
         });
         const res = await api.get(
           `/dashboard/customer-credit?${query.toString()}`
@@ -375,6 +387,7 @@ const DashboardOverview = ({ navigate }) => {
         const query = new URLSearchParams({
           range,
           ...(selectedLocation ? { location: selectedLocation } : {}),
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
         });
         const res = await api.get(
           `/dashboard/smart-insights?${query.toString()}`
@@ -417,6 +430,7 @@ const DashboardOverview = ({ navigate }) => {
           range,
           ...(salesTrendMode === 'location' ? { group_by: 'location' } : {}),
           ...(selectedLocation ? { location: selectedLocation } : {}),
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
         });
         const res = await api.get(
           `/dashboard/sales-trend?${query.toString()}`
@@ -447,7 +461,7 @@ const DashboardOverview = ({ navigate }) => {
     return () => {
       isMounted = false;
     };
-  }, [activeSection, advancedEnabled, range, selectedLocation, salesTrendMode, navigate, showPopup]);
+  }, [activeSection, advancedEnabled, range, selectedLocation, effectiveBranchId, salesTrendMode, navigate, showPopup]);
 
   useEffect(() => {
     if (activeSection !== "category-products" || !advancedEnabled) return;
@@ -458,6 +472,7 @@ const DashboardOverview = ({ navigate }) => {
         const query = new URLSearchParams({
           range,
           ...(selectedLocation ? { location: selectedLocation } : {}),
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
         });
         const res = await api.get(
           `/dashboard/category-performance?${query.toString()}`
@@ -488,7 +503,7 @@ const DashboardOverview = ({ navigate }) => {
     return () => {
       isMounted = false;
     };
-  }, [activeSection, advancedEnabled, range, selectedLocation, navigate, showPopup]);
+  }, [activeSection, advancedEnabled, range, selectedLocation, effectiveBranchId, navigate, showPopup]);
 
   useEffect(() => {
     if (activeSection !== "location-performance") return;
@@ -499,6 +514,7 @@ const DashboardOverview = ({ navigate }) => {
         const query = new URLSearchParams({
           range,
           ...(selectedLocation ? { location: selectedLocation } : {}),
+          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
         });
         const res = await api.get(
           `/dashboard/location-performance?${query.toString()}`
@@ -520,7 +536,7 @@ const DashboardOverview = ({ navigate }) => {
     return () => {
       isMounted = false;
     };
-  }, [activeSection, range, selectedLocation]);
+  }, [activeSection, range, selectedLocation, effectiveBranchId]);
 
   const advancedSections = [
     "revenue-overview",

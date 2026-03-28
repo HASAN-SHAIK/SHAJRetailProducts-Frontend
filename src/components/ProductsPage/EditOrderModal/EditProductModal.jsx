@@ -1,16 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import './EditProductModal.css';
+import '../AddModalComponent/AddProductModalComponent.css';
 
 const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, weightBasedEnabled = true, barcodeEnabled = false, isSubmitting = false, detailsStatus = {} }) => {
-  useEffect(() => {
-    // Add Google Font (Orbitron - a cool tech font)
-    const link = document.createElement("link");
-    link.href =
-      "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap";
-    link.rel = "stylesheet";
-    document.head.appendChild(link);
-  }, []);
-
   const formatExpiryDate = (value) => {
     if (!value) return '';
     if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
@@ -21,7 +13,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
 
   const [productName, setProductName] = useState(item.name || item.product_name || '');
   const [sellingPrice, setSellingPrice] = useState(item.selling_price);
-  const [actualPrice, setActualPrice] = useState(item.actual_price);
+  const [purchasePrice, setPurchasePrice] = useState(item.purchase_price);
   const [stockQuantity, setStockQuantity] = useState(
     item.stock_quantity ?? item.quantity ?? item.stock ?? ''
   );
@@ -61,7 +53,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
     if (!sourceItem) return;
     setProductName(sourceItem.name || sourceItem.product_name || '');
     setSellingPrice(sourceItem.selling_price);
-    setActualPrice(sourceItem.actual_price);
+    setPurchasePrice(sourceItem.purchase_price);
     setStockQuantity(sourceItem.stock_quantity ?? sourceItem.quantity ?? sourceItem.stock ?? '');
     setExpiryDate(formatExpiryDate(sourceItem.expiry_date ?? sourceItem.expiryDate));
     setCompanyName(sourceItem.company || sourceItem.company_name || sourceItem.brand || '');
@@ -82,7 +74,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
 
   const handlePriceChange = (value, index = 0) => {
     setHasTouched(true);
-    index === 0?setActualPrice(value): index == 1? setSellingPrice(value): setStockQuantity(value);
+    index === 0 ? setPurchasePrice(value) : index === 1 ? setSellingPrice(value) : setStockQuantity(value);
   };
 
 
@@ -96,7 +88,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
       company: companyName,
       barcode: barcodeEnabled ? barcode : undefined,
       selling_price: sellingPrice,
-      actual_price:actualPrice,
+      purchase_price: purchasePrice,
       stock_quantity: stockQuantity,
       expiry_date: expiryDate || null,
       is_weight_based: isWeightBased,
@@ -110,10 +102,21 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
 
   return (
     <div className="modal-overlay edit-product-modal d-flex justify-content-center align-items-center">
-      <div
-        className="modal-content p-4 text-white shadow"
-      >
-        <h3 className="text-center mb-4 text-info">Edit Product</h3>
+      <div className="modal-dialog modal-dialog-centered custom-modal-width">
+        <div className="modal-content custom-modal">
+          <div className="modal-header border-0">
+            <h5 className="modal-title fw-bold text-primary">
+              Edit Product{productName ? ` - ${productName}` : ''}
+            </h5>
+            <button
+              type="button"
+              className="btn-close btn-close-white custom-close bg-danger position-absolute end-0 m-4"
+              aria-label="Close"
+              onClick={onClose}
+              disabled={isSubmitting}
+            ></button>
+          </div>
+          <div className="modal-body">
         {detailsStatus?.message && (
           <div className={`edit-details-banner ${detailsStatus.state || ''}`}>
             <span>{detailsStatus.message}</span>
@@ -123,10 +126,10 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
           </div>
         )}
         <form className="d-flex flex-column align-items-center">
-          <div className="form-group w-100 mb-3 text-center">
-            <label className="form-label w-100">Product Name</label>
+          <div className="form-group w-100 mb-3">
+            <label className="form-label text-light">Product Name</label>
             <input
-              className="form-control text-center neon-input"
+              className="form-control custom-input"
               type="text"
               value={productName}
               onChange={(e) => {
@@ -136,10 +139,10 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
             />
           </div>
 
-          <div className="form-group w-100 mb-3 text-center">
-            <label className="form-label w-100">Company</label>
+          <div className="form-group w-100 mb-3">
+            <label className="form-label text-light">Company</label>
             <input
-              className="form-control text-center neon-input"
+              className="form-control custom-input"
               type="text"
               value={companyName}
               onChange={(e) => {
@@ -149,10 +152,10 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
             />
           </div>
           {barcodeEnabled && (
-            <div className="form-group w-100 mb-3 text-center">
-              <label className="form-label w-100">Barcode</label>
+            <div className="form-group w-100 mb-3">
+              <label className="form-label text-light">Barcode</label>
               <input
-                className="form-control text-center neon-input"
+                className="form-control custom-input"
               type="text"
               value={barcode}
               onChange={(e) => {
@@ -163,40 +166,40 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
           </div>
           )}
 
-          <div className="form-group w-100 mb-3 text-center">
-            <label className="form-label w-100">Actual Price</label>
+          <div className="form-group w-100 mb-3">
+            <label className="form-label text-light">Purchase Price</label>
             <input
-              className="form-control text-center neon-input"
+              className="form-control custom-input"
               type="number"
-              value={actualPrice}
+              value={purchasePrice}
               onChange={(e) => handlePriceChange(e.target.value)}
             />
           </div>
 
-          <div className="form-group w-100 mb-3 text-center">
-            <label className="form-label w-100">Selling Price</label>
+          <div className="form-group w-100 mb-3">
+            <label className="form-label text-light">Selling Price</label>
             <input
-              className="form-control text-center neon-input"
+              className="form-control custom-input"
               type="number"
               value={sellingPrice}
               onChange={(e) => handlePriceChange(e.target.value, 1)}
             />
           </div>
 
-          <div className="form-group w-100 mb-4 text-center">
-            <label className="form-label w-100">Stock Quantity</label>
+          <div className="form-group w-100 mb-4">
+            <label className="form-label text-light">Stock Quantity</label>
             <input
-              className="form-control text-center neon-input"
+              className="form-control custom-input"
               type="number"
               value={stockQuantity}
               onChange={(e) => handlePriceChange(e.target.value, 2)}
             />
           </div>
 
-          <div className="form-group w-100 mb-4 text-center">
-            <label className="form-label w-100">Expiry Date</label>
+          <div className="form-group w-100 mb-4">
+            <label className="form-label text-light">Expiry Date</label>
             <input
-              className="form-control text-center neon-input"
+              className="form-control custom-input"
               type="date"
               value={expiryDate}
               onChange={(e) => {
@@ -206,10 +209,10 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
             />
           </div>
 
-          <div className="form-group w-100 mb-4 text-center">
-            <label className="form-label w-100">Type</label>
+          <div className="form-group w-100 mb-4">
+            <label className="form-label text-light">Type</label>
             <select
-              className="form-control text-center neon-input"
+              className="form-select custom-input"
               value={isWeightBased}
               onChange={(e) => {
                 setHasTouched(true);
@@ -227,9 +230,9 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
             )}
           </div>
 
-          <div className="d-flex justify-content-between w-100">
+          <div className="modal-footer border-0">
             <button
-              className="btn btn-outline-danger w-45"
+              className="btn btn-light custom-btn"
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
@@ -237,15 +240,17 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
               Cancel
             </button>
             <button
-              className="btn btn-outline-success w-45"
+              className="btn btn-primary custom-btn"
               type="button"
               onClick={handleSubmit}
               disabled={isSubmitting}
             >
-              {isSubmitting ? 'Saving...' : 'Submit'}
+              {isSubmitting ? 'Saving...' : 'Save'}
             </button>
           </div>
         </form>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -253,6 +258,8 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
 };
 
 export default EditProductModal;
+
+
 
 
 

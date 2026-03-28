@@ -1,18 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import './ProductsPage.css'; // Custom styles
 import api from '../../utils/axios';
 import { Modal } from 'bootstrap';
 import AddProductModalComponent from './AddModalComponent/AddProductModalComponent';
 import { useSelector } from 'react-redux';
 import { saveProductsCache } from '../../utils/offlineProducts';
-import { getAllProducts, updateProduct } from '../../core/db';
+import { preloadAllCaches, preloadProductsToIndexedDb } from '../../utils/indexedDb';
+import { getAllProducts, updateProduct, updateProductsBulk, getProductByBarcode } from '../../core/db';
 import { usePopup } from '../common/PopUp/PopupProvider';
 import EditProductModal from './EditOrderModal/EditProductModal';
+import { useBranchStore } from '../../store/branchStore';
 
 const ProductsPage = ({ navigate }) => {
 //Modal data
  const [productUpdateFlag, setProductUpdateFlag] = useState(false);
  const userDetails = useSelector((state) => state.user.userDetails);
+ const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
  const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
  const features = tenantConfig?.features || tenantConfig?.plan_features || tenantConfig || {};
  const weightBasedEnabled =
@@ -24,21 +28,34 @@ const ProductsPage = ({ navigate }) => {
  const barcodeEnabled = features.enable_barcode === true;
  const defaultWeightValue = weightBasedEnabled && !pieceBasedEnabled ? '1' : '0';
  const { showPopup } = usePopup();
- const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState({
   product_name: '',
     company: '',
     selling_price: '',
-    actual_price: '',
+    purchase_price: '',
+    mrp: '',
     stock_quantity: '',
     category: '',
+    hsn_code: '',
+    gst_percentage: '',
+    is_batch_enabled: '0',
+    batch_number: '',
     expiry_date: '',
     time_for_delivery: '',
     is_weight_based: defaultWeightValue,
     barcode: ''
   });
+  const [hsnSuggestions, setHsnSuggestions] = useState([]);
+  const [gstTouched, setGstTouched] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+    if (name === 'gst_percentage') {
+      setGstTouched(true);
+    }
+    if (name === 'hsn_code') {
+      setGstTouched(false);
+    }
     setFormData((prev) => ({
       ...prev,
       [name]: value,
@@ -58,8 +75,12 @@ const ProductsPage = ({ navigate }) => {
 
     try {
       setIsAddingProduct(true);
-      const payload = barcodeEnabled ? formData : (({ barcode, ...rest }) => rest)(formData);
+      const payload = { ...formData };
+      if (!barcodeEnabled && !payload.barcode) {
+        delete payload.barcode;
+      }
       if (payload.expiry_date === '') payload.expiry_date = null;
+      if (payload.batch_number === '') payload.batch_number = null;
       const createRes = await api.post('/products', payload); // Your endpoint
       const createdProduct = extractProductFromResponse(createRes);
       if (createdProduct) {
@@ -70,12 +91,17 @@ const ProductsPage = ({ navigate }) => {
         product_name: '',
         company: '',
         category:'',
+        hsn_code: '',
+        gst_percentage: '',
+        is_batch_enabled: '0',
+        batch_number: '',
         expiry_date: '',
-        selling_price: '',
-        actual_price: '',
-        stock_quantity: '',
-        time_for_delivery: '',
-        is_weight_based: defaultWeightValue,
+      selling_price: '',
+      purchase_price: '',
+      mrp: '',
+      stock_quantity: '',
+      time_for_delivery: '',
+      is_weight_based: defaultWeightValue,
         barcode: ''
       });
       const modalElement = document.getElementById('addProductModal');
@@ -83,7 +109,12 @@ const ProductsPage = ({ navigate }) => {
       modal.hide();
       showPopup("Product added successfully!", "Success");
       setForceApiFetch(true);
-      setProductUpdateFlag(true)
+      // Toggle to ensure `fetchProducts()` runs even if the flag is already truthy.
+      setProductUpdateFlag((prev) => !prev);
+      // Keep `shajretaildb` (IndexedDB) in sync immediately.
+      if (navigator.onLine) {
+        preloadProductsToIndexedDb({ branchId: selectedBranchId }).catch(() => {});
+      }
 
     } catch (err) {
       if(err.response.data.message === 'Invalid Token' || err.response.status === 401){
@@ -103,10 +134,18 @@ const ProductsPage = ({ navigate }) => {
   const productFields = [
     { label: 'Product Name', name: 'product_name' },
     { label: 'Company', name: 'company' },
-    ...(barcodeEnabled ? [{ label: 'Barcode', name: 'barcode', required: false, autoFocus: true }] : []),
+    { label: 'Barcode', name: 'barcode', required: false, autoFocus: true },
     { label: 'Category', name: 'category', type: 'datalist' },
     { label: 'Selling Price', name: 'selling_price', type: 'number' },
-    { label: 'Actual Price', name: 'actual_price', type: 'number' },
+    { label: 'Purchase Price', name: 'purchase_price', type: 'number' },
+    { label: 'MRP', name: 'mrp', type: 'number' },
+    { label: 'HSN Code', name: 'hsn_code', type: 'hsn', required: false },
+    { label: 'GST %', name: 'gst_percentage', type: 'number', required: false },
+    { label: 'Batch Enabled', name: 'is_batch_enabled', type: 'select', required: false, options: [
+      { label: 'No', value: '0' },
+      { label: 'Yes', value: '1' },
+    ]},
+    { label: 'Batch Number', name: 'batch_number', required: false },
     { label: 'Expiry Date', name: 'expiry_date', type: 'date', required: false },
     { label: 'Quantity', name: 'stock_quantity', type: 'number' },
     { label: 'Time For Delivery', name:'time_for_delivery', type: 'number'},
@@ -147,17 +186,69 @@ const ProductsPage = ({ navigate }) => {
   message: '',
   source: 'indexeddb',
  });
+ const [activeEdit, setActiveEdit] = useState(null);
+ const [editedMap, setEditedMap] = useState({});
+ const [savingBulk, setSavingBulk] = useState(false);
+ const [stockModalOpen, setStockModalOpen] = useState(false);
+ const [stockLoading, setStockLoading] = useState(false);
+ const [stockRows, setStockRows] = useState([]);
+ const [stockTarget, setStockTarget] = useState(null);
+ const [importModalOpen, setImportModalOpen] = useState(false);
+ const [importFile, setImportFile] = useState(null);
+ const [importResult, setImportResult] = useState(null);
+ const [importError, setImportError] = useState('');
+ const [importing, setImporting] = useState(false);
+  const [importPreviewRows, setImportPreviewRows] = useState([]);
+  const [importPreviewError, setImportPreviewError] = useState('');
+  const [importParsing, setImportParsing] = useState(false);
+  const [autoCategoryEnabled, setAutoCategoryEnabled] = useState(true);
 
   useEffect(() => {
     fetchCategories();
   }, []);
 
   useEffect(() => {
+    if (!formData.product_name) {
+      setHsnSuggestions([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.get('/hsn/search', { params: { q: formData.product_name } });
+        const list = res?.data?.results || res?.data?.data?.results || res?.data?.data || [];
+        setHsnSuggestions(Array.isArray(list) ? list : []);
+      } catch (err) {
+        setHsnSuggestions([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [formData.product_name]);
+
+  useEffect(() => {
+    if (!formData.hsn_code) return;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.get('/hsn/lookup', { params: { hsn: formData.hsn_code } });
+        const result = res?.data?.result || res?.data?.data?.result || res?.data?.data || null;
+        if (result?.gst_percentage !== undefined && !gstTouched) {
+          setFormData((prev) => ({
+            ...prev,
+            gst_percentage: result.gst_percentage
+          }));
+        }
+      } catch (err) {
+        // ignore lookup errors
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [formData.hsn_code, gstTouched]);
+
+  useEffect(() => {
     const fetchExtraDetails = async () => {
       if (!navigator.onLine || window.__serverOffline) return;
       const barcodes = products
         .map((item) => item?.barcode)
-        .filter((barcode) => barcode);
+        .filter((barcode) => barcode && !String(barcode).startsWith('id:'));
       if (barcodes.length === 0) {
         setExtraDetailsByBarcode({});
         return;
@@ -196,6 +287,12 @@ const ProductsPage = ({ navigate }) => {
     fetchProducts();
   }, [productUpdateFlag, pagination.page, pagination.limit, searchQuery, selectedCategory, sortBy, sortOrder]);
 
+  useEffect(() => {
+    setPagination((prev) => ({ ...prev, page: 1 }));
+    setForceApiFetch(true);
+    fetchProducts();
+  }, [selectedBranchId]);
+
   const buildParams = useCallback(() => {
     const params = {
       page: pagination.page,
@@ -209,6 +306,108 @@ const ProductsPage = ({ navigate }) => {
   }, [pagination.page, pagination.limit, searchQuery, selectedCategory, sortBy, sortOrder]);
 
   const normalizeValue = (value) => String(value ?? '').toLowerCase();
+  const normalizeNumericInput = (value) => {
+    const trimmed = String(value ?? '').trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  const getProductKey = (product) =>
+    product?.id ?? product?.product_id ?? product?.productId ?? product?.barcode;
+
+  const getDisplayBarcode = (barcodeValue) => {
+    if (!barcodeValue) return '';
+    const value = String(barcodeValue);
+    return value.startsWith('id:') ? '' : value;
+  };
+
+  const mergeNonEmptyFields = (base, extra) => {
+    if (!extra) return base;
+    const merged = { ...base };
+    Object.entries(extra).forEach(([key, value]) => {
+      if (value !== null && value !== undefined && value !== '') {
+        merged[key] = value;
+      }
+    });
+    return merged;
+  };
+
+  const getGstKey = (product) => {
+    if (product && Object.prototype.hasOwnProperty.call(product, 'gst_percent')) return 'gst_percent';
+    if (product && Object.prototype.hasOwnProperty.call(product, 'gst_percentage')) return 'gst_percentage';
+    if (product && Object.prototype.hasOwnProperty.call(product, 'gst')) return 'gst';
+    if (product && Object.prototype.hasOwnProperty.call(product, 'gstPercent')) return 'gstPercent';
+    if (product && Object.prototype.hasOwnProperty.call(product, 'gstPercentage')) return 'gstPercentage';
+    return 'gst_percent';
+  };
+
+  const getProductFieldValue = (product, field) => {
+    if (!product) return null;
+    if (field === 'purchase_price') {
+      return product.purchase_price ?? null;
+    }
+    if (field === 'mrp') {
+      return product.mrp ?? product.mrp_price ?? null;
+    }
+    if (field === 'selling_price') {
+      return product.selling_price ?? product.sellingPrice ?? null;
+    }
+    if (field === 'gst_percent') {
+      return (
+        product.gst_percent ??
+        product.gst_percentage ??
+        product.gst ??
+        product.gstPercent ??
+        product.gstPercentage ??
+        null
+      );
+    }
+    return product[field] ?? null;
+  };
+
+  const getDraftValue = (product, field) => {
+    const key = getProductKey(product);
+    if (key && editedMap[key] && Object.prototype.hasOwnProperty.call(editedMap[key], field)) {
+      return editedMap[key][field];
+    }
+    return getProductFieldValue(product, field);
+  };
+
+  const commitEditValue = (product, field, rawValue) => {
+    const key = getProductKey(product);
+    if (!key) return;
+    const normalized = normalizeNumericInput(rawValue);
+    const original = normalizeNumericInput(getProductFieldValue(product, field));
+    setEditedMap((prev) => {
+      const next = { ...prev };
+      const existing = next[key]
+        ? { ...next[key] }
+        : {
+            id: product?.id ?? product?.product_id ?? product?.productId ?? null,
+            barcode: product?.barcode ?? null,
+            gstKey: getGstKey(product),
+            source: product ?? null,
+          };
+      if (product) {
+        existing.source = product;
+      }
+      if (normalized === original) {
+        delete existing[field];
+      } else {
+        existing[field] = normalized;
+      }
+      const hasEdits = ['purchase_price', 'mrp', 'selling_price', 'gst_percent'].some((entry) =>
+        Object.prototype.hasOwnProperty.call(existing, entry)
+      );
+      if (!hasEdits) {
+        delete next[key];
+      } else {
+        next[key] = existing;
+      }
+      return next;
+    });
+  };
 
   const applyLocalFilters = useCallback((items) => {
     let filtered = Array.isArray(items) ? items : [];
@@ -217,9 +416,8 @@ const ProductsPage = ({ navigate }) => {
       const query = normalizeValue(searchQuery);
       filtered = filtered.filter((item) => {
         const name = normalizeValue(item.name ?? item.product_name);
-        const company = normalizeValue(item.company ?? item.company_name);
         const barcode = normalizeValue(item.barcode);
-        return name.includes(query) || company.includes(query) || barcode.includes(query);
+        return name.includes(query) || barcode.includes(query);
       });
     }
 
@@ -364,6 +562,130 @@ const ProductsPage = ({ navigate }) => {
     }).format(Number.isFinite(amount) ? amount : 0);
   };
 
+  const formatPercent = (value) => {
+    const amount = Number(value);
+    if (Number.isNaN(amount)) return '-';
+    return `${amount}%`;
+  };
+
+  const handleBulkSave = async () => {
+    if (savingBulk) return;
+    const pendingKeys = Object.keys(editedMap);
+    if (!pendingKeys.length) return;
+    if (!navigator.onLine || window.__serverOffline) {
+      showPopup('You are offline. Please reconnect to save changes.', 'Offline');
+      return;
+    }
+    const hydratedEntries = await Promise.all(
+      pendingKeys.map(async (key) => {
+        const entry = editedMap[key];
+        if (!entry) return null;
+        if (entry.id || !entry.barcode || String(entry.barcode).startsWith('id:')) return { key, entry };
+        try {
+          const cached = await getProductByBarcode(entry.barcode);
+          if (cached?.id) {
+            return {
+              key,
+              entry: {
+                ...entry,
+                id: cached.id,
+                source: entry.source || cached,
+              },
+            };
+          }
+        } catch (err) {
+          // ignore lookup failure
+        }
+        return { key, entry };
+      })
+    );
+
+    const updates = hydratedEntries
+      .map((item) => {
+        if (!item?.entry) return null;
+        const entry = item.entry;
+        const payload = {};
+        if (entry.id) payload.id = entry.id;
+        if (entry.barcode && !String(entry.barcode).startsWith('id:')) {
+          payload.barcode = entry.barcode;
+        }
+          if (Object.prototype.hasOwnProperty.call(entry, 'purchase_price')) {
+            payload.purchase_price = entry.purchase_price;
+          }
+          if (Object.prototype.hasOwnProperty.call(entry, 'mrp')) {
+            payload.mrp = entry.mrp;
+          }
+          if (Object.prototype.hasOwnProperty.call(entry, 'selling_price')) {
+            payload.selling_price = entry.selling_price;
+          }
+        if (Object.prototype.hasOwnProperty.call(entry, 'gst_percent')) {
+          payload.gst_percentage = entry.gst_percent;
+        }
+        return Object.keys(payload).length ? payload : null;
+      })
+      .filter(Boolean);
+
+    if (!updates.length) return;
+
+    setSavingBulk(true);
+    try {
+      await api.put('/products/bulk-update', { products: updates });
+      const updatedItemsForDb = hydratedEntries
+        .map((item) => {
+          if (!item?.entry) return null;
+          const entry = item.entry;
+          const base = entry.source ? { ...entry.source } : {};
+            if (Object.prototype.hasOwnProperty.call(entry, 'purchase_price')) {
+              base.purchase_price = entry.purchase_price;
+            }
+            if (Object.prototype.hasOwnProperty.call(entry, 'mrp')) {
+              base.mrp = entry.mrp;
+            }
+            if (Object.prototype.hasOwnProperty.call(entry, 'selling_price')) {
+              base.selling_price = entry.selling_price;
+            }
+          if (Object.prototype.hasOwnProperty.call(entry, 'gst_percent')) {
+            base.gst_percentage = entry.gst_percent;
+          }
+          return base;
+        })
+        .filter((item) => item && (item.barcode || item.id));
+      setProducts((prev) =>
+        prev.map((product) => {
+          const key = getProductKey(product);
+          const draft = editedMap[key];
+          if (!draft) return product;
+          const updated = { ...product };
+            if (Object.prototype.hasOwnProperty.call(draft, 'purchase_price')) {
+              updated.purchase_price = draft.purchase_price;
+            }
+            if (Object.prototype.hasOwnProperty.call(draft, 'mrp')) {
+              updated.mrp = draft.mrp;
+            }
+            if (Object.prototype.hasOwnProperty.call(draft, 'selling_price')) {
+              updated.selling_price = draft.selling_price;
+            }
+          if (Object.prototype.hasOwnProperty.call(draft, 'gst_percent')) {
+            updated.gst_percentage = draft.gst_percent;
+          }
+          return updated;
+        })
+      );
+      if (updatedItemsForDb.length) {
+        updateProductsBulk(updatedItemsForDb).catch(() => {});
+      }
+      showPopup('Products updated successfully!', 'Success');
+      setEditedMap({});
+      setForceApiFetch(true);
+      setProductUpdateFlag((prev) => !prev);
+    } catch (err) {
+      console.error('Bulk update failed', err);
+      showPopup('Failed to save product updates.', 'Error');
+    } finally {
+      setSavingBulk(false);
+    }
+  };
+
   const handleSortToggle = (field) => {
     if (sortBy === field) {
       setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -500,6 +822,446 @@ const ProductsPage = ({ navigate }) => {
       setDeletingId(null);
     }
   };
+  const openStockModal = async (product) => {
+    if (!product?.id) return;
+    setStockTarget(product);
+    setStockModalOpen(true);
+    setStockLoading(true);
+    try {
+      const res = await api.get('/stock', { params: { product_id: product.id } });
+      const payload = res?.data?.stock || res?.data?.data || res?.data || [];
+      setStockRows(Array.isArray(payload) ? payload : []);
+    } catch (err) {
+      setStockRows([]);
+      showPopup('Failed to load branch stock.', 'Error');
+    } finally {
+      setStockLoading(false);
+    }
+  };
+
+  const closeStockModal = () => {
+    setStockModalOpen(false);
+    setStockTarget(null);
+    setStockRows([]);
+  };
+  const closeImportModal = () => {
+    setImportModalOpen(false);
+    setImportFile(null);
+    setImportResult(null);
+    setImportError('');
+    setImportPreviewRows([]);
+    setImportPreviewError('');
+  };
+  const normalizeImportHeader = (value) => String(value || '').trim().toLowerCase();
+  const IMPORT_HEADER_MAP = {
+    'product name': 'name',
+    product_name: 'name',
+    name: 'name',
+    barcode: 'barcode',
+    category: 'category',
+    mrp: 'mrp',
+    mrp_price: 'mrp',
+    'selling price': 'selling_price',
+    selling_price: 'selling_price',
+    sellingprice: 'selling_price',
+    price: 'selling_price',
+    rate: 'selling_price',
+    'purchase price': 'purchase_price',
+    purchase_price: 'purchase_price',
+    purchaseprice: 'purchase_price',
+    'Purchase Price': 'purchase_price',
+    purchase_price: 'purchase_price',
+    quantity: 'stock_quantity',
+    qty: 'stock_quantity',
+    stock: 'stock_quantity',
+    stock_quantity: 'stock_quantity',
+    hsn: 'hsn_code',
+    hsn_code: 'hsn_code',
+    gst: 'gst_percentage',
+    gst_percentage: 'gst_percentage',
+    gstpercent: 'gst_percentage',
+    'gst %': 'gst_percentage',
+    'gst%': 'gst_percentage',
+    'gst rate': 'gst_percentage',
+    gst_rate: 'gst_percentage',
+    batch: 'batch_number',
+    batch_number: 'batch_number',
+    batchno: 'batch_number',
+    'batch no': 'batch_number',
+    expiry: 'expiry_date',
+    'expiry date': 'expiry_date',
+    expiry_date: 'expiry_date',
+    exp: 'expiry_date',
+    'exp date': 'expiry_date'
+  };
+  const normalizeImportRow = (row = {}) => {
+    const mapped = {};
+    Object.keys(row || {}).forEach((key) => {
+      const normalized = IMPORT_HEADER_MAP[normalizeImportHeader(key)];
+      if (normalized) {
+        mapped[normalized] = row[key];
+      }
+    });
+    return mapped;
+  };
+  const toNumber = (value) => {
+    if (value === null || value === undefined) return null;
+    let trimmed = String(value).trim();
+    if (!trimmed) return null;
+    trimmed = trimmed.replace(/[% ,]/g, '');
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : null;
+  };
+  const toDateInput = (value) => {
+    if (value === null || value === undefined || value === '') return '';
+    if (value instanceof Date && !Number.isNaN(value.valueOf())) {
+      return value.toISOString().slice(0, 10);
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const parsed = XLSX.SSF?.parse_date_code
+        ? XLSX.SSF.parse_date_code(value)
+        : null;
+      if (parsed && parsed.y && parsed.m && parsed.d) {
+        const month = String(parsed.m).padStart(2, '0');
+        const day = String(parsed.d).padStart(2, '0');
+        return `${parsed.y}-${month}-${day}`;
+      }
+      const excelEpoch = new Date(Math.round((value - 25569) * 86400 * 1000));
+      if (!Number.isNaN(excelEpoch.valueOf())) {
+        return excelEpoch.toISOString().slice(0, 10);
+      }
+    }
+    const raw = String(value).trim();
+    if (!raw) return '';
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.valueOf())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+    return raw;
+  };
+  const parseImportFile = async (file) => {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return [];
+    const sheet = workbook.Sheets[sheetName];
+    const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const normalized = rawRows.map(normalizeImportRow);
+    const inferCategoryFromName = (nameValue) => {
+      const name = String(nameValue || '').toLowerCase();
+      if (!name) return '';
+      const rules = [
+        { category: 'Dairy', keywords: ['milk', 'cheese', 'butter', 'yogurt', 'paneer', 'curd'] },
+        { category: 'Snacks', keywords: ['chips', 'namkeen', 'biscuit', 'cookie', 'snack', 'chocolate'] },
+        { category: 'Beverages', keywords: ['juice', 'cola', 'soda', 'tea', 'coffee', 'drink', 'water'] },
+        { category: 'Personal Care', keywords: ['soap', 'shampoo', 'toothpaste', 'deo', 'cream', 'lotion'] },
+        { category: 'Household', keywords: ['detergent', 'cleaner', 'mop', 'phenyl', 'disinfectant'] },
+        { category: 'Produce', keywords: ['apple', 'banana', 'tomato', 'onion', 'potato', 'vegetable', 'fruit'] },
+        { category: 'Bakery', keywords: ['bread', 'bun', 'cake', 'pastry', 'rusk'] },
+        { category: 'Stationery', keywords: ['pen', 'pencil', 'notebook', 'paper', 'marker'] },
+        { category: 'Electronics', keywords: ['battery', 'charger', 'cable', 'earphone', 'bulb'] },
+        { category: 'Pharma', keywords: ['tablet', 'capsule', 'syrup', 'ointment', 'medicine'] },
+        { category: 'Baby Care', keywords: ['diaper', 'baby', 'feeding', 'wipes'] },
+        { category: 'Pet Care', keywords: ['pet', 'dog', 'cat', 'litter'] },
+        { category: 'Frozen', keywords: ['ice cream', 'frozen', 'ice'] },
+        { category: 'Meat', keywords: ['chicken', 'mutton', 'fish', 'meat', 'egg'] }
+      ];
+      for (const rule of rules) {
+        if (rule.keywords.some((kw) => name.includes(kw))) {
+          return rule.category;
+        }
+      }
+      return '';
+    };
+    const resolveFallbackCategory = () => {
+      const names = Array.isArray(categoryOptions) ? categoryOptions.map((cat) => String(cat?.name || '').trim()) : [];
+      const lowered = names.map((name) => name.toLowerCase());
+      const preferred = ['misc', 'miscellaneous', 'others', 'other', 'general', 'uncategorized'];
+      for (const label of preferred) {
+        const idx = lowered.findIndex((name) => name === label);
+        if (idx >= 0) return names[idx];
+      }
+      return '';
+    };
+    const fallbackCategory = resolveFallbackCategory();
+    const isCategoryMissing = (value) => {
+      const trimmed = String(value || '').trim().toLowerCase();
+      if (!trimmed) return true;
+      return ['na', 'n/a', 'none', '-', '--', 'null', 'undefined'].includes(trimmed);
+    };
+    const applyAutoCategories = (rows) =>
+      rows.map((row) => {
+        if (!isCategoryMissing(row.category)) {
+          return { ...row, category: String(row.category || '').trim() };
+        }
+        const inferred = inferCategoryFromName(row.name);
+        if (inferred) {
+          return { ...row, category: inferred };
+        }
+        return fallbackCategory ? { ...row, category: fallbackCategory } : row;
+      });
+    const parsedRows = normalized
+      .map((row) => {
+        const name = String(row.name || '').trim();
+        const categoryRaw = row.category ? String(row.category).trim() : '';
+        const category = categoryRaw ? categoryRaw : '';
+        const barcode = row.barcode ? String(row.barcode).trim() : '';
+        const stock_quantity = toNumber(row.stock_quantity) ?? 0;
+        const mrp = toNumber(row.mrp);
+        const purchase_price = toNumber(row.purchase_price);
+        const hsn_code = row.hsn_code ? String(row.hsn_code).trim() : '';
+        const gst_percentage = toNumber(row.gst_percentage);
+        const batch_number = row.batch_number ? String(row.batch_number).trim() : '';
+        const expiry_date = toDateInput(row.expiry_date);
+        return {
+          name,
+          category,
+          barcode,
+          stock_quantity,
+          purchase_price,
+          mrp,
+          hsn_code,
+          gst_percentage,
+          batch_number,
+          expiry_date,
+          selling_price: ''
+        };
+      })
+      .filter((row) =>
+        Object.values(row).some((value) => String(value || '').trim() !== '')
+      );
+    return autoCategoryEnabled ? applyAutoCategories(parsedRows) : parsedRows;
+  };
+  const autoFillCategories = () => {
+    setImportPreviewRows((prev) => {
+      if (!prev.length) return prev;
+      const names = Array.isArray(categoryOptions) ? categoryOptions.map((cat) => String(cat?.name || '').trim()) : [];
+      const lowered = names.map((name) => name.toLowerCase());
+      const preferred = ['misc', 'miscellaneous', 'others', 'other', 'general', 'uncategorized'];
+      let fallbackCategory = '';
+      for (const label of preferred) {
+        const idx = lowered.findIndex((name) => name === label);
+        if (idx >= 0) {
+          fallbackCategory = names[idx];
+          break;
+        }
+      }
+      const inferCategoryFromName = (nameValue) => {
+        const name = String(nameValue || '').toLowerCase();
+        if (!name) return '';
+        const rules = [
+          { category: 'Dairy', keywords: ['milk', 'cheese', 'butter', 'yogurt', 'paneer', 'curd'] },
+          { category: 'Snacks', keywords: ['chips', 'namkeen', 'biscuit', 'cookie', 'snack', 'chocolate'] },
+          { category: 'Beverages', keywords: ['juice', 'cola', 'soda', 'tea', 'coffee', 'drink', 'water'] },
+          { category: 'Personal Care', keywords: ['soap', 'shampoo', 'toothpaste', 'deo', 'cream', 'lotion'] },
+          { category: 'Household', keywords: ['detergent', 'cleaner', 'mop', 'phenyl', 'disinfectant'] },
+          { category: 'Produce', keywords: ['apple', 'banana', 'tomato', 'onion', 'potato', 'vegetable', 'fruit'] },
+          { category: 'Bakery', keywords: ['bread', 'bun', 'cake', 'pastry', 'rusk'] },
+          { category: 'Stationery', keywords: ['pen', 'pencil', 'notebook', 'paper', 'marker'] },
+          { category: 'Electronics', keywords: ['battery', 'charger', 'cable', 'earphone', 'bulb'] },
+          { category: 'Pharma', keywords: ['tablet', 'capsule', 'syrup', 'ointment', 'medicine'] },
+          { category: 'Baby Care', keywords: ['diaper', 'baby', 'feeding', 'wipes'] },
+          { category: 'Pet Care', keywords: ['pet', 'dog', 'cat', 'litter'] },
+          { category: 'Frozen', keywords: ['ice cream', 'frozen', 'ice'] },
+          { category: 'Meat', keywords: ['chicken', 'mutton', 'fish', 'meat', 'egg'] }
+        ];
+        for (const rule of rules) {
+          if (rule.keywords.some((kw) => name.includes(kw))) {
+            return rule.category;
+          }
+        }
+        return '';
+      };
+      const isCategoryMissing = (value) => {
+        const trimmed = String(value || '').trim().toLowerCase();
+        if (!trimmed) return true;
+        return ['na', 'n/a', 'none', '-', '--', 'null', 'undefined'].includes(trimmed);
+      };
+      return prev.map((row) => {
+        if (!isCategoryMissing(row.category)) {
+          return { ...row, category: String(row.category || '').trim() };
+        }
+        const inferred = inferCategoryFromName(row.name);
+        if (inferred) return { ...row, category: inferred };
+        return fallbackCategory ? { ...row, category: fallbackCategory } : row;
+      });
+    });
+  };
+  const updatePreviewRow = (index, field, value) => {
+    setImportPreviewRows((prev) =>
+      prev.map((row, idx) =>
+        idx === index ? { ...row, [field]: value } : row
+      )
+    );
+  };
+  const preventNumberWheel = (event) => {
+    event.currentTarget.blur();
+  };
+  const handleImportFileChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    setImportFile(file);
+    setImportResult(null);
+    setImportError('');
+    setImportPreviewRows([]);
+    setImportPreviewError('');
+  };
+  const handleImportSubmit = async () => {
+    if (importing || importParsing) return;
+    if (!importFile) {
+      showPopup('Select a file to import.', 'Validation');
+      return;
+    }
+    const name = importFile.name.toLowerCase();
+    const allowed = ['.xlsx', '.xls', '.csv'];
+    const isAllowed = allowed.some((ext) => name.endsWith(ext));
+    if (!isAllowed) {
+      showPopup('Only .xlsx, .xls, or .csv files are supported for preview.', 'Validation');
+      return;
+    }
+    if (importFile.size > 5 * 1024 * 1024) {
+      showPopup('File size must be 5MB or less.', 'Validation');
+      return;
+    }
+    setImportParsing(true);
+    setImportPreviewError('');
+    try {
+      const rows = await parseImportFile(importFile);
+      if (!rows.length) {
+        setImportPreviewError('No valid rows found in file.');
+        return;
+      }
+      setImportPreviewRows(rows);
+    } catch (err) {
+      const message = err?.message || 'Failed to parse file.';
+      setImportPreviewError(message);
+      showPopup(message, 'Error');
+    } finally {
+      setImportParsing(false);
+    }
+  };
+  const handleImportConfirm = async () => {
+    if (importing || importPreviewRows.length === 0) return;
+    const payloadRows = importPreviewRows.map((row) => ({
+      name: String(row.name || '').trim(),
+      category: row.category ? String(row.category).trim() : null,
+      barcode: row.barcode ? String(row.barcode).trim() : null,
+      stock_quantity: toNumber(row.stock_quantity) ?? 0,
+      purchase_price: toNumber(row.purchase_price),
+      mrp: toNumber(row.mrp),
+      hsn_code: row.hsn_code ? String(row.hsn_code).trim() : null,
+      gst_percentage: toNumber(row.gst_percentage),
+      batch_number: row.batch_number ? String(row.batch_number).trim() : null,
+      expiry_date: row.expiry_date ? String(row.expiry_date).trim() : null,
+      selling_price: toNumber(row.selling_price)
+    }));
+
+    const invalid = payloadRows.some(
+      (row) =>
+        !row.name ||
+        !Number.isFinite(row.purchase_price) ||
+        row.purchase_price <= 0 ||
+        !Number.isFinite(row.selling_price) ||
+        row.selling_price <= 0
+    );
+    if (invalid) {
+      showPopup('Fill required fields (Name, Purchase Price, Selling Price).', 'Validation');
+      return;
+    }
+
+    setImporting(true);
+    setImportError('');
+    try {
+      const response = await api.post('/products/import-rows', { rows: payloadRows });
+      const summary =
+        response?.data?.summary ||
+        response?.data?.data?.summary ||
+        response?.data?.data ||
+        response?.data?.summary ||
+        null;
+      setImportResult(summary);
+      showPopup('Import completed.', 'Success');
+      setForceApiFetch(true);
+      setProductUpdateFlag((prev) => !prev);
+      if (navigator.onLine) {
+        preloadProductsToIndexedDb({ branchId: selectedBranchId }).catch(() => {});
+      }
+    } catch (err) {
+      const message = err?.response?.data?.message || 'Import failed.';
+      setImportError(message);
+      showPopup(message, 'Error');
+    } finally {
+      setImporting(false);
+    }
+  };
+  const dirtyCount = Object.keys(editedMap).length;
+  const importMissingRequired = importPreviewRows.filter((row) => {
+    const name = String(row.name || '').trim();
+    const actual = toNumber(row.purchase_price);
+    const selling = toNumber(row.selling_price);
+    return !name || !Number.isFinite(actual) || actual <= 0 || !Number.isFinite(selling) || selling <= 0;
+  }).length;
+
+  const renderEditableCell = (product, field, formatter) => {
+    const key = getProductKey(product);
+    if (userDetails.role !== 'admin') {
+      const readonlyValue = getDraftValue(product, field);
+      return <span>{formatter ? formatter(readonlyValue) : readonlyValue ?? '-'}</span>;
+    }
+    if (!key) {
+      const readonlyValue = getDraftValue(product, field);
+      return <span>{formatter ? formatter(readonlyValue) : readonlyValue ?? '-'}</span>;
+    }
+    const isEditing =
+      activeEdit &&
+      activeEdit.key === key &&
+      activeEdit.field === field;
+    const value = isEditing ? activeEdit.value : getDraftValue(product, field);
+    const displayValue = formatter ? formatter(value) : value ?? '-';
+    if (!isEditing) {
+      return (
+        <button
+          type="button"
+          className="editable-cell"
+          onClick={() =>
+            setActiveEdit({
+              key,
+              field,
+              value: value ?? '',
+            })
+          }
+        >
+          {displayValue || '-'}
+        </button>
+      );
+    }
+    return (
+      <input
+        className="editable-input"
+        type="number"
+        step="0.01"
+        value={value ?? ''}
+        onChange={(event) =>
+          setActiveEdit((prev) =>
+            prev ? { ...prev, value: event.target.value } : prev
+          )
+        }
+        onBlur={() => {
+          commitEditValue(product, field, value);
+          setActiveEdit(null);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            commitEditValue(product, field, value);
+            setActiveEdit(null);
+          }
+          if (event.key === 'Escape') {
+            setActiveEdit(null);
+          }
+        }}
+        autoFocus
+      />
+    );
+  };
   return (
     <div className="wow-page products-page">
       <div className="wow-motion-layer" aria-hidden="true">
@@ -518,16 +1280,34 @@ const ProductsPage = ({ navigate }) => {
             <p className="products-subtitle">Search, filter, and manage inventory.</p>
           </div>
           <div className="d-flex gap-2">
+            {userDetails.role === 'admin' && (
+              <button
+                className="btn btn-primary"
+                onClick={handleBulkSave}
+                type="button"
+                disabled={dirtyCount === 0 || savingBulk}
+              >
+                {savingBulk
+                  ? 'Saving...'
+                  : `Save All Changes${dirtyCount ? ` (${dirtyCount})` : ''}`}
+              </button>
+            )}
             <button
               className="btn btn-outline-light"
               onClick={() => {
                 setForceApiFetch(true);
                 setProductUpdateFlag((prev) => !prev);
+                preloadAllCaches({ branchId: selectedBranchId }).catch(() => {});
               }}
               type="button"
             >
               Refresh from Server
             </button>
+            {userDetails.role === 'admin' && (
+              <button className="btn btn-outline-info" onClick={() => setImportModalOpen(true)}>
+                Import Products
+              </button>
+            )}
             {userDetails.role === 'admin' && (
               <button className="btn btn-success" onClick={handleOpenModal}>
                 Add Product
@@ -539,7 +1319,7 @@ const ProductsPage = ({ navigate }) => {
         <div className="products-controls">
           <input
             className="form-control search-input"
-            placeholder="Search by product name or company"
+            placeholder="Search by product name or barcode"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
           />
@@ -568,7 +1348,10 @@ const ProductsPage = ({ navigate }) => {
             >
               <option value="created_at">Sort by Date</option>
               <option value="name">Sort by Name</option>
-              <option value="selling_price">Sort by Price</option>
+              <option value="mrp">Sort by MRP</option>
+              <option value="purchase_price">Sort by Purchase Price</option>
+              <option value="selling_price">Sort by Selling Price</option>
+              <option value="gst_percent">Sort by GST</option>
               <option value="stock_quantity">Sort by Stock</option>
             </select>
             <button
@@ -593,12 +1376,18 @@ const ProductsPage = ({ navigate }) => {
                   <th role="button" onClick={() => handleSortToggle('name')} className="sortable">
                     Product <span className="sort-indicator">{getSortIndicator('name')}</span>
                   </th>
-                  <th role="button" onClick={() => handleSortToggle('company_name')} className="sortable">
-                    Company <span className="sort-indicator">{getSortIndicator('company_name')}</span>
-                  </th>
-                  <th>Category</th>
-                  <th role="button" onClick={() => handleSortToggle('selling_price')} className="sortable">
-                    Selling Price <span className="sort-indicator">{getSortIndicator('selling_price')}</span>
+                  <th>Barcode</th>
+                    <th role="button" onClick={() => handleSortToggle('mrp')} className="sortable">
+                      MRP <span className="sort-indicator">{getSortIndicator('mrp')}</span>
+                    </th>
+                    <th role="button" onClick={() => handleSortToggle('purchase_price')} className="sortable">
+                      Purchase Price <span className="sort-indicator">{getSortIndicator('purchase_price')}</span>
+                    </th>
+                    <th role="button" onClick={() => handleSortToggle('selling_price')} className="sortable">
+                      Selling Price <span className="sort-indicator">{getSortIndicator('selling_price')}</span>
+                    </th>
+                  <th role="button" onClick={() => handleSortToggle('gst_percent')} className="sortable">
+                    GST % <span className="sort-indicator">{getSortIndicator('gst_percent')}</span>
                   </th>
                   <th role="button" onClick={() => handleSortToggle('stock_quantity')} className="sortable">
                     Stock <span className="sort-indicator">{getSortIndicator('stock_quantity')}</span>
@@ -618,35 +1407,49 @@ const ProductsPage = ({ navigate }) => {
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
                     {userDetails.role === 'admin' && <td><span className="skeleton-block" /></td>}
                   </tr>
                 ))}
                 {!isLoading && errorMessage && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 8 : 7} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 9 : 8} className="empty-state">
                       {errorMessage}
                     </td>
                   </tr>
                 )}
                 {!isLoading && !errorMessage && products.length === 0 && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 8 : 7} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 9 : 8} className="empty-state">
                       No products found.
                     </td>
                   </tr>
                 )}
                 {!isLoading && !errorMessage && products.map((product) => {
                   const extra = extraDetailsByBarcode?.[product?.barcode] || {};
-                  const displayProduct = { ...product, ...extra };
+                  const displayProduct = mergeNonEmptyFields(product, extra);
+                  const rowKey = getProductKey(displayProduct);
                   const stock = Number(displayProduct.stock_quantity ?? displayProduct.quantity ?? 0);
                   const minStock = Number(displayProduct.min_stock_level ?? 0);
                   const lowStock = minStock > 0 && stock <= minStock;
                   return (
-                    <tr key={displayProduct.id || displayProduct.barcode} className="products-row">
-                      <td>{displayProduct.name || displayProduct.product_name || '-'}</td>
-                      <td>{displayProduct.company_name || displayProduct.company || '-'}</td>
-                      <td>{displayProduct.category_name || displayProduct.category || '-'}</td>
-                      <td>{formatMoney(displayProduct.selling_price)}</td>
+                    <tr
+                      key={displayProduct.id || displayProduct.barcode}
+                      className={`products-row ${rowKey && editedMap[rowKey] ? 'dirty-row' : ''}`}
+                    >
+                      <td className="product-name-cell">
+                        <span className="product-name-text">{displayProduct.name || displayProduct.product_name || '-'}</span>
+                        {String(displayProduct.is_weight_based ?? displayProduct.isWeightBased ?? displayProduct.weight_based ?? '0') === '1' ? (
+                          <span className="product-type-tag weight">Weighted</span>
+                        ) : (
+                          <span className="product-type-tag piece">Piece</span>
+                        )}
+                      </td>
+                      <td>{getDisplayBarcode(displayProduct.barcode) || '-'}</td>
+                      <td>{renderEditableCell(displayProduct, 'mrp', formatMoney)}</td>
+                      <td>{renderEditableCell(displayProduct, 'purchase_price', formatMoney)}</td>
+                      <td>{renderEditableCell(displayProduct, 'selling_price', formatMoney)}</td>
+                      <td>{renderEditableCell(displayProduct, 'gst_percent', formatPercent)}</td>
                       <td>{stock}</td>
                       <td>{formatDate(displayProduct.expiry_date || displayProduct.expiryDate)}</td>
                       <td>
@@ -656,8 +1459,11 @@ const ProductsPage = ({ navigate }) => {
                       </td>
                       {userDetails.role === 'admin' && (
                         <td className="actions-cell">
-                          <button className="btn btn-outline-primary btn-sm" onClick={() => handleEditClick(product)}>
+                          {/* <button className="btn btn-outline-primary btn-sm" onClick={() => handleEditClick(product)}>
                             Edit
+                          </button> */}
+                          <button className="btn btn-outline-info btn-sm" onClick={() => openStockModal(displayProduct)}>
+                            Stock by Branch
                           </button>
                           <button className="btn btn-outline-danger btn-sm" onClick={() => openDeleteModal(product)}>
                             Delete
@@ -708,6 +1514,7 @@ const ProductsPage = ({ navigate }) => {
             title="Add Product"
             fields={productFields}
             formData={formData}
+            hsnOptions={hsnSuggestions}
             onChange={handleChange}
             onSubmit={handleSubmit}
             isSubmitting={isAddingProduct}
@@ -715,7 +1522,7 @@ const ProductsPage = ({ navigate }) => {
             onProductAdded={fetchProducts}
           />
         )}
-        {editTarget && (
+        {/* {editTarget && (
           <EditProductModal
             item={editTarget}
             pieceBasedEnabled={pieceBasedEnabled}
@@ -729,7 +1536,7 @@ const ProductsPage = ({ navigate }) => {
             isSubmitting={isEditingProduct}
             detailsStatus={editDetailsStatus}
           />
-        )}
+        )} */}
         {deleteModalOpen && (
           <div className="delete-modal-overlay" onClick={closeDeleteModal}>
             <div className="delete-modal" onClick={(event) => event.stopPropagation()}>
@@ -746,12 +1553,270 @@ const ProductsPage = ({ navigate }) => {
             </div>
           </div>
         )}
+        {stockModalOpen && (
+          <div className="delete-modal-overlay" onClick={closeStockModal}>
+            <div className="delete-modal stock-modal" onClick={(event) => event.stopPropagation()}>
+              <h4>Stock by Branch</h4>
+              <p className="mb-2">{stockTarget?.name || stockTarget?.product_name || '-'}</p>
+              <div className="expenses-table-wrapper">
+                <table className="expenses-table">
+                  <thead>
+                    <tr>
+                      <th>Branch</th>
+                      <th className="text-end">Quantity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockLoading && (
+                      <tr>
+                        <td colSpan={2} className="text-center">Loading...</td>
+                      </tr>
+                    )}
+                    {!stockLoading && stockRows.length === 0 && (
+                      <tr>
+                        <td colSpan={2} className="text-center">No stock data.</td>
+                      </tr>
+                    )}
+                    {!stockLoading && stockRows.map((row) => (
+                      <tr key={row.branch_id || row.branch}>
+                        <td>{row.branch || '-'}</td>
+                        <td className="text-end">{row.quantity ?? 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="delete-actions">
+                <button className="btn btn-outline-secondary" onClick={closeStockModal}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {importModalOpen && (
+          <div className="delete-modal-overlay" onClick={closeImportModal}>
+            <div className="delete-modal import-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="import-modal-header">
+                <h4>Import Products</h4>
+                <div className="import-modal-actions">
+                  <button
+                    className="btn btn-primary"
+                    onClick={importPreviewRows.length > 0 ? handleImportConfirm : handleImportSubmit}
+                    disabled={importing || importParsing || (importPreviewRows.length > 0 && importMissingRequired > 0)}
+                  >
+                    {importing
+                      ? 'Importing...'
+                      : importPreviewRows.length > 0
+                      ? 'Confirm & Import'
+                      : importParsing
+                      ? 'Parsing...'
+                      : 'Parse & Preview'}
+                  </button>
+                  <button
+                    className="btn btn-outline-light"
+                    onClick={closeImportModal}
+                    type="button"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+              <p className="mb-2">Upload Excel (.xlsx, .xls, .csv). We'll preview and let you set selling price.</p>
+              <input
+                type="file"
+                className="form-control mb-2"
+                accept=".xlsx,.xls,.csv"
+                onChange={handleImportFileChange}
+              />
+              <div className="form-check mb-2">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="auto-category-toggle"
+                  checked={autoCategoryEnabled}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setAutoCategoryEnabled(checked);
+                    if (checked && importPreviewRows.length > 0) {
+                      autoFillCategories();
+                    }
+                  }}
+                />
+                <label className="form-check-label" htmlFor="auto-category-toggle">
+                  Auto-fill category from product name when empty
+                </label>
+              </div>
+              {/* {importPreviewRows.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-outline-info btn-sm mb-2"
+                  onClick={autoFillCategories}
+                >
+                  Re-apply Auto Categories
+                </button>
+              )} */}
+              {importPreviewError && (
+                <p className="text-danger mb-2">{importPreviewError}</p>
+              )}
+              {importPreviewRows.length > 0 && (
+                <div className="mb-2">
+                  <p className="mb-1">
+                    Rows: {importPreviewRows.length} · Missing required: {importMissingRequired}
+                  </p>
+                  <div className="expenses-table-wrapper import-preview-table">
+                    <table className="expenses-table">
+                      <thead>
+                        <tr>
+                          <th>Name *</th>
+                          <th>Category</th>
+                          <th>Barcode</th>
+                          <th className="text-end">Stock</th>
+                          <th className="text-end">Purchase Price *</th>
+                          <th className="text-end">MRP</th>
+                          <th>HSN</th>
+                          <th className="text-end">GST %</th>
+                          <th>Batch No.</th>
+                          <th>Expiry</th>
+                          <th className="text-end">Selling Price *</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importPreviewRows.map((row, idx) => (
+                          <tr key={`import-row-${idx}`}>
+                            <td>
+                              <input
+                                className="form-control form-control-sm"
+                                value={row.name}
+                                onChange={(event) => updatePreviewRow(idx, 'name', event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm"
+                                value={row.category}
+                                onChange={(event) => updatePreviewRow(idx, 'category', event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm"
+                                value={row.barcode}
+                                onChange={(event) => updatePreviewRow(idx, 'barcode', event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm text-end"
+                                type="number"
+                                step="0.01"
+                                value={row.stock_quantity}
+                                onChange={(event) => updatePreviewRow(idx, 'stock_quantity', event.target.value)}
+                                onWheel={preventNumberWheel}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm text-end"
+                                type="number"
+                                step="0.01"
+                                value={row.purchase_price ?? ''}
+                                onChange={(event) => updatePreviewRow(idx, 'purchase_price', event.target.value)}
+                                onWheel={preventNumberWheel}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm text-end"
+                                type="number"
+                                step="0.01"
+                                value={row.mrp ?? ''}
+                                onChange={(event) => updatePreviewRow(idx, 'mrp', event.target.value)}
+                                onWheel={preventNumberWheel}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm"
+                                value={row.hsn_code}
+                                onChange={(event) => updatePreviewRow(idx, 'hsn_code', event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm text-end"
+                                type="number"
+                                step="0.01"
+                                value={row.gst_percentage ?? ''}
+                                onChange={(event) => updatePreviewRow(idx, 'gst_percentage', event.target.value)}
+                                onWheel={preventNumberWheel}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm"
+                                value={row.batch_number ?? ''}
+                                onChange={(event) => updatePreviewRow(idx, 'batch_number', event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm"
+                                type="date"
+                                value={row.expiry_date ?? ''}
+                                onChange={(event) => updatePreviewRow(idx, 'expiry_date', event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm text-end"
+                                type="number"
+                                step="0.01"
+                                value={row.selling_price ?? ''}
+                                onChange={(event) => updatePreviewRow(idx, 'selling_price', event.target.value)}
+                                onWheel={preventNumberWheel}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              {importResult && (
+                <div className="mb-2">
+                  <p className="mb-1">Total: {importResult.total ?? 0}</p>
+                  <p className="mb-1">Inserted: {importResult.inserted ?? 0}</p>
+                  <p className="mb-1">Skipped: {importResult.skipped ?? 0}</p>
+                  {Array.isArray(importResult.errors) && importResult.errors.length > 0 && (
+                    <div>
+                      <p className="mb-1">Errors:</p>
+                      <ul>
+                        {importResult.errors.slice(0, 5).map((err, index) => (
+                          <li key={`import-error-${index}`}>
+                            Row {err.row}: {err.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+              {importError && (
+                <p className="text-danger mb-2">{importError}</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 export default ProductsPage;
+
+
 
 
 

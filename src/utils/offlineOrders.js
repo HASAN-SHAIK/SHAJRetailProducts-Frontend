@@ -1,4 +1,4 @@
-import { getOfflineOrders, saveOfflineOrdersBulk, upsertOfflineOrder } from '../core/db';
+import { deleteOfflineOrdersByIds, getOfflineOrders, saveOfflineOrdersBulk, upsertOfflineOrder } from '../core/db';
 
 const STORAGE_KEY = 'offline_order_queue_v1';
 let migrationDone = false;
@@ -57,6 +57,19 @@ const writeQueue = async (queue) => {
   }
 };
 
+const emitQueueUpdate = (queue) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent('offline-queue-updated', {
+        detail: { count: queue.length, queue },
+      })
+    );
+  } catch {
+    // ignore
+  }
+};
+
 export const getOfflineOrderQueue = async () => readQueue();
 
 const generateUuidV4 = () => {
@@ -111,9 +124,16 @@ const buildOfflineSyncOrder = (entry) => {
     user_id: payload.user_id,
     transaction_type: payload.transaction_type || payload.type,
     payment_mode: payload.payment_mode || payload.payment_method || payload.payment,
+    is_gst_enabled: payload.is_gst_enabled,
     client_created_at: payload.client_created_at || entry.createdAt,
+    customer_name: payload.customer_name,
+    customer_phone: payload.customer_phone || null,
+    customer_location: payload.customer_location,
+    customer_address: payload.customer_address,
+    branch_id: payload.branch_id || null,
     products: payload.products || [],
     total_amount: payload.total_amount ?? payload.total_price,
+    payments: Array.isArray(payload.payments) ? payload.payments : [],
   };
 };
 
@@ -124,6 +144,8 @@ export const processOfflineQueue = async (api) => {
   const remaining = [];
   let processed = 0;
   let failed = 0;
+  let synced = [];
+  const processedIds = [];
 
   const createEntries = queue.filter((item) => item.type === 'create');
   const updateEntries = queue.filter((item) => item.type === 'update');
@@ -137,6 +159,7 @@ export const processOfflineQueue = async (api) => {
       const sync_id = generateUuidV4();
       const res = await api.post('/orders/offline-sync', { sync_id, orders });
       const results = res?.data?.results || [];
+      synced = Array.isArray(results) ? results : [];
       const resultMap = new Map(
         results.map((r) => [r.client_order_id, r])
       );
@@ -147,6 +170,7 @@ export const processOfflineQueue = async (api) => {
         const result = resultMap.get(clientOrderId);
         if (result && (result.status === 'created' || result.status === 'duplicate')) {
           processed += 1;
+          if (entry.id) processedIds.push(entry.id);
         } else {
           failed += 1;
           remaining.push(entry);
@@ -162,12 +186,21 @@ export const processOfflineQueue = async (api) => {
     try {
       await api.put(`/orders/${item.orderId}`, item.payload);
       processed += 1;
+      if (item.id) processedIds.push(item.id);
     } catch (err) {
       failed += 1;
       remaining.push(item);
     }
   }
 
+  if (processedIds.length) {
+    try {
+      await deleteOfflineOrdersByIds(processedIds);
+    } catch {
+      // ignore delete failures; writeQueue will still reconcile
+    }
+  }
   await writeQueue(remaining);
-  return { processed, failed, remaining: remaining.length };
+  emitQueueUpdate(remaining);
+  return { processed, failed, remaining: remaining.length, synced };
 };

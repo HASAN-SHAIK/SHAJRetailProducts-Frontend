@@ -23,7 +23,7 @@ const ProductsMobile = () => {
         if (localResults.length) {
           const mapped = localResults.map(normalizeDisplayProduct).map((product) => ({
             ...product,
-            price: product.price ?? product.selling_price ?? product.actual_price ?? 0,
+            price: product.price ?? product.selling_price ?? product.purchase_price ?? 0,
             stock: product.stock ?? product.stock_quantity ?? 0,
           }));
           setProducts(mapped);
@@ -72,3 +72,4 @@ const ProductsMobile = () => {
 };
 
 export default ProductsMobile;
+

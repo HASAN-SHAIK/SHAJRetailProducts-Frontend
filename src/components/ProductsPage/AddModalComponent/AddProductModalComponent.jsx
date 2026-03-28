@@ -3,7 +3,7 @@ import './AddProductModalComponent.css'; // Add this CSS file
 import api from '../../../utils/axios';
 import { usePopup } from '../../common/PopUp/PopupProvider';
 
-const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, onSubmit, navigate, isSubmitting }) => {
+const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, onSubmit, navigate, isSubmitting, hsnOptions = [] }) => {
   const [categories, setCategories] = useState([]);
   const { showPopup } = usePopup();
   useEffect(() => {
@@ -38,62 +38,93 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
             </div>
 
             <div className="modal-body">
-              {fields.map(({ label, name, type, options, required, autoFocus }) => (
-                <div className="form-group mb-3" key={name}>
-                  <label htmlFor={name} className="form-label text-light">{label}</label>
-                  {
-                    (type === 'select' && Array.isArray(options)) ? (
-                      <select
-                        className="form-select custom-input"
-                        id={name}
-                        name={name}
-                        value={formData[name] || ''}
-                        onChange={onChange}
-                        required={required !== false}
-                      >
-                        {options.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    ) : (type === 'datalist' || type === 'select') ? (
-                    <>
-                      <input
-                        list="categories-list"
-                        className="form-control custom-input"
-                        id={name}
-                        name={name}
-                        value={formData[name] || ''}
-                        onChange={onChange}
-                        required={required !== false}
-                        placeholder={`Select or type ${label}`}
-                        autoFocus={autoFocus === true}
-                      />
-                      <datalist id="categories-list">
-                        {categories && categories.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </datalist>
-                    </>
-                    ): (
-                  <input
-                    type={type || 'text'}
-                    className="form-control custom-input"
-                    id={name}
-                    name={name}
-                    value={formData[name] || ''}
-                    onChange={onChange}
-                    required={required !== false}
-                    autoFocus={autoFocus === true}
-                  />)
-                }
-                </div>
-              ))}
+              <div className="row">
+                {fields.map(({ label, name, type, options, required, autoFocus }) => (
+                  <div className="form-group mb-3 col-6" key={name}>
+                    <div className="modal-field-row">
+                      <label htmlFor={name} className="form-label text-light modal-field-label">
+                        {label}
+                      </label>
+                      <div className="modal-field-input">
+                        {(type === 'select' && Array.isArray(options)) ? (
+                          <select
+                            className="form-select custom-input"
+                            id={name}
+                            name={name}
+                            value={formData[name] || ''}
+                            onChange={onChange}
+                            required={required !== false}
+                          >
+                            {options.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        ) : type === 'hsn' ? (
+                          <>
+                            <input
+                              list="hsn-list"
+                              className="form-control custom-input"
+                              id={name}
+                              name={name}
+                              value={formData[name] || ''}
+                              onChange={onChange}
+                              required={required !== false}
+                              placeholder={`Enter ${label}`}
+                              autoFocus={autoFocus === true}
+                            />
+                            <datalist id="hsn-list">
+                              {hsnOptions.map((option) => (
+                                <option
+                                  key={option.hsn_code || option.hsn}
+                                  value={option.hsn_code || option.hsn}
+                                >
+                                  {(option.description || '').toString()}
+                                </option>
+                              ))}
+                            </datalist>
+                          </>
+                        ) : (type === 'datalist' || type === 'select') ? (
+                          <>
+                            <input
+                              list="categories-list"
+                              className="form-control custom-input"
+                              id={name}
+                              name={name}
+                              value={formData[name] || ''}
+                              onChange={onChange}
+                              required={required !== false}
+                              placeholder={`Select or type ${label}`}
+                              autoFocus={autoFocus === true}
+                            />
+                            <datalist id="categories-list">
+                              {categories && categories.map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                            </datalist>
+                          </>
+                        ) : (
+                          <input
+                            type={type || 'text'}
+                            className="form-control custom-input"
+                            id={name}
+                            name={name}
+                            value={formData[name] || ''}
+                            onChange={onChange}
+                            required={required !== false}
+                            autoFocus={autoFocus === true}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="modal-footer border-0">
               <button type="button" className="btn btn-light custom-btn" data-bs-dismiss="modal">Cancel</button>
               <button type="submit" className="btn btn-primary custom-btn" disabled={isSubmitting}>
-                {isSubmitting ? 'Saving...' : 'Save'}
+                {isSubmitting ? 'Adding item...' : 'Save'}
               </button>
             </div>
           </div>

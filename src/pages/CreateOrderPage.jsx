@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../utils/axios';
-import { getProductByBarcode, updateProductsBulk } from '../core/db';
+import { getAllCustomers, saveCustomersBulk, upsertCustomersBulk, getProductByBarcode, updateProductsBulk } from '../core/db';
 import { searchLocalProducts, normalizeDisplayProduct } from '../utils/localProductSearch';
 import { useNavigate } from 'react-router-dom';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
@@ -9,6 +9,7 @@ import { clearOrderDetails, setOrderDetails } from '../store/orderSlice';
 import { enqueueOfflineOrder } from '../utils/offlineOrders';
 import { saveProductsCache, searchCachedProducts } from '../utils/offlineProducts';
 import { loadCategoriesCache, saveCategoriesCache } from '../utils/offlineCategories';
+import { useBranchStore } from '../store/branchStore';
 import './CreateOrderPage.css';
 
 const DRAFT_STORAGE_KEY = 'create_order_drafts_v1';
@@ -84,6 +85,8 @@ const CreateOrderPage = () => {
   const [saleMethods, setSaleMethods] = useState(['sale', 'purchase', 'personal']);
   const userDetails = useSelector((state) => state.user.userDetails);
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
+  const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
+  const effectiveBranchId = selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null;
   const features = tenantConfig?.features || tenantConfig?.plan_features || tenantConfig || {};
   const [transactionType, setTransactionType] = useState('sale');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -95,6 +98,7 @@ const CreateOrderPage = () => {
   const [customerAddress, setCustomerAddress] = useState('');
   const [customerLocation, setCustomerLocation] = useState('');
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
+  const [locationSuggestions, setLocationSuggestions] = useState([]);
   const [barcodeInput, setBarcodeInput] = useState('');
   const [isBarcodeAdding, setIsBarcodeAdding] = useState(false);
   const barcodeInputRef = useRef(null);
@@ -109,6 +113,14 @@ const CreateOrderPage = () => {
   const [purchaseModalSuggestions, setPurchaseModalSuggestions] = useState([]);
   const purchaseModalSearchTimerRef = useRef(null);
   const latestPurchaseModalSearchRef = useRef('');
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [invoiceFile, setInvoiceFile] = useState(null);
+  const [invoiceItems, setInvoiceItems] = useState([]);
+  const [invoiceMargin, setInvoiceMargin] = useState(20);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoiceSaving, setInvoiceSaving] = useState(false);
+  const [invoiceError, setInvoiceError] = useState('');
+  const [invoiceMeta, setInvoiceMeta] = useState({ supplier_id: '', invoice_number: '' });
   const initialDraftStateRef = useRef(null);
   const hasPlanSyncRef = useRef(false);
   const orderDetails = useSelector((state) => state.order.orderDetails);
@@ -124,6 +136,13 @@ const CreateOrderPage = () => {
     .trim();
   const isPremiumPlan = planType.includes('premium');
   const multiDraftEnabled = !isEditing && isPremiumPlan;
+
+  const computeProfitPerUnit = (purchasePrice, sellingPrice) => {
+    const purchase = Number(purchasePrice);
+    const selling = Number(sellingPrice);
+    if (!Number.isFinite(purchase) || !Number.isFinite(selling)) return null;
+    return Number((selling - purchase).toFixed(2));
+  };
   if (!initialDraftStateRef.current) {
     const storedDrafts = loadDraftsFromStorage();
     if (storedDrafts.length) {
@@ -165,6 +184,12 @@ useEffect(() => {
             id: clonedItem.product_id || clonedItem.id,
             suggestions: [],
             is_weight_based: clonedItem.is_weight_based ?? 0,
+            purchase_price:
+              clonedItem.purchase_price_snapshot ??
+              clonedItem.purchase_price ??
+              clonedItem.purchasePrice ??
+              null,
+            default_selling_price: clonedItem.selling_price ?? null,
           };
         });
         setProducts(reconstructedProducts);
@@ -211,6 +236,23 @@ useEffect(() => {
           saveProductsCache(productsRes.data);
         } catch (err) {
           console.log('Failed to cache products for offline search', err);
+        }
+      }
+
+      if (navigator.onLine) {
+        try {
+          const customersRes = await api.get('/customers', { params: { limit: 2000 } });
+          const customerPayload =
+            customersRes?.data?.data?.customers ||
+            customersRes?.data?.customers ||
+            customersRes?.data?.data ||
+            customersRes?.data ||
+            [];
+          if (Array.isArray(customerPayload) && customerPayload.length) {
+            await saveCustomersBulk(customerPayload);
+          }
+        } catch (err) {
+          // non-blocking
         }
       }
       
@@ -433,22 +475,24 @@ useEffect(() => {
   };
 
   const getDefaultPurchaseData = () => ({
-    product_name: '',
-    company: '',
-    quantity: '',
-    actual_price: '',
-    selling_price: '',
-    category: '',
-    time_for_delivery: '',
-    is_weight_based: weightBasedEnabled && !pieceBasedEnabled ? 1 : 0,
-    product_id: null,
-  });
+      product_name: '',
+      company: '',
+      quantity: '',
+      purchase_price: '',
+      selling_price: '',
+      batch_number: '',
+      expiry_date: '',
+      category: '',
+      time_for_delivery: '',
+      is_weight_based: weightBasedEnabled && !pieceBasedEnabled ? 1 : 0,
+      product_id: null,
+    });
 
   const getDefaultBarcodeCreateData = (barcode = '') => ({
     product_name: '',
     company: '',
     selling_price: '',
-    actual_price: '',
+    purchase_price: '',
     stock_quantity: '',
     category: '',
     barcode,
@@ -471,6 +515,232 @@ useEffect(() => {
     }
   }, [transactionType]);
 
+  const closeInvoiceModal = () => {
+    setInvoiceModalOpen(false);
+    setInvoiceFile(null);
+    setInvoiceItems([]);
+    setInvoiceError('');
+    setInvoiceMeta({ supplier_id: '', invoice_number: '' });
+  };
+
+  const handleInvoiceFileChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    setInvoiceFile(file);
+    setInvoiceItems([]);
+    setInvoiceError('');
+  };
+
+  const fetchExistingProductForInvoice = async (name) => {
+    if (!name) return null;
+    try {
+      const response = await api.get(buildSearchUrl(name, 'purchase'));
+      const results = response?.data?.products || response?.data?.data || response?.data || [];
+      const list = Array.isArray(results) ? results : [];
+      const match = list.find(
+        (item) => String(item?.name || item?.product_name || '').trim().toLowerCase() === name.trim().toLowerCase()
+      );
+      return match || list[0] || null;
+    } catch (err) {
+      return null;
+    }
+  };
+
+  const buildInvoiceRow = (raw, existing, margin) => {
+    const purchase_price = Number(raw.purchase_price || 0);
+    const suggested = purchase_price ? +(purchase_price * (1 + margin / 100)).toFixed(2) : null;
+    const existingSelling = existing?.selling_price ?? existing?.sellingPrice ?? null;
+    return {
+      product_id: existing?.id ?? existing?.product_id ?? null,
+      name: raw.name || '',
+      hsn: raw.hsn || '',
+      qty: raw.qty || '',
+      purchase_price: raw.purchase_price || '',
+      gst_percent: raw.gst_percent || '',
+      batch_number: '',
+      expiry_date: '',
+      existing_selling_price: existingSelling,
+      suggested_selling_price: suggested,
+      selling_price: existingSelling ?? suggested ?? '',
+      update_price: existingSelling ? false : true
+    };
+  };
+
+  const handleInvoiceUpload = async () => {
+    if (!invoiceFile || invoiceLoading) return;
+    const name = invoiceFile.name.toLowerCase();
+    if (!name.endsWith('.pdf')) {
+      showPopup('Only PDF invoices are supported.', 'Validation');
+      return;
+    }
+    if (invoiceFile.size > 5 * 1024 * 1024) {
+      showPopup('File size must be 5MB or less.', 'Validation');
+      return;
+    }
+    setInvoiceLoading(true);
+    setInvoiceError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', invoiceFile);
+      const response = await api.post('/purchase/parse-invoice', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      const items = response?.data?.items || response?.data?.data?.items || response?.data?.data || [];
+      const list = Array.isArray(items) ? items : [];
+      const enriched = await Promise.all(
+        list.map(async (item) => {
+          const existing = await fetchExistingProductForInvoice(item.name);
+          return buildInvoiceRow(item, existing, invoiceMargin);
+        })
+      );
+      setInvoiceItems(enriched);
+      if (!enriched.length) {
+        setInvoiceError('No items found in invoice.');
+      }
+    } catch (err) {
+      const message = err?.response?.data?.message || 'Unable to parse invoice.';
+      setInvoiceError(message);
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  const applyMarginToAll = () => {
+    setInvoiceItems((prev) =>
+      prev.map((row) => {
+        const purchase = Number(row.purchase_price || 0);
+        const suggested = purchase ? +(purchase * (1 + invoiceMargin / 100)).toFixed(2) : '';
+        return {
+          ...row,
+          suggested_selling_price: suggested,
+          selling_price: suggested,
+          update_price: true
+        };
+      })
+    );
+  };
+
+  const handleInvoiceRowChange = (index, field, value) => {
+    setInvoiceItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const handleInvoiceKeyDown = (event) => {
+    if (event.key !== 'Enter') return;
+    const current = event.currentTarget;
+    const order = Number(current.dataset.order);
+    if (!Number.isFinite(order)) return;
+    const next = document.querySelector(`[data-invoice-order="${order + 1}"]`);
+    if (next) {
+      event.preventDefault();
+      next.focus();
+    }
+  };
+
+  const handleInvoiceSave = async (withPriceUpdate) => {
+    if (invoiceSaving || invoiceItems.length === 0) return;
+    const missingSelling = invoiceItems.filter((row) => !Number(row.selling_price || 0)).length;
+    if (missingSelling > 0) {
+      const ok = window.confirm(`Selling price missing for ${missingSelling} items. Continue?`);
+      if (!ok) return;
+    }
+    setInvoiceSaving(true);
+    try {
+      const payloadItems = invoiceItems.map((row) => {
+        const item = {
+          product_id: row.product_id || undefined,
+          name: row.name,
+          hsn: row.hsn || undefined,
+          qty: Number(row.qty || 0),
+          purchase_price: Number(row.purchase_price || 0),
+          gst_percent: Number(row.gst_percent || 0) || undefined,
+          batch_number: row.batch_number || undefined,
+          expiry_date: row.expiry_date || undefined
+        };
+        if (withPriceUpdate && row.update_price && Number(row.selling_price || 0) > 0) {
+          item.selling_price = Number(row.selling_price);
+        }
+        return item;
+      });
+      await api.post('/purchase/save', {
+        supplier_id: invoiceMeta.supplier_id || undefined,
+        invoice_number: invoiceMeta.invoice_number || undefined,
+        branch_id: effectiveBranchId || undefined,
+        items: payloadItems
+      });
+      showPopup('Purchase saved successfully.', 'Success');
+      closeInvoiceModal();
+    } catch (err) {
+      const message = err?.response?.data?.message || 'Failed to save purchase.';
+      showPopup(message, 'Error');
+    } finally {
+      setInvoiceSaving(false);
+    }
+  };
+
+  const buildPurchasePdfPayload = () => {
+    const company = {
+      name: tenantConfig?.shop_name || tenantConfig?.tenant_name || 'SHAJTech',
+      address: tenantConfig?.shop_address || tenantConfig?.address_line || '',
+      gstin: tenantConfig?.gst_number || tenantConfig?.gstin || '',
+      phone: tenantConfig?.phone || tenantConfig?.mobile || ''
+    };
+    const items = (products || []).map((item) => {
+      const qty = Number(item.quantity || 0);
+      const purchasePrice = Number(item.purchase_price || item.purchase_price || 0);
+      const gst = Number(item.gst_percentage || item.gst_percent || 0);
+      const total = qty * purchasePrice * (1 + gst / 100);
+      return {
+        name: item.product_name || item.name || '',
+        hsn: item.hsn_code || item.hsn || '',
+        qty,
+        purchase_price: purchasePrice,
+        gst_percent: gst,
+        total
+      };
+    });
+    const taxTotal = items.reduce((sum, row) => {
+      const gst = Number(row.gst_percent || 0);
+      const base = Number(row.qty || 0) * Number(row.purchase_price || 0);
+      return sum + base * (gst / 100);
+    }, 0);
+    const taxes = taxTotal > 0 ? [{ label: 'GST', amount: taxTotal }] : [];
+    return {
+      company,
+      supplier: {},
+      po_number: `PO-${Date.now().toString().slice(-6)}`,
+      date: new Date().toLocaleDateString('en-IN'),
+      items,
+      taxes,
+      notes: ''
+    };
+  };
+
+  const handleDownloadPurchasePdf = async () => {
+    if (!products.length) {
+      showPopup('Add at least one product to download PDF.', 'Validation');
+      return;
+    }
+    try {
+      const response = await api.post('/purchase/generate-pdf', buildPurchasePdfPayload(), {
+        responseType: 'blob'
+      });
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'purchase-order.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      showPopup('Failed to generate PDF.', 'Error');
+    }
+  };
+
   const handlePaymentMethodChange = (e) => setPaymentMethod(e.target.value);
 
   const handleCustomerSearch = async (text) => {
@@ -480,17 +750,37 @@ useEffect(() => {
       return;
     }
     try {
-      const response = await api.get(
-        `/customers/search?name=${encodeURIComponent(text)}`
-      );
-      const results =
-        response?.data?.data?.customers ||
-        response?.data?.customers ||
-        response?.data?.data ||
-        response?.data ||
-        [];
-      if (latestSearchRef.current.customer !== text) return;
-      setCustomerSuggestions(Array.isArray(results) ? results : []);
+      const localCustomers = await getAllCustomers();
+      const localMatches = (localCustomers || [])
+        .filter((customer) => {
+          const name = String(customer?.name || '').toLowerCase();
+          const mobile = String(customer?.mobile || '').toLowerCase();
+          const query = text.toLowerCase();
+          return name.includes(query) || mobile.includes(query);
+        })
+        .slice(0, 20);
+      if (localMatches.length) {
+        if (latestSearchRef.current.customer !== text) return;
+        setCustomerSuggestions(localMatches);
+      } else if (navigator.onLine) {
+        const response = await api.get(
+          `/customers/search?name=${encodeURIComponent(text)}`
+        );
+        const results =
+          response?.data?.data?.customers ||
+          response?.data?.customers ||
+          response?.data?.data ||
+          response?.data ||
+          [];
+        if (latestSearchRef.current.customer !== text) return;
+        const list = Array.isArray(results) ? results : [];
+        setCustomerSuggestions(list);
+        if (list.length) {
+          upsertCustomersBulk(list).catch(() => {});
+        }
+      } else {
+        setCustomerSuggestions([]);
+      }
     } catch (err) {
       if (latestSearchRef.current.customer !== text) return;
       setCustomerSuggestions([]);
@@ -515,6 +805,25 @@ useEffect(() => {
     setCustomerAddress(customer?.address || '');
     setCustomerLocation(customer?.location || '');
     setCustomerSuggestions([]);
+    setLocationSuggestions([]);
+  };
+
+  const handleLocationSearch = async (text) => {
+    if (!text) {
+      setLocationSuggestions([]);
+      return;
+    }
+    try {
+      const localCustomers = await getAllCustomers();
+      const matches = (localCustomers || [])
+        .map((customer) => String(customer?.location || '').trim())
+        .filter((location) => location)
+        .filter((location) => location.toLowerCase().includes(text.toLowerCase()));
+      const unique = Array.from(new Set(matches)).slice(0, 10);
+      setLocationSuggestions(unique);
+    } catch {
+      setLocationSuggestions([]);
+    }
   };
 
   const handleAddProductRow = () => {
@@ -662,6 +971,8 @@ useEffect(() => {
       quantity: '',
       suggestions: [],
       selling_price: product.selling_price,
+      purchase_price: product.purchase_price ?? product.purchasePrice ?? null,
+      default_selling_price: product.selling_price,
       is_weight_based: product.is_weight_based ?? product.type ?? 0,
       stock_quantity: product.stock_quantity ?? null,
     };
@@ -764,16 +1075,18 @@ const schedulePurchaseProductSearch = (text, index) => {
     return;
   }
   const updated = [...products];
-  updated[index] = {
-    ...updated[index],
-    product_id: product.id ?? null,
-    product_name: product.name,
-    company: product.company,
-    quantity: 1,
-    actual_price: product.actual_price,
-    selling_price: product.selling_price,
-    category: product.category,
-    time_for_delivery: '',
+    updated[index] = {
+      ...updated[index],
+      product_id: product.id ?? null,
+      product_name: product.name,
+      company: product.company,
+      quantity: 1,
+      purchase_price: product.purchase_price,
+      selling_price: product.selling_price,
+      batch_number: updated[index]?.batch_number || '',
+      expiry_date: updated[index]?.expiry_date || '',
+      category: product.category,
+      time_for_delivery: '',
     suggestions: [],
       is_weight_based: product.is_weight_based ?? product.type ?? 0,
     stock_quantity: product.stock_quantity ?? null,
@@ -874,8 +1187,10 @@ const schedulePurchaseProductSearch = (text, index) => {
       product_name: product.name,
       company: product.company,
       quantity: 1,
-      actual_price: product.actual_price,
+      purchase_price: product.purchase_price,
       selling_price: product.selling_price,
+      batch_number: prev.batch_number || '',
+      expiry_date: prev.expiry_date || '',
       category: product.category,
       time_for_delivery: '',
       is_weight_based: product.is_weight_based ?? product.type ?? 0,
@@ -888,12 +1203,12 @@ const schedulePurchaseProductSearch = (text, index) => {
     const data = purchaseModalData || {};
     const hasExisting = Boolean(data.product_id);
     if (hasExisting) {
-      if (!data.quantity || !data.actual_price || !data.selling_price) {
-        showPopup('Enter quantity, actual price, and selling price', 'Validation');
+      if (!data.quantity || !data.purchase_price || !data.selling_price) {
+        showPopup('Enter quantity, Purchase Price, and selling price', 'Validation');
         return;
       }
     } else {
-      if (!data.product_name || !data.company || !data.quantity || !data.actual_price || !data.selling_price || !data.category || !data.time_for_delivery) {
+      if (!data.product_name || !data.company || !data.quantity || !data.purchase_price || !data.selling_price || !data.category || !data.time_for_delivery) {
         showPopup('Fill all product details', 'Validation');
         return;
       }
@@ -907,8 +1222,8 @@ const schedulePurchaseProductSearch = (text, index) => {
       showPopup('Piece-based products are disabled for this tenant.', 'Feature');
       return;
     }
-    if (Number(data.selling_price) < Number(data.actual_price)) {
-      showPopup('Actual Price is Less than Selling price', 'Validation');
+    if (Number(data.selling_price) < Number(data.purchase_price)) {
+      showPopup('Purchase Price is Less than Selling price', 'Validation');
       return;
     }
     const updated = [
@@ -952,6 +1267,8 @@ const schedulePurchaseProductSearch = (text, index) => {
             quantity: '',
             suggestions: [],
             selling_price: product.selling_price,
+            purchase_price: product.purchase_price ?? product.purchasePrice ?? null,
+            default_selling_price: product.selling_price,
             is_weight_based: product.is_weight_based ?? product.type ?? 0,
             stock_quantity: product.stock_quantity ?? null,
           },
@@ -1018,7 +1335,7 @@ const schedulePurchaseProductSearch = (text, index) => {
     const name = product?.name || '-';
     const company = product?.company || '-';
     const selling = product?.selling_price ?? '-';
-    const actual = product?.actual_price ?? '-';
+    const actual = product?.purchase_price ?? '-';
     const category = product?.category || '-';
     const delivery = product?.time_for_delivery ?? '-';
     const typeLabel = resolveIsWeightBased(product) ? 'Weight' : 'Piece';
@@ -1068,7 +1385,7 @@ const schedulePurchaseProductSearch = (text, index) => {
           product_name: product.name,
           company: product.company,
           quantity: 1,
-          actual_price: product.actual_price,
+          purchase_price: product.purchase_price,
           selling_price: product.selling_price,
           category: product.category,
           time_for_delivery: '',
@@ -1148,12 +1465,12 @@ const schedulePurchaseProductSearch = (text, index) => {
       showPopup('Barcode is required', 'Validation');
       return;
     }
-    if (!data.product_name || !data.category || !data.selling_price || !data.actual_price || !data.company || !data.stock_quantity) {
+    if (!data.product_name || !data.category || !data.selling_price || !data.purchase_price || !data.company || !data.stock_quantity) {
       showPopup('Fill all product details', 'Validation');
       return;
     }
-    if (Number(data.selling_price) < Number(data.actual_price)) {
-      showPopup('Actual Price is Less than Selling price', 'Validation');
+    if (Number(data.selling_price) < Number(data.purchase_price)) {
+      showPopup('Purchase Price is Less than Selling price', 'Validation');
       return;
     }
     try {
@@ -1162,7 +1479,7 @@ const schedulePurchaseProductSearch = (text, index) => {
         product_name: data.product_name,
         company: data.company,
         selling_price: data.selling_price,
-        actual_price: data.actual_price,
+        purchase_price: data.purchase_price,
         stock_quantity: data.stock_quantity,
         category: data.category,
         barcode: data.barcode,
@@ -1184,7 +1501,7 @@ const schedulePurchaseProductSearch = (text, index) => {
           product_name: created.name,
           company: created.company,
           quantity: 1,
-          actual_price: created.actual_price,
+          purchase_price: created.purchase_price,
           selling_price: created.selling_price,
           category: created.category,
           time_for_delivery: '',
@@ -1258,6 +1575,13 @@ const schedulePurchaseProductSearch = (text, index) => {
     calculateTotal(updated);
   };
 
+  const handleSaleFieldChange = (value, index, field) => {
+    const updated = [...products];
+    updated[index][field] = value;
+    setProducts(updated);
+    calculateTotal(updated);
+  };
+
   const handlePurchaseFieldChange = (value, index, field) => {
     const updated = [...products];
     updated[index][field] = value;
@@ -1274,7 +1598,7 @@ const schedulePurchaseProductSearch = (text, index) => {
       setTotalAmount(total);
     } else if (transactionType === 'purchase') {
       const total = updatedProducts.reduce((sum, p) => {
-        return sum + (parseFloat(p.quantity || 0) * parseFloat(p.actual_price || 0));
+        return sum + (parseFloat(p.quantity || 0) * parseFloat(p.purchase_price || 0));
       }, 0);
       setTotalAmount(total);
     }
@@ -1288,6 +1612,10 @@ const schedulePurchaseProductSearch = (text, index) => {
         return;
       }
       handleDiscardDraft(activeDraftId);
+      return;
+    }
+    if ((transactionType === 'sale' || transactionType === 'purchase') && !effectiveBranchId) {
+      showPopup('Select a branch before proceeding.', 'Validation');
       return;
     }
     if (!transactionType) {
@@ -1341,12 +1669,12 @@ const schedulePurchaseProductSearch = (text, index) => {
       for (const p of products) {
         const hasExisting = Boolean(p.product_id);
         if (hasExisting) {
-          if (!p.quantity || !p.actual_price || !p.selling_price) {
-            showPopup('Enter quantity, actual price, and selling price', 'Validation');
+          if (!p.quantity || !p.purchase_price || !p.selling_price) {
+            showPopup('Enter quantity, Purchase Price, and selling price', 'Validation');
             return;
           }
         } else {
-          if (!p.product_name || !p.company || !p.quantity || !p.actual_price || !p.selling_price || !p.category || !p.time_for_delivery) {
+          if (!p.product_name || !p.company || !p.quantity || !p.purchase_price || !p.selling_price || !p.category || !p.time_for_delivery) {
             showPopup('Fill all product details', 'Validation');
             return;
           }
@@ -1360,8 +1688,8 @@ const schedulePurchaseProductSearch = (text, index) => {
           showPopup('Piece-based products are disabled for this tenant.', 'Feature');
           return;
         }
-        if (p.selling_price < p.actual_price) {
-          showPopup('Actual Price is Less than Selling price', 'Validation');
+        if (p.selling_price < p.purchase_price) {
+          showPopup('Purchase Price is Less than Selling price', 'Validation');
           return;
         }
       }
@@ -1375,10 +1703,11 @@ const schedulePurchaseProductSearch = (text, index) => {
         type: transactionType,
         user_id: userDetails.id,
         customer_name: customerName || undefined,
-        customer_phone: customerPhone || undefined,
-        customer_address: customerAddress || undefined,
-        customer_location: customerLocation || undefined,
-        total_amount: transactionType === 'personal' ? parseFloat(personalAmount) : totalAmount,
+          customer_phone: customerPhone || undefined,
+          customer_address: customerAddress || undefined,
+          customer_location: customerLocation || undefined,
+          branch_id: effectiveBranchId || undefined,
+          total_amount: transactionType === 'personal' ? parseFloat(personalAmount) : totalAmount,
         total_price: transactionType === 'personal' ? parseFloat(personalAmount) : totalAmount,
         payment: paymentMethod,
         payment_method: paymentMethod,
@@ -1409,14 +1738,15 @@ const schedulePurchaseProductSearch = (text, index) => {
       };
 
     const createPayload = {
-        transaction_type: transactionType,
-        user_id: userDetails.id,
-        customer_name: customerName || undefined,
-        customer_phone: customerPhone || undefined,
-        customer_address: customerAddress || undefined,
-        customer_location: customerLocation || undefined,
-        total_amount: transactionType === 'personal' ? parseFloat(personalAmount) : totalAmount,
-        payment_method: paymentMethod,
+          transaction_type: transactionType,
+          user_id: userDetails.id,
+          customer_name: customerName || undefined,
+          customer_phone: customerPhone || undefined,
+          customer_address: customerAddress || undefined,
+          customer_location: customerLocation || undefined,
+          branch_id: effectiveBranchId || undefined,
+          total_amount: transactionType === 'personal' ? parseFloat(personalAmount) : totalAmount,
+          payment_method: paymentMethod,
         products: products.map(p => {
           if (transactionType === 'sale') {
             return {
@@ -1431,12 +1761,14 @@ const schedulePurchaseProductSearch = (text, index) => {
         })
       };
 
-    const enqueueAndExit = async (isUpdate) => {
+    const enqueueAndExit = async (isUpdate, shouldShowOfflinePopup = false) => {
       const entry = isUpdate
         ? { type: 'update', orderId: orderDetails.id, payload: updatePayload }
         : { type: 'create', payload: createPayload };
       await enqueueOfflineOrder(entry);
-      showPopup('Offline: Order saved and will sync when you are online.', 'Offline');
+      if (shouldShowOfflinePopup) {
+        showPopup('Offline: Order saved and will sync when you are online.', 'Offline');
+      }
       dispatch(clearOrderDetails());
       if (isUpdate || !multiDraftEnabled) {
         navigate('/orders');
@@ -1452,7 +1784,7 @@ const schedulePurchaseProductSearch = (text, index) => {
         (typeof window !== 'undefined' && window.__serverOffline === true);
 
       if (serverOffline) {
-        await enqueueAndExit(Boolean(orderDetails));
+        await enqueueAndExit(Boolean(orderDetails), true);
         return;
       }
 
@@ -1474,6 +1806,25 @@ const schedulePurchaseProductSearch = (text, index) => {
       }
       
       // For new orders
+      if (transactionType === 'purchase') {
+        const canUsePurchases = products.every((p) => Boolean(p.product_id));
+        if (canUsePurchases) {
+          const items = products.map((p) => ({
+            product_id: p.product_id,
+            batch_number: p.batch_number || undefined,
+            expiry_date: p.expiry_date || undefined,
+            purchase_price: p.purchase_price,
+            selling_price: p.selling_price,
+            quantity: p.quantity,
+          }));
+          await api.post('/purchases', { branch_id: effectiveBranchId, items });
+          dispatch(clearOrderDetails());
+          navigate('/orders');
+          showPopup('Purchase recorded.', 'Success');
+          return;
+        }
+      }
+
       const createRes = await api.post('/orders', createPayload);
       const updatedProducts = createRes?.data?.updated_products;
       if (Array.isArray(updatedProducts) && updatedProducts.length) {
@@ -1492,7 +1843,10 @@ const schedulePurchaseProductSearch = (text, index) => {
       }
     } catch (err) {
       if (!err?.response) {
-        await enqueueAndExit(Boolean(orderDetails));
+        const shouldShowOfflinePopup =
+          !navigator.onLine ||
+          (typeof window !== 'undefined' && window.__serverOffline === true);
+        await enqueueAndExit(Boolean(orderDetails), shouldShowOfflinePopup);
         return;
       }
       const message = err?.response?.data?.message;
@@ -1663,8 +2017,28 @@ const schedulePurchaseProductSearch = (text, index) => {
                 className="form-control bg-light text-dark"
                 placeholder="Customer Location (optional)"
                 value={customerLocation}
-                onChange={(e) => setCustomerLocation(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setCustomerLocation(value);
+                  handleLocationSearch(value);
+                }}
               />
+              {locationSuggestions.length > 0 && (
+                <ul className="list-group">
+                  {locationSuggestions.map((location) => (
+                    <li
+                      key={location}
+                      className="list-group-item list-group-item-action"
+                      onClick={() => {
+                        setCustomerLocation(location);
+                        setLocationSuggestions([]);
+                      }}
+                    >
+                      {location}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </div>
@@ -1693,14 +2067,21 @@ const schedulePurchaseProductSearch = (text, index) => {
               onClick={handleBarcodeSearch}
               disabled={isBarcodeAdding}
             >
-              {isBarcodeAdding ? 'Adding...' : 'Add'}
+              {isBarcodeAdding ? 'Item Adding...' : 'Add'}
             </button>
           </div>
         </div>
       )}
 
-      {transactionType === 'sale' && products.map((p, index) => (
-        <div className="row mb-2" key={index}>
+      {transactionType === 'sale' && products.map((p, index) => {
+        const profitPerUnit = computeProfitPerUnit(p.purchase_price, p.selling_price);
+        const marginPercent =
+          profitPerUnit !== null && Number(p.selling_price || 0) > 0
+            ? (profitPerUnit / Number(p.selling_price || 0)) * 100
+            : null;
+        const canOverridePrice = userDetails?.role === 'admin';
+        return (
+          <div className="row mb-2" key={index}>
           <div className="col-md-4">
             <input
               className="form-control bg-light text-dark"
@@ -1748,9 +2129,19 @@ const schedulePurchaseProductSearch = (text, index) => {
                             Only {Number(s.stock_quantity)} left
                           </small>
                         )}
+                      {s.location_tag && (
+                        <small className="text-warning d-block">
+                          {s.location_tag}
+                        </small>
+                      )}
                     </li>
                     : <li className="list-group-item list-group-item-action text-danger" disabled>
-                      {s.name + '(Out Of Stock)'}
+                      <div>{s.name + '(Out Of Stock)'}</div>
+                      {s.location_tag && (
+                        <small className="text-warning d-block">
+                          {s.location_tag}
+                        </small>
+                      )}
                     </li>
                 ))}
               </ul>
@@ -1787,20 +2178,45 @@ const schedulePurchaseProductSearch = (text, index) => {
               </small>
             )}
           </div>
+          <div className="col-md-2">
+            <input
+              type="number"
+              className="form-control bg-light text-dark"
+              placeholder="Selling Price"
+              value={p.selling_price ?? ''}
+              onChange={(e) => handleSaleFieldChange(e.target.value, index, 'selling_price')}
+              disabled={!p.id || !canOverridePrice}
+            />
+            {!canOverridePrice ? (
+              <small className="form-text text-muted">Only admins can edit price</small>
+            ) : null}
+            {p.default_selling_price != null && p.default_selling_price !== '' ? (
+              <small className="form-text text-muted">
+                Default: ₹{p.default_selling_price}
+              </small>
+            ) : null}
+            {profitPerUnit !== null ? (
+              <small className={profitPerUnit < 0 ? 'text-danger' : 'text-success'}>
+                Profit/unit: ₹{profitPerUnit}
+                {marginPercent !== null ? ` (${marginPercent.toFixed(2)}%)` : ''}
+              </small>
+            ) : null}
+          </div>
           <div className="col-md-1 d-flex align-items-center">
             <button className="btn btn-danger btn-sm" onClick={() => removeProductRow(index)}>×</button>
           </div>
         </div>
-      ))}
+      );
+      })}
 
   {transactionType === 'purchase' && products.map((p, index) => (
-  <div className="row mb-2" key={index}>
-    {['product_name', 'company', 'is_weight_based', 'quantity', 'actual_price', 'selling_price', 'category', 'time_for_delivery'].map((field) => (
-      <div className="col" key={field}>
-        {field === 'product_name' ? (
-          <>
-            <input
-              className="form-control"
+    <div className="row mb-2" key={index}>
+      {['product_name', 'company', 'is_weight_based', 'quantity', 'purchase_price', 'selling_price', 'batch_number', 'expiry_date', 'category', 'time_for_delivery'].map((field) => (
+        <div className="col" key={field}>
+          {field === 'product_name' ? (
+            <>
+              <input
+                className="form-control"
               placeholder="Product Name"
               value={p.product_name}
               onChange={(e) => {
@@ -1837,21 +2253,48 @@ const schedulePurchaseProductSearch = (text, index) => {
               ))}
             </datalist>
           </>
-        ) : field === 'is_weight_based' ? (
-          <select
-            className="form-select"
-            value={String(p.is_weight_based ?? 0)}
-            onChange={(e) => handlePurchaseFieldChange(e.target.value, index, 'is_weight_based')}
-            disabled={!pieceBasedEnabled || !weightBasedEnabled}
-          >
-            {pieceBasedEnabled && <option value="0">Piece</option>}
-            {weightBasedEnabled && <option value="1">Weight</option>}
-          </select>
-        ) : (
-          <input
-            className="form-control"
-            placeholder={field.replace(/_/g, ' ')}
-            value={p[field]}
+          ) : field === 'is_weight_based' ? (
+            <select
+              className="form-select"
+              value={String(p.is_weight_based ?? 0)}
+              onChange={(e) => handlePurchaseFieldChange(e.target.value, index, 'is_weight_based')}
+              disabled={!pieceBasedEnabled || !weightBasedEnabled}
+            >
+              {pieceBasedEnabled && <option value="0">Piece</option>}
+              {weightBasedEnabled && <option value="1">Weight</option>}
+            </select>
+          ) : field === 'expiry_date' ? (
+            <input
+              className="form-control"
+              type="date"
+              value={p.expiry_date || ''}
+              onChange={(e) => handlePurchaseFieldChange(e.target.value, index, 'expiry_date')}
+            />
+          ) : field === 'selling_price' ? (
+            <div>
+              <input
+                className="form-control"
+                placeholder={field.replace(/_/g, ' ')}
+                value={p[field]}
+                onChange={(e) => handlePurchaseFieldChange(e.target.value, index, field)}
+              />
+              {computeProfitPerUnit(p.purchase_price, p.selling_price) !== null ? (
+                <small
+                  className={
+                    computeProfitPerUnit(p.purchase_price, p.selling_price) < 0
+                      ? 'text-danger'
+                      : 'text-success'
+                  }
+                >
+                  Profit/unit: ₹{computeProfitPerUnit(p.purchase_price, p.selling_price)}
+                </small>
+              ) : null}
+            </div>
+          ) : (
+            <input
+              className="form-control"
+              placeholder={field.replace(/_/g, ' ')}
+              value={p[field]}
             onChange={(e) => handlePurchaseFieldChange(e.target.value, index, field)}
           />
         )}
@@ -1865,8 +2308,18 @@ const schedulePurchaseProductSearch = (text, index) => {
 
 
       {transactionType && transactionType !== 'personal' && (
-        <div className="mb-3">
+        <div className="mb-3 d-flex flex-wrap gap-2">
           <button className="btn btn-success" onClick={handleAddProductRow}>Add Product</button>
+          {transactionType === 'purchase' && (
+            <>
+              <button className="btn btn-outline-info" onClick={() => setInvoiceModalOpen(true)}>
+                Upload Purchase Invoice
+              </button>
+              <button className="btn btn-outline-light" onClick={handleDownloadPurchasePdf}>
+                Download Purchase PDF
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -1964,23 +2417,41 @@ const schedulePurchaseProductSearch = (text, index) => {
                 />
               </div>
               <div className="col-md-4">
-                <label>Actual Price</label>
+                <label>Purchase Price</label>
                 <input
                   className="form-control"
-                  placeholder="Actual Price"
-                  value={purchaseModalData.actual_price || ''}
-                  onChange={(e) => handlePurchaseModalChange('actual_price', e.target.value)}
+                  placeholder="Purchase Price"
+                  value={purchaseModalData.purchase_price || ''}
+                  onChange={(e) => handlePurchaseModalChange('purchase_price', e.target.value)}
                 />
               </div>
-              <div className="col-md-4">
-                <label>Selling Price</label>
-                <input
-                  className="form-control"
-                  placeholder="Selling Price"
-                  value={purchaseModalData.selling_price || ''}
-                  onChange={(e) => handlePurchaseModalChange('selling_price', e.target.value)}
-                />
-              </div>
+                <div className="col-md-4">
+                  <label>Selling Price</label>
+                  <input
+                    className="form-control"
+                    placeholder="Selling Price"
+                    value={purchaseModalData.selling_price || ''}
+                    onChange={(e) => handlePurchaseModalChange('selling_price', e.target.value)}
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label>Batch Number</label>
+                  <input
+                    className="form-control"
+                    placeholder="Batch Number"
+                    value={purchaseModalData.batch_number || ''}
+                    onChange={(e) => handlePurchaseModalChange('batch_number', e.target.value)}
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label>Expiry Date</label>
+                  <input
+                    className="form-control"
+                    type="date"
+                    value={purchaseModalData.expiry_date || ''}
+                    onChange={(e) => handlePurchaseModalChange('expiry_date', e.target.value)}
+                  />
+                </div>
               <div className="col-md-6">
                 <label>Category</label>
                 <input
@@ -2012,6 +2483,159 @@ const schedulePurchaseProductSearch = (text, index) => {
               </button>
               <button className="btn btn-primary" onClick={handlePurchaseModalSubmit}>
                 Add Product
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {invoiceModalOpen && (
+        <div className="purchase-modal-overlay" onClick={closeInvoiceModal}>
+          <div className="purchase-modal purchase-invoice-modal" onClick={(event) => event.stopPropagation()}>
+            <h4>Import Purchase Invoice</h4>
+            <div className="row g-3">
+              <div className="col-md-6">
+                <label>Supplier ID (optional)</label>
+                <input
+                  className="form-control"
+                  value={invoiceMeta.supplier_id || ''}
+                  onChange={(e) => setInvoiceMeta((prev) => ({ ...prev, supplier_id: e.target.value }))}
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Invoice Number (optional)</label>
+                <input
+                  className="form-control"
+                  value={invoiceMeta.invoice_number || ''}
+                  onChange={(e) => setInvoiceMeta((prev) => ({ ...prev, invoice_number: e.target.value }))}
+                />
+              </div>
+              <div className="col-12">
+                <input
+                  type="file"
+                  className="form-control"
+                  accept=".pdf"
+                  onChange={handleInvoiceFileChange}
+                />
+              </div>
+              <div className="col-12 d-flex gap-2 align-items-center">
+                <div className="d-flex gap-2 align-items-center">
+                  <label className="m-0">Margin %</label>
+                  <input
+                    type="number"
+                    className="form-control form-control-sm"
+                    style={{ width: 90 }}
+                    value={invoiceMargin}
+                    onChange={(e) => setInvoiceMargin(Number(e.target.value || 0))}
+                  />
+                </div>
+                <button className="btn btn-outline-primary btn-sm" onClick={applyMarginToAll}>
+                  Apply margin to all
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={handleInvoiceUpload} disabled={invoiceLoading}>
+                  {invoiceLoading ? 'Parsing...' : 'Upload & Parse'}
+                </button>
+              </div>
+            </div>
+            {invoiceError && (
+              <p className="text-danger mt-2">{invoiceError}</p>
+            )}
+            {invoiceItems.length > 0 && (
+              <div className="invoice-table-wrapper mt-3">
+                <table className="invoice-table">
+                  <thead>
+                    <tr>
+                      <th>Product Name</th>
+                      <th>HSN</th>
+                      <th>Qty</th>
+                      <th>Purchase Price</th>
+                      <th>GST %</th>
+                      <th>Batch</th>
+                      <th>Expiry</th>
+                      <th>Selling Price</th>
+                      <th>Update Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoiceItems.map((row, index) => {
+                      const cols = [
+                        { key: 'name', type: 'text' },
+                        { key: 'hsn', type: 'text' },
+                        { key: 'qty', type: 'number' },
+                        { key: 'purchase_price', type: 'number' },
+                        { key: 'gst_percent', type: 'number' },
+                        { key: 'batch_number', type: 'text' },
+                        { key: 'expiry_date', type: 'date' },
+                        { key: 'selling_price', type: 'number' }
+                      ];
+                      return (
+                        <tr key={`invoice-row-${index}`} className={!Number(row.selling_price || 0) ? 'missing-price' : ''}>
+                          {cols.map((col, colIndex) => {
+                            const order = index * cols.length + colIndex;
+                            const profitPerUnit =
+                              col.key === 'selling_price'
+                                ? computeProfitPerUnit(row.purchase_price, row.selling_price)
+                                : null;
+                            return (
+                              <td key={`${col.key}-${index}`}>
+                                <input
+                                  data-invoice-order={order}
+                                  onKeyDown={handleInvoiceKeyDown}
+                                  type={col.type}
+                                  className="form-control form-control-sm"
+                                  value={row[col.key] ?? ''}
+                                  onChange={(e) => handleInvoiceRowChange(index, col.key, e.target.value)}
+                                />
+                                {col.key === 'selling_price' && (
+                                  <div className="invoice-price-hint">
+                                    {row.existing_selling_price ? (
+                                      <span>Old: ₹{row.existing_selling_price}</span>
+                                    ) : (
+                                      <span>Old: -</span>
+                                    )}
+                                    {row.suggested_selling_price ? (
+                                      <span>Suggested: ₹{row.suggested_selling_price}</span>
+                                    ) : null}
+                                    {profitPerUnit !== null ? (
+                                      <span className={profitPerUnit < 0 ? 'text-danger' : 'text-success'}>
+                                        Profit/unit: ₹{profitPerUnit}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="text-center">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(row.update_price)}
+                              onChange={(e) => handleInvoiceRowChange(index, 'update_price', e.target.checked)}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="purchase-modal-actions mt-3">
+              <button className="btn btn-outline-secondary" onClick={closeInvoiceModal}>
+                Close
+              </button>
+              <button
+                className="btn btn-outline-primary"
+                onClick={() => handleInvoiceSave(false)}
+                disabled={invoiceSaving || invoiceItems.length === 0}
+              >
+                {invoiceSaving ? 'Saving...' : 'Save Purchase'}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => handleInvoiceSave(true)}
+                disabled={invoiceSaving || invoiceItems.length === 0}
+              >
+                {invoiceSaving ? 'Saving...' : 'Save + Update Selling Price'}
               </button>
             </div>
           </div>
@@ -2084,13 +2708,13 @@ const schedulePurchaseProductSearch = (text, index) => {
                 />
               </div>
               <div className="col-md-6">
-                <label>Actual Price</label>
+                <label>Purchase Price</label>
                 <input
                   className="form-control"
                   type="number"
-                  placeholder="Actual Price"
-                  value={barcodeCreateData.actual_price || ''}
-                  onChange={(e) => handleBarcodeCreateChange('actual_price', e.target.value)}
+                  placeholder="Purchase Price"
+                  value={barcodeCreateData.purchase_price || ''}
+                  onChange={(e) => handleBarcodeCreateChange('purchase_price', e.target.value)}
                 />
               </div>
             </div>
@@ -2110,4 +2734,6 @@ const schedulePurchaseProductSearch = (text, index) => {
 };
 
 export default CreateOrderPage;
+
+
 

@@ -21,7 +21,7 @@ describe('Create Order Page Functionalities', () => {
     cy.get('input[placeholder="product name"]').first().type('New Product');
     cy.get('input[placeholder="company"]').first().type('New Company');
     cy.get('input[placeholder="quantity"]').first().type('10');
-    cy.get('input[placeholder="actual price"]').first().type('50');
+    cy.get('input[placeholder="Purchase Price"]').first().type('50');
     cy.get('input[placeholder="selling price"]').first().type('60');
     cy.get('input[list="categories-list"]').first().type('Electronics');
     cy.get('input[placeholder="time for delivery"]').first().type('2');
@@ -157,3 +157,4 @@ describe('Create Order Page Functionalities', () => {
         cy.get('button').contains('Delete').first().should('be.disabled');
     });
 });
+
