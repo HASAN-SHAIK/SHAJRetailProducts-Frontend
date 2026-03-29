@@ -17,6 +17,7 @@ const waitForTransaction = (transaction) =>
 
 const normalizeOrder = (order) => ({
   id: order?.id ?? null,
+  branch_id: order?.branch_id ?? null,
   products_summary: order?.products_summary ?? order?.product_summary ?? '',
   product_names: order?.product_names ?? [],
   product_count: order?.product_count ?? 0,
@@ -79,6 +80,15 @@ export const getCachedOrdersPage = async ({ page = 1, limit = 20 } = {}) => {
   return { orders, total: sorted.length };
 };
 
+export const getAllCachedOrders = async () => {
+  const db = await initDB();
+  const transaction = db.transaction([ORDERS_STORE], 'readonly');
+  const store = transaction.objectStore(ORDERS_STORE);
+  const allOrders = (await waitForRequest(store.getAll())) || [];
+  await waitForTransaction(transaction);
+  return allOrders;
+};
+
 export const clearOrdersCache = async () => {
   const db = await initDB();
   const transaction = db.transaction([ORDERS_STORE], 'readwrite');
@@ -91,5 +101,6 @@ export default {
   upsertOrders,
   replaceAllOrders,
   getCachedOrdersPage,
+  getAllCachedOrders,
   clearOrdersCache,
 };

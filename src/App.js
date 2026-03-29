@@ -35,6 +35,7 @@ import ProductsMobile from './mobile/pages/ProductsMobile';
 import ReportsMobile from './mobile/pages/ReportsMobile';
 import SettingsMobile from './mobile/pages/SettingsMobile';
 import BillingPage from './pages/BillingPage';
+import BranchDevices from './pages/BranchDevices';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
@@ -217,6 +218,20 @@ useEffect(() => {
   };
   fetchBranches();
 }, [userDetails, selectedBranchId, setBranches, setSelectedBranchId]);
+
+useEffect(() => {
+  const registerDeviceForBranch = async () => {
+    if (!userDetails) return;
+    if (!navigator.onLine) return;
+    if (!selectedBranchId || selectedBranchId === 'all') return;
+    try {
+      await api.get('/auth/getLogin');
+    } catch (err) {
+      // handled by axios interceptors
+    }
+  };
+  registerDeviceForBranch();
+}, [userDetails, selectedBranchId]);
 
 useEffect(() => {
   if (!tenantConfig) return;
@@ -475,6 +490,14 @@ const tenantBannerColor = (() => {
           element={
             <ProtectedRoute>
               <BillingPage navigate={navigate} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/branch-devices"
+          element={
+            <ProtectedRoute>
+              <BranchDevices />
             </ProtectedRoute>
           }
         />
