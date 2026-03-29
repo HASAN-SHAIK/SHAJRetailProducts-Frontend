@@ -69,6 +69,11 @@ const Navbar = () => {
             <button className={`btn btn-outline-primary nav-pill${isActive('/billing') ? ' active' : ''}`} onClick={() => navigateTo('/billing')}><i class="bi bi-receipt fs-6"><span className='m-1'>Billing</span></i></button>
             <button className={`btn btn-outline-primary nav-pill${isActive('/products') ? ' active' : ''}`} onClick={() => navigateTo('/products')}><i class="bi bi-box-seam fs-6"><span className='m-1'>Products</span></i></button>
             <button className={`btn btn-outline-primary nav-pill${isActive('/transactions') ? ' active' : ''}`} onClick={() => navigateTo('/transactions')}><i class="bi bi-credit-card fs-6"><span className='m-1'>Transactions</span></i></button>
+            {userRole === 'admin' && (
+              <button className={`btn btn-outline-primary nav-pill${isActive('/branch-devices') ? ' active' : ''}`} onClick={() => navigateTo('/branch-devices')}>
+                <i class="bi bi-shield-lock fs-6"><span className='m-1'>Devices</span></i>
+              </button>
+            )}
             <button className="btn btn-outline-danger nav-pill" onClick={async() =>{navigate('/logout')}}><i class="bi bi-box-arrow-right fs-6"><span className='m-1'>Logout</span></i></button>
             </div>
         </div>

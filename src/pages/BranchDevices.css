@@ -1,0 +1,12 @@
+.branch-devices-page .card {
+  border-radius: 16px;
+  background-color: #1e293b;
+  color: aliceblue;
+}
+
+.branch-devices-page .table th,
+.branch-devices-page .table td {
+  vertical-align: middle;
+  background-color: #1e293b;
+  color: aliceblue;
+}

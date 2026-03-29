@@ -3,7 +3,7 @@ import api from '../../utils/axios';
 import './OrdersPage.css';
 import { usePopup } from '../common/PopUp/PopupProvider';
 import { getOfflineOrderQueue, processOfflineQueue } from '../../utils/offlineOrders';
-import { clearOrdersCache, getCachedOrdersPage, replaceAllOrders, upsertOrders } from '../../db/ordersDb';
+import { clearOrdersCache, getAllCachedOrders, replaceAllOrders, upsertOrders } from '../../db/ordersDb';
 import { getSessionValue, saveSessionValue } from '../../core/db';
 import { useSelector } from 'react-redux';
 import { jsPDF } from "jspdf";
@@ -89,6 +89,7 @@ const OrdersPage = ({ navigate }) => {
   const setWhatsappPhone = useWhatsappStore((state) => state.setPhone);
   const resetWhatsappState = useWhatsappStore((state) => state.resetWhatsappState);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
+  const effectiveBranchId = selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null;
 
   const RETURN_REASONS = [
     'Damaged',
@@ -138,20 +139,94 @@ const OrdersPage = ({ navigate }) => {
 
   const loadCachedOrders = useCallback(async () => {
     try {
-      const cached = await getCachedOrdersPage({ page: pagination.page, limit: pagination.limit });
-      if (Array.isArray(cached.orders) && cached.orders.length > 0) {
-        setOrders(cached.orders);
-        setErrorMessage('');
-        setPagination((prev) => ({
-          ...prev,
-          total_records: cached.total,
-          total_pages: cached.total ? Math.max(Math.ceil(cached.total / prev.limit), 1) : 1,
-        }));
+      const allOrders = await getAllCachedOrders();
+      let filtered = Array.isArray(allOrders) ? allOrders.slice() : [];
+
+      if (effectiveBranchId) {
+        filtered = filtered.filter((order) => order.branch_id === effectiveBranchId);
       }
+
+      if (searchQuery) {
+        const term = searchQuery.toLowerCase();
+        filtered = filtered.filter((order) => {
+          const idMatch = String(order.id || '').toLowerCase().includes(term);
+          const customerMatch =
+            String(order.customer_name || '').toLowerCase().includes(term) ||
+            String(order.customer_phone || '').toLowerCase().includes(term);
+          const productMatch =
+            String(order.products_summary || '').toLowerCase().includes(term) ||
+            (Array.isArray(order.product_names) &&
+              order.product_names.join(' ').toLowerCase().includes(term));
+          return idMatch || customerMatch || productMatch;
+        });
+      }
+
+      if (selectedRange) {
+        const now = new Date();
+        let rangeStart = null;
+        let rangeEnd = null;
+        if (selectedRange === 'today') {
+          rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          rangeEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        } else if (selectedRange === 'this_week') {
+          const day = now.getDay();
+          const diff = now.getDate() - day;
+          rangeStart = new Date(now.getFullYear(), now.getMonth(), diff);
+          rangeEnd = new Date(rangeStart);
+          rangeEnd.setDate(rangeStart.getDate() + 6);
+          rangeEnd.setHours(23, 59, 59, 999);
+        } else if (selectedRange === 'this_month') {
+          rangeStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        } else if (selectedRange === 'custom' && customStartDate && customEndDate) {
+          rangeStart = new Date(customStartDate);
+          rangeEnd = new Date(customEndDate);
+          rangeEnd.setHours(23, 59, 59, 999);
+        }
+        if (rangeStart && rangeEnd) {
+          filtered = filtered.filter((order) => {
+            const createdAt = new Date(order.created_at);
+            if (Number.isNaN(createdAt.getTime())) return false;
+            return createdAt >= rangeStart && createdAt <= rangeEnd;
+          });
+        }
+      }
+
+      const direction = sortOrder === 'asc' ? 1 : -1;
+      filtered.sort((a, b) => {
+        if (sortBy === 'total_amount') {
+          return (Number(a.total_amount || 0) - Number(b.total_amount || 0)) * direction;
+        }
+        if (sortBy === 'created_at') {
+          return String(a.created_at || '').localeCompare(String(b.created_at || '')) * direction;
+        }
+        return (Number(a.id || 0) - Number(b.id || 0)) * direction;
+      });
+
+      const total = filtered.length;
+      const startIndex = (pagination.page - 1) * pagination.limit;
+      const pageOrders = filtered.slice(startIndex, startIndex + pagination.limit);
+      setOrders(pageOrders);
+      setErrorMessage('');
+      setPagination((prev) => ({
+        ...prev,
+        total_records: total,
+        total_pages: total ? Math.max(Math.ceil(total / prev.limit), 1) : 1,
+      }));
     } catch {
       // ignore cache errors
     }
-  }, [pagination.page, pagination.limit]);
+  }, [
+    pagination.page,
+    pagination.limit,
+    searchQuery,
+    selectedRange,
+    customStartDate,
+    customEndDate,
+    sortBy,
+    sortOrder,
+    effectiveBranchId,
+  ]);
 
   const syncOrdersSince = useCallback(async () => {
     if (!navigator.onLine) return;
@@ -186,7 +261,7 @@ const OrdersPage = ({ navigate }) => {
     }
   }, [ORDER_CACHE_PAGE_SIZE]);
 
-  const fetchOrders = useCallback(async () => {
+  const fetchOrdersFromServer = useCallback(async () => {
     if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
       return;
     }
@@ -242,6 +317,19 @@ const OrdersPage = ({ navigate }) => {
       setIsLoading(false);
     }
   }, [buildRangeParams, customEndDate, customStartDate, navigate, selectedRange, showPopup, loadCachedOrders, pagination.page, ORDER_CACHE_FULL_SYNC_LIMIT, ORDER_CACHE_PAGE_SIZE, searchQuery, syncOrdersSince]);
+
+  const fetchOrders = useCallback(async () => {
+    if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
+      return;
+    }
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      await loadCachedOrders();
+    } finally {
+      setIsLoading(false);
+    }
+  }, [customEndDate, customStartDate, loadCachedOrders, selectedRange]);
 
   useEffect(() => {
     loadCachedOrders();
@@ -481,7 +569,7 @@ const OrdersPage = ({ navigate }) => {
       });
       showPopup('Return processed successfully.', 'Success');
       closeReturnModal();
-      fetchOrders();
+      fetchOrdersFromServer();
       if (drawerOpen && drawerOrder?.id === returnOrder.id) {
         fetchOrderDetails(returnOrder.id);
       }
@@ -504,7 +592,7 @@ const OrdersPage = ({ navigate }) => {
       await clearOrdersCache();
       await saveSessionValue('orders_last_sync', new Date(0).toISOString());
       await loadCachedOrders();
-      await fetchOrders();
+      await fetchOrdersFromServer();
       showPopup('Orders resync started.', 'Success');
     } catch {
       showPopup('Unable to start resync.', 'Error');
@@ -517,7 +605,7 @@ const OrdersPage = ({ navigate }) => {
       return;
     }
     try {
-      await fetchOrders();
+      await fetchOrdersFromServer();
       showPopup('Orders refreshed from server.', 'Success');
     } catch {
       showPopup('Unable to refresh orders.', 'Error');
@@ -553,7 +641,7 @@ const OrdersPage = ({ navigate }) => {
         order_id: order.id,
         payment_mode: paymentMode,
       });
-      fetchOrders();
+      fetchOrdersFromServer();
       if (drawerOpen) {
         fetchOrderDetails(order.id);
       }
@@ -663,7 +751,7 @@ const OrdersPage = ({ navigate }) => {
         setPendingSyncCount(0);
         setOfflineOrders([]);
       }
-      fetchOrders();
+      fetchOrdersFromServer();
     }
   };
 
@@ -995,7 +1083,7 @@ const OrdersPage = ({ navigate }) => {
       await api.delete(`/orders/${orderId}`);
       showPopup('Order deleted', 'Success');
       closeDeleteModal();
-      fetchOrders();
+      fetchOrdersFromServer();
     } catch (err) {
       showPopup('Failed to delete order', 'Error');
     } finally {
