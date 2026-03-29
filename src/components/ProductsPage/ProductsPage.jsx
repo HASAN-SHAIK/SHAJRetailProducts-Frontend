@@ -852,11 +852,18 @@ const ProductsPage = ({ navigate }) => {
     setImportPreviewRows([]);
     setImportPreviewError('');
   };
-  const normalizeImportHeader = (value) => String(value || '').trim().toLowerCase();
+  const normalizeImportHeader = (value) =>
+    String(value || '')
+      .replace(/[\uFEFF\u200B-\u200D\u2060\u00A0]/g, '')
+      .trim()
+      .toLowerCase();
   const IMPORT_HEADER_MAP = {
     'product name': 'name',
     product_name: 'name',
     name: 'name',
+    id: 'id',
+    product_id: 'id',
+    'product id': 'id',
     barcode: 'barcode',
     category: 'category',
     mrp: 'mrp',
@@ -894,21 +901,67 @@ const ProductsPage = ({ navigate }) => {
     exp: 'expiry_date',
     'exp date': 'expiry_date'
   };
+  const pickValueByHeaderPattern = (row = {}, patterns = []) => {
+    const keys = Object.keys(row || {});
+    for (const key of keys) {
+      const normalized = normalizeImportHeader(key).replace(/[^a-z0-9]/g, '');
+      if (patterns.some((pattern) => normalized.includes(pattern))) {
+        const value = row[key];
+        if (value !== null && value !== undefined && String(value).trim() !== '') {
+          return value;
+        }
+      }
+    }
+    return null;
+  };
+
   const normalizeImportRow = (row = {}) => {
     const mapped = {};
     Object.keys(row || {}).forEach((key) => {
-      const normalized = IMPORT_HEADER_MAP[normalizeImportHeader(key)];
-      if (normalized) {
-        mapped[normalized] = row[key];
+      const header = normalizeImportHeader(key);
+      let normalized = IMPORT_HEADER_MAP[header];
+      if (!normalized) {
+        const compact = header.replace(/[^a-z0-9]/g, '');
+        if (compact.includes('selling') && compact.includes('price')) {
+          normalized = 'selling_price';
+        } else if (compact.includes('sale') && compact.includes('price')) {
+          normalized = 'selling_price';
+        } else if (compact === 'sp' || compact === 'selling') {
+          normalized = 'selling_price';
+        }
       }
+      if (normalized) mapped[normalized] = row[key];
     });
+    // Strong fallbacks for unusual spreadsheet headers
+    if (mapped.selling_price === undefined || mapped.selling_price === null || mapped.selling_price === '') {
+      const sellingFromHeader = pickValueByHeaderPattern(row, [
+        'sellingprice',
+        'saleprice',
+        'sellprice',
+        'sellingrate',
+      ]);
+      if (sellingFromHeader !== null) {
+        mapped.selling_price = sellingFromHeader;
+      }
+    }
+    if (mapped.purchase_price === undefined || mapped.purchase_price === null || mapped.purchase_price === '') {
+      const purchaseFromHeader = pickValueByHeaderPattern(row, [
+        'purchaseprice',
+        'buyprice',
+        'costprice',
+      ]);
+      if (purchaseFromHeader !== null) {
+        mapped.purchase_price = purchaseFromHeader;
+      }
+    }
     return mapped;
   };
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
     let trimmed = String(value).trim();
     if (!trimmed) return null;
-    trimmed = trimmed.replace(/[% ,]/g, '');
+    trimmed = trimmed.replace(/[^0-9.-]/g, '');
+    if (!trimmed || trimmed === '-' || trimmed === '.' || trimmed === '-.') return null;
     const num = Number(trimmed);
     return Number.isFinite(num) ? num : null;
   };
@@ -945,7 +998,55 @@ const ProductsPage = ({ navigate }) => {
     const sheetName = workbook.SheetNames[0];
     if (!sheetName) return [];
     const sheet = workbook.Sheets[sheetName];
-    const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (!Array.isArray(matrix) || matrix.length === 0) return [];
+
+    const scoreHeaderRow = (row = []) => {
+      const normalizedHeaders = row.map((cell) =>
+        normalizeImportHeader(cell).replace(/[^a-z0-9]/g, '')
+      );
+      const headerHits = normalizedHeaders.filter((header) => {
+        if (!header) return false;
+        return (
+          IMPORT_HEADER_MAP[header] ||
+          header.includes('productname') ||
+          header.includes('name') ||
+          header.includes('sellingprice') ||
+          header.includes('saleprice') ||
+          header.includes('purchaseprice') ||
+          header.includes('stock') ||
+          header.includes('qty') ||
+          header.includes('category')
+        );
+      }).length;
+      return headerHits;
+    };
+
+    let headerRowIndex = 0;
+    let bestScore = -1;
+    const scanLimit = Math.min(matrix.length, 10);
+    for (let i = 0; i < scanLimit; i += 1) {
+      const score = scoreHeaderRow(matrix[i]);
+      if (score > bestScore) {
+        bestScore = score;
+        headerRowIndex = i;
+      }
+    }
+
+    const rawHeaders = matrix[headerRowIndex] || [];
+    const dataRows = matrix.slice(headerRowIndex + 1);
+    const rawRows = dataRows
+      .filter((row) => Array.isArray(row) && row.some((cell) => String(cell || '').trim() !== ''))
+      .map((row) => {
+        const obj = {};
+        rawHeaders.forEach((headerCell, idx) => {
+          const key = String(headerCell || '').trim();
+          if (!key) return;
+          obj[key] = row[idx] ?? '';
+        });
+        return obj;
+      });
+
     const normalized = rawRows.map(normalizeImportRow);
     const inferCategoryFromName = (nameValue) => {
       const name = String(nameValue || '').toLowerCase();
@@ -1002,6 +1103,7 @@ const ProductsPage = ({ navigate }) => {
       });
     const parsedRows = normalized
       .map((row) => {
+        const id = toNumber(row.id);
         const name = String(row.name || '').trim();
         const categoryRaw = row.category ? String(row.category).trim() : '';
         const category = categoryRaw ? categoryRaw : '';
@@ -1009,11 +1111,17 @@ const ProductsPage = ({ navigate }) => {
         const stock_quantity = toNumber(row.stock_quantity) ?? 0;
         const mrp = toNumber(row.mrp);
         const purchase_price = toNumber(row.purchase_price);
+        const selling_price =
+          toNumber(row.selling_price) ??
+          toNumber(row.sellingPrice) ??
+          toNumber(row.price) ??
+          toNumber(row.rate);
         const hsn_code = row.hsn_code ? String(row.hsn_code).trim() : '';
         const gst_percentage = toNumber(row.gst_percentage);
         const batch_number = row.batch_number ? String(row.batch_number).trim() : '';
         const expiry_date = toDateInput(row.expiry_date);
         return {
+          id,
           name,
           category,
           barcode,
@@ -1024,7 +1132,7 @@ const ProductsPage = ({ navigate }) => {
           gst_percentage,
           batch_number,
           expiry_date,
-          selling_price: ''
+          selling_price
         };
       })
       .filter((row) =>
@@ -1142,6 +1250,7 @@ const ProductsPage = ({ navigate }) => {
   const handleImportConfirm = async () => {
     if (importing || importPreviewRows.length === 0) return;
     const payloadRows = importPreviewRows.map((row) => ({
+      id: toNumber(row.id),
       name: String(row.name || '').trim(),
       category: row.category ? String(row.category).trim() : null,
       barcode: row.barcode ? String(row.barcode).trim() : null,
@@ -1152,7 +1261,26 @@ const ProductsPage = ({ navigate }) => {
       gst_percentage: toNumber(row.gst_percentage),
       batch_number: row.batch_number ? String(row.batch_number).trim() : null,
       expiry_date: row.expiry_date ? String(row.expiry_date).trim() : null,
-      selling_price: toNumber(row.selling_price)
+      selling_price:
+        toNumber(row.selling_price) ??
+        toNumber(row.sellingPrice) ??
+        toNumber(row.price) ??
+        toNumber(row.rate),
+      sellingPrice:
+        toNumber(row.selling_price) ??
+        toNumber(row.sellingPrice) ??
+        toNumber(row.price) ??
+        toNumber(row.rate),
+      sale_price:
+        toNumber(row.selling_price) ??
+        toNumber(row.sellingPrice) ??
+        toNumber(row.price) ??
+        toNumber(row.rate),
+      rate:
+        toNumber(row.selling_price) ??
+        toNumber(row.sellingPrice) ??
+        toNumber(row.price) ??
+        toNumber(row.rate)
     }));
 
     const invalid = payloadRows.some(
