@@ -23,8 +23,10 @@ const getBarcodeKey = (product) =>
 
 const normalizeProduct = (product) => {
   const barcode = getBarcodeKey(product);
-  if (!barcode) return null;
-  return { ...product, barcode };
+  if (barcode) return { ...product, barcode };
+  const idValue = product?.id ?? product?.product_id ?? product?.productId ?? null;
+  if (!idValue) return null;
+  return { ...product, barcode: `id:${idValue}` };
 };
 
 export const preloadProductsViaFetch = async (baseURL) => {

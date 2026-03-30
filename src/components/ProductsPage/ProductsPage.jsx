@@ -13,6 +13,7 @@ import EditProductModal from './EditOrderModal/EditProductModal';
 import { useBranchStore } from '../../store/branchStore';
 
 const ProductsPage = ({ navigate }) => {
+const IMPORT_CHUNK_SIZE = 100;
 //Modal data
  const [productUpdateFlag, setProductUpdateFlag] = useState(false);
  const userDetails = useSelector((state) => state.user.userDetails);
@@ -1226,8 +1227,8 @@ const ProductsPage = ({ navigate }) => {
       showPopup('Only .xlsx, .xls, or .csv files are supported for preview.', 'Validation');
       return;
     }
-    if (importFile.size > 5 * 1024 * 1024) {
-      showPopup('File size must be 5MB or less.', 'Validation');
+    if (importFile.size > 25 * 1024 * 1024) {
+      showPopup('File size must be 25MB or less.', 'Validation');
       return;
     }
     setImportParsing(true);
@@ -1296,17 +1297,52 @@ const ProductsPage = ({ navigate }) => {
       return;
     }
 
+    const chunkRows = (rows, size) => {
+      const chunks = [];
+      for (let i = 0; i < rows.length; i += size) {
+        chunks.push(rows.slice(i, i + size));
+      }
+      return chunks;
+    };
+
     setImporting(true);
     setImportError('');
     try {
-      const response = await api.post('/products/import-rows', { rows: payloadRows });
-      const summary =
-        response?.data?.summary ||
-        response?.data?.data?.summary ||
-        response?.data?.data ||
-        response?.data?.summary ||
-        null;
-      setImportResult(summary);
+      const chunks = chunkRows(payloadRows, IMPORT_CHUNK_SIZE);
+      const aggregate = {
+        total: payloadRows.length,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        errors: []
+      };
+
+      for (let idx = 0; idx < chunks.length; idx += 1) {
+        const chunk = chunks[idx];
+        const response = await api.post('/products/import-rows', { rows: chunk });
+        const summary =
+          response?.data?.summary ||
+          response?.data?.data?.summary ||
+          response?.data?.data ||
+          response?.data?.summary ||
+          null;
+
+        if (summary) {
+          aggregate.inserted += Number(summary.inserted || 0);
+          aggregate.updated += Number(summary.updated || 0);
+          aggregate.skipped += Number(summary.skipped || 0);
+          if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+            aggregate.errors.push(
+              ...summary.errors.map((entry) => ({
+                row: entry?.row,
+                message: entry?.message || 'Import failed'
+              }))
+            );
+          }
+        }
+      }
+
+      setImportResult(aggregate);
       showPopup('Import completed.', 'Success');
       setForceApiFetch(true);
       setProductUpdateFlag((prev) => !prev);
@@ -1322,12 +1358,27 @@ const ProductsPage = ({ navigate }) => {
     }
   };
   const dirtyCount = Object.keys(editedMap).length;
-  const importMissingRequired = importPreviewRows.filter((row) => {
-    const name = String(row.name || '').trim();
-    const actual = toNumber(row.purchase_price);
-    const selling = toNumber(row.selling_price);
-    return !name || !Number.isFinite(actual) || actual <= 0 || !Number.isFinite(selling) || selling <= 0;
-  }).length;
+  const importMissingDetails = importPreviewRows
+    .map((row, index) => {
+      const missing = [];
+      const name = String(row.name || '').trim();
+      const actual = toNumber(row.purchase_price);
+      const selling = toNumber(row.selling_price);
+      if (!name) missing.push('Name');
+      if (!Number.isFinite(actual) || actual <= 0) missing.push('Purchase Price');
+      if (!Number.isFinite(selling) || selling <= 0) missing.push('Selling Price');
+      if (missing.length === 0) return null;
+      return {
+        row: index + 1,
+        missing,
+      };
+    })
+    .filter(Boolean);
+  const importMissingRequired = importMissingDetails.length;
+  const importDisableReason =
+    importMissingRequired > 0
+      ? `Please fill required fields. Missing in ${importMissingRequired} row(s).`
+      : '';
 
   const renderEditableCell = (product, field, formatter) => {
     const key = getProductKey(product);
@@ -1732,6 +1783,7 @@ const ProductsPage = ({ navigate }) => {
                     className="btn btn-primary"
                     onClick={importPreviewRows.length > 0 ? handleImportConfirm : handleImportSubmit}
                     disabled={importing || importParsing || (importPreviewRows.length > 0 && importMissingRequired > 0)}
+                    title={importDisableReason}
                   >
                     {importing
                       ? 'Importing...'
@@ -1792,10 +1844,28 @@ const ProductsPage = ({ navigate }) => {
                   <p className="mb-1">
                     Rows: {importPreviewRows.length} · Missing required: {importMissingRequired}
                   </p>
+                  {importMissingRequired > 0 && (
+                    <div className="alert alert-warning py-2 px-3">
+                      <div className="mb-1">
+                        <strong>Why "Confirm & Import" is disabled:</strong>
+                      </div>
+                      <div className="small">
+                        {importMissingDetails.slice(0, 8).map((entry) => (
+                          <div key={`missing-row-${entry.row}`}>
+                            Row {entry.row}: {entry.missing.join(', ')}
+                          </div>
+                        ))}
+                        {importMissingDetails.length > 8 && (
+                          <div>...and {importMissingDetails.length - 8} more row(s).</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="expenses-table-wrapper import-preview-table">
                     <table className="expenses-table">
                       <thead>
                         <tr>
+                          <th>#</th>
                           <th>Name *</th>
                           <th>Category</th>
                           <th>Barcode</th>
@@ -1812,10 +1882,12 @@ const ProductsPage = ({ navigate }) => {
                       <tbody>
                         {importPreviewRows.map((row, idx) => (
                           <tr key={`import-row-${idx}`}>
+                            <td>{idx + 1}</td>
                             <td>
                               <input
                                 className="form-control form-control-sm"
                                 value={row.name}
+                                title={String(row.name ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'name', event.target.value)}
                               />
                             </td>
@@ -1823,6 +1895,7 @@ const ProductsPage = ({ navigate }) => {
                               <input
                                 className="form-control form-control-sm"
                                 value={row.category}
+                                title={String(row.category ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'category', event.target.value)}
                               />
                             </td>
@@ -1830,6 +1903,7 @@ const ProductsPage = ({ navigate }) => {
                               <input
                                 className="form-control form-control-sm"
                                 value={row.barcode}
+                                title={String(row.barcode ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'barcode', event.target.value)}
                               />
                             </td>
@@ -1839,6 +1913,7 @@ const ProductsPage = ({ navigate }) => {
                                 type="number"
                                 step="0.01"
                                 value={row.stock_quantity}
+                                title={String(row.stock_quantity ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'stock_quantity', event.target.value)}
                                 onWheel={preventNumberWheel}
                               />
@@ -1849,6 +1924,7 @@ const ProductsPage = ({ navigate }) => {
                                 type="number"
                                 step="0.01"
                                 value={row.purchase_price ?? ''}
+                                title={String(row.purchase_price ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'purchase_price', event.target.value)}
                                 onWheel={preventNumberWheel}
                               />
@@ -1859,6 +1935,7 @@ const ProductsPage = ({ navigate }) => {
                                 type="number"
                                 step="0.01"
                                 value={row.mrp ?? ''}
+                                title={String(row.mrp ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'mrp', event.target.value)}
                                 onWheel={preventNumberWheel}
                               />
@@ -1867,6 +1944,7 @@ const ProductsPage = ({ navigate }) => {
                               <input
                                 className="form-control form-control-sm"
                                 value={row.hsn_code}
+                                title={String(row.hsn_code ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'hsn_code', event.target.value)}
                               />
                             </td>
@@ -1876,6 +1954,7 @@ const ProductsPage = ({ navigate }) => {
                                 type="number"
                                 step="0.01"
                                 value={row.gst_percentage ?? ''}
+                                title={String(row.gst_percentage ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'gst_percentage', event.target.value)}
                                 onWheel={preventNumberWheel}
                               />
@@ -1884,6 +1963,7 @@ const ProductsPage = ({ navigate }) => {
                               <input
                                 className="form-control form-control-sm"
                                 value={row.batch_number ?? ''}
+                                title={String(row.batch_number ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'batch_number', event.target.value)}
                               />
                             </td>
@@ -1892,6 +1972,7 @@ const ProductsPage = ({ navigate }) => {
                                 className="form-control form-control-sm"
                                 type="date"
                                 value={row.expiry_date ?? ''}
+                                title={String(row.expiry_date ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'expiry_date', event.target.value)}
                               />
                             </td>
@@ -1901,6 +1982,7 @@ const ProductsPage = ({ navigate }) => {
                                 type="number"
                                 step="0.01"
                                 value={row.selling_price ?? ''}
+                                title={String(row.selling_price ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'selling_price', event.target.value)}
                                 onWheel={preventNumberWheel}
                               />

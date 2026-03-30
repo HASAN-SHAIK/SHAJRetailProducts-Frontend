@@ -36,7 +36,9 @@ export const preloadProductsToIndexedDb = async (options = {}) => {
   const headers =
     branchId && branchId !== 'all' ? { 'x-branch-id': branchId } : undefined;
   const res = await api.get('/products/cache-db', { headers });
+  const payload = res?.data || {};
   const products = extractProductsPayload(res);
+  const batches = Array.isArray(payload?.batches) ? payload.batches : [];
   if (products.length) {
     saveProductsCache(products);
   }
@@ -47,6 +49,11 @@ export const preloadProductsToIndexedDb = async (options = {}) => {
   if (!safeProducts.length) return;
   console.log('\u{1F4E5} Bulk inserting products');
   const savedCount = await saveProductsBulk(safeProducts);
+  if (batches.length) {
+    await saveBatchesBulk(batches).catch(() => {});
+  } else {
+    await preloadBatchesToIndexedDb({ branchId }).catch(() => {});
+  }
   console.log('\u2705 IndexedDB fully loaded', savedCount);
 };
 
