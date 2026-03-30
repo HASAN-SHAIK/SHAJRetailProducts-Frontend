@@ -867,6 +867,9 @@ const IMPORT_CHUNK_SIZE = 100;
     'product id': 'id',
     barcode: 'barcode',
     category: 'category',
+    company: 'company',
+    company_name: 'company',
+    brand: 'company',
     mrp: 'mrp',
     mrp_price: 'mrp',
     'selling price': 'selling_price',
@@ -1106,6 +1109,7 @@ const IMPORT_CHUNK_SIZE = 100;
       .map((row) => {
         const id = toNumber(row.id);
         const name = String(row.name || '').trim();
+        const company = row.company ? String(row.company).trim() : '';
         const categoryRaw = row.category ? String(row.category).trim() : '';
         const category = categoryRaw ? categoryRaw : '';
         const barcode = row.barcode ? String(row.barcode).trim() : '';
@@ -1124,6 +1128,7 @@ const IMPORT_CHUNK_SIZE = 100;
         return {
           id,
           name,
+          company,
           category,
           barcode,
           stock_quantity,
@@ -1253,6 +1258,7 @@ const IMPORT_CHUNK_SIZE = 100;
     const payloadRows = importPreviewRows.map((row) => ({
       id: toNumber(row.id),
       name: String(row.name || '').trim(),
+      company: row.company ? String(row.company).trim() : null,
       category: row.category ? String(row.category).trim() : null,
       barcode: row.barcode ? String(row.barcode).trim() : null,
       stock_quantity: toNumber(row.stock_quantity) ?? 0,
@@ -1555,6 +1561,7 @@ const IMPORT_CHUNK_SIZE = 100;
                   <th role="button" onClick={() => handleSortToggle('name')} className="sortable">
                     Product <span className="sort-indicator">{getSortIndicator('name')}</span>
                   </th>
+                  <th>Company</th>
                   <th>Barcode</th>
                     <th role="button" onClick={() => handleSortToggle('mrp')} className="sortable">
                       MRP <span className="sort-indicator">{getSortIndicator('mrp')}</span>
@@ -1587,19 +1594,20 @@ const IMPORT_CHUNK_SIZE = 100;
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
                     {userDetails.role === 'admin' && <td><span className="skeleton-block" /></td>}
                   </tr>
                 ))}
                 {!isLoading && errorMessage && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 9 : 8} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 10 : 9} className="empty-state">
                       {errorMessage}
                     </td>
                   </tr>
                 )}
                 {!isLoading && !errorMessage && products.length === 0 && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 9 : 8} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 10 : 9} className="empty-state">
                       No products found.
                     </td>
                   </tr>
@@ -1624,6 +1632,7 @@ const IMPORT_CHUNK_SIZE = 100;
                           <span className="product-type-tag piece">Piece</span>
                         )}
                       </td>
+                      <td>{displayProduct.company || displayProduct.company_name || '-'}</td>
                       <td>{getDisplayBarcode(displayProduct.barcode) || '-'}</td>
                       <td>{renderEditableCell(displayProduct, 'mrp', formatMoney)}</td>
                       <td>{renderEditableCell(displayProduct, 'purchase_price', formatMoney)}</td>
@@ -1867,6 +1876,7 @@ const IMPORT_CHUNK_SIZE = 100;
                         <tr>
                           <th>#</th>
                           <th>Name *</th>
+                          <th>Company</th>
                           <th>Category</th>
                           <th>Barcode</th>
                           <th className="text-end">Stock</th>
@@ -1889,6 +1899,14 @@ const IMPORT_CHUNK_SIZE = 100;
                                 value={row.name}
                                 title={String(row.name ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'name', event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="form-control form-control-sm"
+                                value={row.company ?? ''}
+                                title={String(row.company ?? '')}
+                                onChange={(event) => updatePreviewRow(idx, 'company', event.target.value)}
                               />
                             </td>
                             <td>

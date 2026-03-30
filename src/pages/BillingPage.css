@@ -222,6 +222,9 @@
   gap: 8px;
   max-height: 220px;
   overflow: auto;
+  background: #0f172a;
+  border-radius: 12px;
+  padding: 8px;
 }
 
 .billing-search-item {
@@ -229,7 +232,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  background: rgba(30, 41, 59, 0.8);
+  background: #0f172a;
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 12px;
   padding: 10px 12px;

@@ -8,7 +8,7 @@ const ProductSearch = ({ value, suggestions, loading, onChange, onSelect }) => (
         className="form-control billing-input"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="Search by name or barcode"
+        placeholder="Search by name, company, or barcode"
       />
     </label>
     {loading && <div className="billing-search-status">Searching...</div>}
@@ -23,6 +23,7 @@ const ProductSearch = ({ value, suggestions, loading, onChange, onSelect }) => (
           >
             <div>
               <strong>{item.name || item.product_name || '-'}</strong>
+              {item.company && <span>Company: {item.company}</span>}
               <span>{item.barcode ? `Barcode: ${item.barcode}` : ''}</span>
               {Number.isFinite(item.__stock) && (
                 <span className="billing-search-stock">Stock: {item.__stock}</span>

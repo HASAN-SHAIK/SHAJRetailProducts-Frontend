@@ -370,6 +370,7 @@ const BillingPage = () => {
           .map((item) => ({
             ...item,
             name: item?.name ?? item?.product_name ?? item?.product ?? '-',
+            company: item?.company ?? item?.company_name ?? '',
             __stock: getStockCount(item),
           }))
           .slice(0, 8);
@@ -389,6 +390,7 @@ const BillingPage = () => {
           map.set(key, {
             ...item,
             name: item?.name ?? item?.product_name ?? item?.product ?? '-',
+            company: item?.company ?? item?.company_name ?? '',
             __stock: getStockCount(item),
           });
         }
@@ -405,12 +407,33 @@ const BillingPage = () => {
             map.set(key, {
               ...item,
               name: item?.name ?? item?.product_name ?? item?.product ?? '-',
+              company: item?.company ?? item?.company_name ?? '',
               __stock: getStockCount(item),
             });
           });
           suggestions = Array.from(map.values()).slice(0, 8);
         } catch (err) {
           // ignore network search failures
+        }
+        try {
+          const response = await api.get('/products', {
+            params: { search: current, page: 1, limit: 10 },
+          });
+          const payload = response?.data?.products ?? response?.data?.data ?? response?.data ?? [];
+          const list = Array.isArray(payload) ? payload : [];
+          list.forEach((item) => {
+            const key = item?.barcode || item?.id || item?.product_id;
+            if (!key || map.has(key)) return;
+            map.set(key, {
+              ...item,
+              name: item?.name ?? item?.product_name ?? item?.product ?? '-',
+              company: item?.company ?? item?.company_name ?? '',
+              __stock: getStockCount(item),
+            });
+          });
+          suggestions = Array.from(map.values()).slice(0, 8);
+        } catch {
+          // ignore fallback search failures
         }
       }
       if (latestSearchRef.current !== current) return;
