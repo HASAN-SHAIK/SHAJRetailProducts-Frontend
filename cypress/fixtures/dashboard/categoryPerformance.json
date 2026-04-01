@@ -1,0 +1,14 @@
+{
+  "category_performance": [
+    { "category_id": 1, "category_name": "Beverages", "revenue": 450000, "percentage": 45 },
+    { "category_id": 2, "category_name": "Snacks", "revenue": 300000, "percentage": 30 },
+    { "category_id": 3, "category_name": "Household", "revenue": 250000, "percentage": 25 }
+  ],
+  "top_products_by_quantity": [
+    { "product_id": "p1", "product_name": "Tea", "category_name": "Beverages", "quantity_sold": 1200, "revenue": 90000 }
+  ],
+  "top_products_by_revenue": [
+    { "product_id": "p2", "product_name": "Premium Coffee", "category_name": "Beverages", "quantity_sold": 400, "revenue": 180000 }
+  ]
+}
+

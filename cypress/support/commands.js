@@ -1,16 +1,29 @@
-Cypress.Commands.add('login', (email, password) => {
-  const userEmail = email || Cypress.env('email');
-  const userPassword = password || Cypress.env('password');
+Cypress.Commands.add("login", () => {
+  const email = Cypress.env("email");
+  const password = Cypress.env("password");
 
-  if (!userEmail || !userPassword) {
+  if (!email || !password) {
     throw new Error(
-      'Missing credentials. Set CYPRESS_EMAIL and CYPRESS_PASSWORD before running E2E tests.'
+      "❌ Missing credentials. Set CYPRESS_EMAIL and CYPRESS_PASSWORD"
     );
   }
 
-  cy.visit('/login');
-  cy.get('input[name="email"]').clear().type(userEmail);
-  cy.get('input[name="password"]').clear().type(userPassword, { log: false });
-  cy.contains('button', /let's go/i).click();
-  cy.url().should('include', '/dashboard');
+  cy.visit("/login");
+
+  cy.log("🔐 Logging in...");
+
+  // Flexible selectors (important)
+  cy.get('input[type="email"], input[placeholder*="Email" i]')
+    .first()
+    .type(email);
+
+  cy.get('input[type="password"]').type(password);
+
+  cy.get("button")
+    .contains(/login|sign in/i)
+    .click();
+
+  cy.url().should("include", "/dashboard");
+
+  cy.log("✅ Login success");
 });

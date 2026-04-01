@@ -1,0 +1,24 @@
+name: End-to-end tests
+on: [pull_request]
+
+jobs:
+  cypress-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Cypress run
+        uses: cypress-io/github-action@v6
+        with:
+          start: npm start
+          wait-on: 'http://localhost:3000'
+          # This tells Cypress to output a machine-readable file
+          config: reporter=junit,reporterOptions={mochaFile=cypress/results/results-[hash].xml}
+          
+      # This reads the file and prints a beautiful UI table directly on your PR!
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v4
+        if: success() || failure() # Always run even if tests fail
+        with:
+          report_paths: 'cypress/results/*.xml'
