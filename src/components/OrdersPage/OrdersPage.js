@@ -851,8 +851,62 @@ const OrdersPage = ({ navigate }) => {
     return lines.join('\n');
   };
 
-  const handleReceiptPrint = () => {
-    window.print();
+  const handleReceiptPrint = async () => {
+    if (!receiptOrder) return;
+    try {
+      const printBase = process.env.REACT_APP_PRINT_SERVICE_URL || 'http://localhost:5000';
+      const items = Array.isArray(receiptOrder?.items)
+        ? receiptOrder.items
+        : Array.isArray(receiptOrder?.products)
+          ? receiptOrder.products
+          : [];
+      const normalizedItems = items.map((item) => ({
+        name: item?.product_name || item?.name || '-',
+        qty: Number(item?.quantity ?? item?.qty ?? 0),
+        rate: Number(item?.price ?? item?.selling_price ?? 0),
+      }));
+      const subtotal =
+        Number(receiptOrder?.subtotal_amount ?? receiptOrder?.subtotal ?? 0) ||
+        normalizedItems.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.rate || 0), 0);
+      const gst =
+        Number(receiptOrder?.gst_amount ?? receiptOrder?.gst ?? receiptOrder?.gst_total ?? 0) || 0;
+      const discount = Number(receiptOrder?.discount ?? receiptOrder?.discount_amount ?? 0) || 0;
+      const total =
+        Number(receiptOrder?.total_amount ?? receiptOrder?.total ?? 0) ||
+        subtotal + gst - discount;
+      const createdAt = receiptOrder?.created_at || new Date().toISOString();
+      const date = formatDate(createdAt);
+      const time = new Date(createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${printBase}/print`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          billNo: receiptOrder?.id || '-',
+          date,
+          time,
+          payment: receiptOrder?.payment_method || receiptOrder?.payment_mode || receiptOrder?.payment || 'CASH',
+          items: normalizedItems,
+          subtotal,
+          gst,
+          discount,
+          total,
+          shopName: shopDetails?.shop_name || shopDetails?.name || shopDetails?.business_name || 'Your Shop',
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error || 'Print failed');
+      }
+      showPopup('Receipt printed successfully.', 'Success');
+    } catch (err) {
+      const message = err?.name === 'AbortError' ? 'Print timeout' : (err?.message || 'Print failed');
+      showPopup(message, 'Error');
+    }
   };
 
   const handlePrintAction = async (event, order) => {

@@ -6,7 +6,7 @@ import { usePopup } from '../components/common/PopUp/PopupProvider';
 import { useBillingStore } from '../store/billingStore';
 import { useWhatsappStore } from '../store/whatsappStore';
 import { useBranchStore } from '../store/branchStore';
-import { getAllCustomers, getProductByBarcode, updateProductsBulk, upsertCustomersBulk, upsertTransaction, saveTransactionsBulk } from '../core/db';
+import { getAllCustomers, getConfigValue, getProductByBarcode, saveConfigValue, updateProductsBulk, upsertCustomersBulk, upsertTransaction, saveTransactionsBulk } from '../core/db';
 import { searchLocalProducts } from '../utils/localProductSearch';
 import { searchCachedProducts } from '../utils/offlineProducts';
 import { enqueueOfflineOrder, processOfflineQueue } from '../utils/offlineOrders';
@@ -18,6 +18,7 @@ import { Modal } from 'bootstrap';
 import WhatsAppModal from '../components/WhatsApp/WhatsAppModal';
 import SendWhatsAppButton from '../components/WhatsApp/SendWhatsAppButton';
 import { sendBillViaWhatsApp } from '../services/whatsappService';
+import { GST_MODES, resolveGstModeFromConfig } from '../services/gstService';
 import './BillingPage.css';
 
 const DRAFT_STORAGE_KEY = 'billing_drafts_v1';
@@ -108,6 +109,8 @@ const BillingPage = () => {
   const selectedKey = useBillingStore((state) => state.selectedKey);
   const isGSTEnabled = useBillingStore((state) => state.isGSTEnabled);
   const setGSTEnabled = useBillingStore((state) => state.setGSTEnabled);
+  const gstMode = useBillingStore((state) => state.gstMode);
+  const setGstMode = useBillingStore((state) => state.setGstMode);
   const setItems = useBillingStore((state) => state.setItems);
   const setSelectedKey = useBillingStore((state) => state.setSelectedKey);
   const addItem = useBillingStore((state) => state.addItem);
@@ -125,6 +128,11 @@ const BillingPage = () => {
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const effectiveBranchId = selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null;
 
+  const showOnlinePopup = (message, title) => {
+    if (!navigator.onLine) return;
+    showPopup(message, title);
+  };
+
   const [barcodeValue, setBarcodeValue] = useState('');
   const [quantityValue, setQuantityValue] = useState('1');
   const [message, setMessage] = useState('');
@@ -132,6 +140,14 @@ const BillingPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [transactionType, setTransactionType] = useState('sale');
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [isPrintEnabled, setIsPrintEnabled] = useState(false);
+  const [paperWidthInput, setPaperWidthInput] = useState('80');
+  const [paperWidth, setPaperWidth] = useState(80);
+  const [paperWidthError, setPaperWidthError] = useState('');
+  const [printStatus, setPrintStatus] = useState('idle');
+  const [printError, setPrintError] = useState('');
+  const [discountType, setDiscountType] = useState('flat');
+  const [discountValue, setDiscountValue] = useState('');
   const [searchText, setSearchText] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -198,9 +214,11 @@ const BillingPage = () => {
   const barcodeRef = useRef(null);
   const gstInitRef = useRef(false);
   const gstEnabledRef = useRef(isGSTEnabled);
+  const gstModeInitRef = useRef(false);
   const searchTimerRef = useRef(null);
   const latestSearchRef = useRef('');
   const customerSearchTimerRef = useRef(null);
+  const saveTimerRef = useRef(null);
   const initialDraftsRef = useRef(null);
   const draftsRef = useRef(null);
 
@@ -251,8 +269,39 @@ const BillingPage = () => {
   }, [planFeatures, setGSTEnabled]);
 
   useEffect(() => {
+    if (!tenantConfig || gstModeInitRef.current) return;
+    setGstMode(resolveGstModeFromConfig(tenantConfig));
+    gstModeInitRef.current = true;
+  }, [tenantConfig, setGstMode]);
+
+  useEffect(() => {
     gstEnabledRef.current = isGSTEnabled;
   }, [isGSTEnabled]);
+
+  useEffect(() => {
+    let mounted = true;
+    getConfigValue('billing_receipt_paper_width_mm')
+      .then((value) => {
+        if (!mounted) return;
+        const numeric = Number(value);
+        if (Number.isFinite(numeric) && numeric >= 40 && numeric <= 120) {
+          setPaperWidth(numeric);
+          setPaperWidthInput(String(numeric));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (barcodeRef.current) {
@@ -447,13 +496,24 @@ const BillingPage = () => {
   }, [searchText, transactionType, effectiveBranchId]);
 
   const totals = useMemo(() => {
-    const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);
+    const subtotal = items.reduce((sum, item) => {
+      const base = Number(item.basePrice ?? item.base_price ?? 0);
+      if (Number.isFinite(base) && base > 0) return sum + base;
+      return sum + Number(item.price || 0) * Number(item.qty || 0);
+    }, 0);
     const gstTotal = isGSTEnabled
-      ? items.reduce((sum, item) => sum + (item.price * item.qty * item.gstPercent) / 100, 0)
+      ? items.reduce((sum, item) => sum + Number(item.gstAmount ?? item.gst_amount ?? 0), 0)
       : 0;
-    const grandTotal = subtotal + gstTotal;
-    return { subtotal, gstTotal, grandTotal };
-  }, [items, isGSTEnabled]);
+    const rawDiscount = Number(discountValue || 0);
+    const discount =
+      rawDiscount > 0
+        ? discountType === 'percent'
+          ? (subtotal * rawDiscount) / 100
+          : rawDiscount
+        : 0;
+    const grandTotal = subtotal + gstTotal - discount;
+    return { subtotal, gstTotal, discount, grandTotal };
+  }, [items, isGSTEnabled, discountType, discountValue]);
 
   const getProductBranchId = (product) =>
     product?.branch_id || product?.branchId || product?.branch || null;
@@ -525,7 +585,7 @@ const BillingPage = () => {
 
   const openAddProductModal = (barcode = '') => {
     if (userDetails?.role !== 'admin') {
-      showPopup('Product not found. Please contact admin to add it.', 'Not Found');
+      showOnlinePopup('Product not found. Please contact admin to add it.', 'Not Found');
       return;
     }
     setProductFormData((prev) => ({
@@ -591,10 +651,10 @@ const BillingPage = () => {
       modal?.hide();
     } catch (err) {
       if (err?.response?.status === 401) {
-        showPopup('Token Expired Please Login Again!', 'Session');
+        showOnlinePopup('Token Expired Please Login Again!', 'Session');
         navigate('/logout');
       } else {
-        showPopup('Issue while adding product. Please try later.', 'Error');
+        showOnlinePopup('Issue while adding product. Please try later.', 'Error');
       }
     } finally {
       setIsAddingProduct(false);
@@ -652,6 +712,8 @@ const BillingPage = () => {
     if (Number.isFinite(totalDue)) {
       setPaymentAmount(totalDue.toFixed(2));
     }
+    setCustomerSuggestions([]);
+    setLocationSuggestions([]);
     setCustomerModalOpen(true);
   };
 
@@ -724,6 +786,55 @@ const BillingPage = () => {
     setLocationSuggestions([]);
   };
 
+  const handlePaperWidthChange = (value) => {
+    const nextValue = String(value ?? '').trim();
+    setPaperWidthInput(nextValue);
+    if (!nextValue) {
+      setPaperWidthError('Enter paper width in mm.');
+      return;
+    }
+    const numeric = Number(nextValue);
+    if (!Number.isFinite(numeric)) {
+      setPaperWidthError('Enter a valid number.');
+      return;
+    }
+    if (numeric < 40 || numeric > 120) {
+      setPaperWidthError('Use a value between 40 and 120 mm.');
+      return;
+    }
+    setPaperWidthError('');
+    setPaperWidth(numeric);
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+    saveTimerRef.current = setTimeout(() => {
+      saveConfigValue('billing_receipt_paper_width_mm', numeric).catch(() => {});
+    }, 400);
+  };
+
+  const handleCheckPrinter = async () => {
+    const printBase = process.env.REACT_APP_PRINT_SERVICE_URL || 'http://localhost:5000';
+    setPrintError('');
+    setPrintStatus('checking');
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`${printBase}/status`, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) {
+        throw new Error('Local print service not reachable');
+      }
+      const payload = await res.json();
+      setPrintStatus(payload?.connected ? 'connected' : 'not-connected');
+      if (!payload?.connected) {
+        setPrintError(payload?.message || 'Printer not connected');
+      }
+    } catch (err) {
+      setPrintStatus('error');
+      setPrintError(err?.name === 'AbortError' ? 'Local print service timeout' : (err?.message || 'Check failed'));
+    }
+  };
+
   const handleConfirmCheckout = async () => {
     if (!items.length || isSubmitting) return;
     const name = customerDetails.name.trim();
@@ -735,6 +846,57 @@ const BillingPage = () => {
     setLastOrderId(null);
     setSelectedOrderId(null);
     setIsSubmitting(true);
+    const snapshot = {
+      items: items.map((item) => ({ ...item })),
+      subtotal: totals.subtotal,
+      gstAmount: totals.gstTotal,
+      total: totals.grandTotal,
+      paymentMethod,
+      date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      shopName: tenantConfig?.shop_name || tenantConfig?.name || 'Siddhu Industries',
+    };
+
+    const printReceipt = async (orderId) => {
+      if (!isPrintEnabled) return;
+      const printBase = process.env.REACT_APP_PRINT_SERVICE_URL || 'http://localhost:5000';
+      try {
+        setPrintError('');
+        setPrintStatus('printing');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`${printBase}/print`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            billNo: orderId || '',
+            date: snapshot.date,
+            time: snapshot.time,
+            payment: snapshot.paymentMethod,
+            items: snapshot.items.map((item) => ({
+              name: item.name,
+              qty: item.qty,
+              rate: item.price,
+            })),
+            subtotal: snapshot.subtotal,
+            gst: snapshot.gstAmount,
+            total: snapshot.total,
+            shopName: snapshot.shopName,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(payload?.error || 'Print failed');
+        }
+        setPrintStatus('printed');
+      } catch (err) {
+        setPrintStatus('error');
+        setPrintError(err?.name === 'AbortError' ? 'Print timeout' : (err?.message || 'Print failed'));
+      }
+    };
+
     try {
       const normalizedPhone = String(mobile || '').replace(/\D+/g, '');
       if (normalizedPhone) {
@@ -756,15 +918,19 @@ const BillingPage = () => {
             },
           ]
         : [];
-        const payload = {
-          type: transactionType,
-          transaction_type: transactionType,
-          payment_method: paymentMethod,
-          payment: paymentMethod,
-          is_gst_enabled: isGSTEnabled,
-          branch_id: effectiveBranchId,
-          customer_name: name,
-          customer_phone: normalizedPhone.length === 10 ? normalizedPhone : mobile,
+    const payload = {
+      type: transactionType,
+      transaction_type: transactionType,
+      payment_method: paymentMethod,
+      payment: paymentMethod,
+      is_gst_enabled: isGSTEnabled,
+      gst_mode: gstMode,
+      discount_type: discountType,
+      discount: totals.discount,
+      gst_amount: totals.gstTotal,
+      branch_id: effectiveBranchId,
+      customer_name: name,
+      customer_phone: normalizedPhone.length === 10 ? normalizedPhone : mobile,
           customer_location: customerDetails.location?.trim() || undefined,
         customer_address: customerDetails.address?.trim() || undefined,
         total_amount: totalDue,
@@ -798,6 +964,8 @@ const BillingPage = () => {
       clearCart();
       setCustomerModalOpen(false);
       setCustomerDetails({ name: '', mobile: '', location: '', address: '' });
+
+      const fallbackOrderId = offlineEntry?.payload?.client_order_id || null;
       if (navigator.onLine) {
         const syncResult = await processOfflineQueue(api).catch(() => null);
         const clientOrderId = offlineEntry?.payload?.client_order_id || null;
@@ -807,6 +975,7 @@ const BillingPage = () => {
         }
         const syncedOrderId = matched?.order_id || null;
         setLastOrderId(syncedOrderId);
+        await printReceipt(syncedOrderId || fallbackOrderId);
         if (whatsappEnabled) {
           if (syncedOrderId) {
             setSelectedOrderId(syncedOrderId);
@@ -818,10 +987,12 @@ const BillingPage = () => {
             showPopup('Order synced in background. Send WhatsApp from Orders once synced.', 'Info');
           }
         }
+      } else {
+        await printReceipt(fallbackOrderId);
       }
     } catch (err) {
       const message = err?.response?.data?.message || 'Failed to place order';
-      showPopup(message, 'Error');
+      showOnlinePopup(message, 'Error');
     } finally {
       setIsSubmitting(false);
     }
@@ -843,7 +1014,7 @@ const BillingPage = () => {
         err?.response?.data?.message ||
         err?.message ||
         'Failed to send WhatsApp bill';
-      showPopup(message, 'Error');
+      showOnlinePopup(message, 'Error');
     } finally {
       setWhatsappSending(false);
     }
@@ -885,6 +1056,39 @@ const BillingPage = () => {
   return (
     <div className="billing-page">
       <div className="billing-main">
+        <div className="billing-left">
+          <ProductSearch
+            value={searchText}
+            suggestions={searchSuggestions}
+            loading={searchLoading}
+            onChange={setSearchText}
+            onSelect={(product) => {
+              if (!ensureBranchMatch(product)) {
+                return;
+              }
+              const stock = getStockCount(product);
+              if (stock !== null && stock <= 0) {
+                showPopup('Product is out of stock', 'Stock');
+                return;
+              }
+              addItem(product, 1);
+              setSearchText('');
+              setSearchSuggestions([]);
+              if (barcodeRef.current) barcodeRef.current.focus();
+            }}
+          />
+
+          <BarcodeInput
+            barcodeValue={barcodeValue}
+            quantityValue={quantityValue}
+            onBarcodeChange={setBarcodeValue}
+            onQuantityChange={setQuantityValue}
+            onSubmit={handleScan}
+            inputRef={barcodeRef}
+            isAdding={isItemAdding}
+          />
+          {message && <div className="billing-message">{message}</div>}
+        </div>
         <div className="billing-center">
           <div className="billing-header">
             <div>
@@ -933,6 +1137,10 @@ const BillingPage = () => {
               <span>GST</span>
               <strong>INR {totals.gstTotal.toFixed(2)}</strong>
             </div>
+            <div>
+              <span>Discount</span>
+              <strong>- INR {totals.discount.toFixed(2)}</strong>
+            </div>
             <div className="grand-total">
               <span>Grand Total</span>
               <strong>INR {totals.grandTotal.toFixed(2)}</strong>
@@ -960,8 +1168,38 @@ const BillingPage = () => {
                   ))}
               </div>
             </div>
+          </div>
+
+          <div className="billing-checkout-panel">
             <div className="billing-option-group">
-              <span className="billing-option-title">Payment</span>
+              <span className="billing-option-title">Discount</span>
+              <div className="billing-option-row">
+                <label className="billing-label">
+                  Type
+                  <select
+                    className="form-select form-select-sm"
+                    value={discountType}
+                    onChange={(event) => setDiscountType(event.target.value)}
+                  >
+                    <option value="flat">Flat</option>
+                    <option value="percent">Percent</option>
+                  </select>
+                </label>
+                <label className="billing-label">
+                  Value
+                  <input
+                    className="form-control form-control-sm billing-input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={discountValue}
+                    onChange={(event) => setDiscountValue(event.target.value)}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="billing-option-group">
+              <span className="billing-option-title">Payment Method</span>
               <div className="billing-option-row">
                 {['cash', 'online', ...(creditEnabled ? ['credit'] : [])].map((method) => (
                   <label key={method}>
@@ -976,39 +1214,68 @@ const BillingPage = () => {
                 ))}
               </div>
             </div>
+            <div className="billing-option-group">
+              <span className="billing-option-title">GST</span>
+              <div className="billing-option-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={isGSTEnabled}
+                    onChange={(event) => setGSTEnabled(event.target.checked)}
+                  />
+                  GST Enabled
+                </label>
+              </div>
+              <div className="billing-option-row">
+                <label className="billing-label">
+                  GST Mode
+                  <select
+                    className="form-select form-select-sm"
+                    value={gstMode}
+                    onChange={(event) => setGstMode(event.target.value)}
+                  >
+                    <option value={GST_MODES.INCLUSIVE}>Inclusive</option>
+                    <option value={GST_MODES.EXCLUSIVE}>Exclusive</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="billing-option-group">
+              <span className="billing-option-title">Receipt Printing</span>
+              <div className="billing-option-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={isPrintEnabled}
+                    onChange={(event) => setIsPrintEnabled(event.target.checked)}
+                  />
+                  Print Bill
+                </label>
+              </div>
+              {isPrintEnabled && (
+                <div className="billing-print-settings">
+                  <label className="billing-label">
+                    Paper Width (mm)
+                    <input
+                      className="form-control form-control-sm billing-input"
+                      type="number"
+                      min="40"
+                      max="120"
+                      step="1"
+                      value={paperWidthInput}
+                      onChange={(event) => handlePaperWidthChange(event.target.value)}
+                    />
+                  </label>
+                  {paperWidthError && <small className="text-danger">{paperWidthError}</small>}
+                  <button className="btn btn-outline-secondary btn-sm" type="button" onClick={handleCheckPrinter}>
+                    Check Printer
+                  </button>
+                  <small className="text-muted d-block">Status: {printStatus}</small>
+                  {printError && <div className="text-danger">{printError}</div>}
+                </div>
+              )}
+            </div>
           </div>
-
-          <ProductSearch
-            value={searchText}
-            suggestions={searchSuggestions}
-            loading={searchLoading}
-            onChange={setSearchText}
-            onSelect={(product) => {
-              if (!ensureBranchMatch(product)) {
-                return;
-              }
-              const stock = getStockCount(product);
-              if (stock !== null && stock <= 0) {
-                showPopup('Product is out of stock', 'Stock');
-                return;
-              }
-              addItem(product, 1);
-              setSearchText('');
-              setSearchSuggestions([]);
-              if (barcodeRef.current) barcodeRef.current.focus();
-            }}
-          />
-
-          <BarcodeInput
-            barcodeValue={barcodeValue}
-            quantityValue={quantityValue}
-            onBarcodeChange={setBarcodeValue}
-            onQuantityChange={setQuantityValue}
-            onSubmit={handleScan}
-            inputRef={barcodeRef}
-            isAdding={isItemAdding}
-          />
-          {message && <div className="billing-message">{message}</div>}
           <button
             className="btn btn-success billing-checkout"
             type="button"

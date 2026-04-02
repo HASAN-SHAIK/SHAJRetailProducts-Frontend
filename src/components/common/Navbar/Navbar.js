@@ -67,7 +67,7 @@ const Navbar = () => {
             <button className={`btn btn-outline-primary nav-pill${isActive('/orders') ? ' active' : ''}`} onClick={() => navigateTo('/orders')}><i class="bi bi-collection fs-6"><span className='m-1'>Orders</span></i></button>
             <button className={`btn btn-outline-primary nav-pill nav-expenses${isActive('/expenses') ? ' active' : ''}`} onClick={() => navigateTo('/expenses')}><i class="bi bi-cash-stack fs-6"><span className='m-1'>Expenses</span></i></button>
             <button className={`btn btn-outline-primary nav-pill${isActive('/billing') ? ' active' : ''}`} onClick={() => navigateTo('/billing')}><i class="bi bi-receipt fs-6"><span className='m-1'>Billing</span></i></button>
-            <button className={`btn btn-outline-primary nav-pill${isActive('/products') ? ' active' : ''}`} onClick={() => navigateTo('/products')}><i class="bi bi-box-seam fs-6"><span className='m-1'>Products</span></i></button>
+            <button className={`btn btn-outline-primary nav-pill${isActive('/products') ? ' active' : ''}`} onClick={() => navigateTo('/products')}><i class="bi bi-box-seam fs-6"><span className='m-1'>Inventory</span></i></button>
             <button className={`btn btn-outline-primary nav-pill${isActive('/transactions') ? ' active' : ''}`} onClick={() => navigateTo('/transactions')}><i class="bi bi-credit-card fs-6"><span className='m-1'>Transactions</span></i></button>
             {userRole === 'admin' && (
               <button className={`btn btn-outline-primary nav-pill${isActive('/branch-devices') ? ' active' : ''}`} onClick={() => navigateTo('/branch-devices')}>

@@ -25,6 +25,7 @@ import { getAuthToken, migrateAuthTokenFromLocalStorage } from './utils/sessionS
 import Support from './pages/Support';
 import { usePopup } from './components/common/PopUp/PopupProvider';
 import { getSettings } from './services/settingsService';
+import { resolveTenantConfig } from './services/tenantService';
 import { useWhatsappStore } from './store/whatsappStore';
 import { getBranches } from './services/branchService';
 import { useBranchStore } from './store/branchStore';
@@ -35,6 +36,7 @@ import ProductsMobile from './mobile/pages/ProductsMobile';
 import ReportsMobile from './mobile/pages/ReportsMobile';
 import SettingsMobile from './mobile/pages/SettingsMobile';
 import BillingPage from './pages/BillingPage';
+// import BillingModule from './modules/billing';
 import BranchDevices from './pages/BranchDevices';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
@@ -156,8 +158,7 @@ useEffect(() => {
     if (!userDetails || tenantConfigStatus === 'loading' || tenantConfigStatus === 'loaded') return;
     dispatch(setTenantConfigStatus('loading'));
     try {
-        const res = await api.get('/platform/config');
-        const payload = res?.data?.data || res?.data || {};
+        const payload = await resolveTenantConfig();
         dispatch(setTenantConfig(payload));
         if (payload.subscription_status || payload.subscriptionStatus) {
           dispatch(setSubscriptionStatus(payload.subscription_status || payload.subscriptionStatus));
@@ -493,6 +494,14 @@ const tenantBannerColor = (() => {
             </ProtectedRoute>
           }
         />
+        {/* <Route
+          path="/billing-new"
+          element={
+            <ProtectedRoute>
+              <BillingModule />
+            </ProtectedRoute>
+          }
+        /> */}
         <Route
           path="/branch-devices"
           element={

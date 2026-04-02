@@ -125,6 +125,7 @@ const buildOfflineSyncOrder = (entry) => {
     transaction_type: payload.transaction_type || payload.type,
     payment_mode: payload.payment_mode || payload.payment_method || payload.payment,
     is_gst_enabled: payload.is_gst_enabled,
+    gst_mode: payload.gst_mode,
     client_created_at: payload.client_created_at || entry.createdAt,
     customer_name: payload.customer_name,
     customer_phone: payload.customer_phone || null,

@@ -10,9 +10,12 @@ const CartItemRow = ({
   onGstChange,
   onRemove,
 }) => {
-  const lineTotal = item.price * item.qty;
-  const gstAmount = isGSTEnabled ? (lineTotal * item.gstPercent) / 100 : 0;
-  const totalWithGst = lineTotal + gstAmount;
+  const lineTotal = Number(item.lineTotal ?? item.total ?? 0);
+  const baseTotal = Number(item.basePrice ?? item.base_price ?? item.price * item.qty);
+  const gstAmount = isGSTEnabled
+    ? Number(item.gstAmount ?? item.gst_amount ?? ((baseTotal * item.gstPercent) / 100))
+    : 0;
+  const totalWithGst = isGSTEnabled ? (Number.isFinite(lineTotal) && lineTotal > 0 ? lineTotal : baseTotal + gstAmount) : baseTotal;
   const weightBased = item?.is_weight_based === true || String(item?.is_weight_based) === '1';
   const [qtyDraft, setQtyDraft] = useState(String(item.qty ?? ''));
 

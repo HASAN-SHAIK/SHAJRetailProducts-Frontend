@@ -3,9 +3,12 @@ const STORE_NAME = 'products';
 const OFFLINE_ORDERS_STORE = 'offline_orders';
 const SESSION_STORE = 'session';
 const ORDERS_STORE = 'orders';
+const ORDER_ITEMS_STORE = 'order_items';
 const BATCHES_STORE = 'batches';
 const TRANSACTIONS_STORE = 'transactions';
 const CUSTOMERS_STORE = 'customers';
+const SYNC_QUEUE_STORE = 'sync_queue';
+const CONFIG_STORE = 'config';
 
 let dbPromise = null;
 
@@ -14,9 +17,12 @@ const REQUIRED_STORES = [
   OFFLINE_ORDERS_STORE,
   SESSION_STORE,
   ORDERS_STORE,
+  ORDER_ITEMS_STORE,
   BATCHES_STORE,
   TRANSACTIONS_STORE,
   CUSTOMERS_STORE,
+  SYNC_QUEUE_STORE,
+  CONFIG_STORE,
 ];
 
 const normalizeProduct = (product) => {
@@ -33,9 +39,10 @@ const normalizeProduct = (product) => {
     null;
   const idValue = product.id ?? product.product_id ?? product.productId ?? null;
   const resolvedBarcode = rawBarcode || (idValue ? `id:${idValue}` : null);
-  if (!resolvedBarcode) return null;
+  const resolvedId = idValue ?? resolvedBarcode;
+  if (!resolvedId) return null;
   return {
-    id: idValue ?? null,
+    id: resolvedId,
     name: product.name ?? product.product_name,
     company: product.company ?? product.company_name,
     category: product.category ?? product.category_name,
@@ -114,32 +121,50 @@ export const initDB = async () => {
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(STORE_NAME)) {
-          console.log('\u{1F9F1} Creating products store');
-          db.createObjectStore(STORE_NAME, { keyPath: 'barcode' });
+          console.log('Creating products store');
+          const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          store.createIndex('barcode', 'barcode', { unique: false });
+          store.createIndex('name', 'name', { unique: false });
+          store.createIndex('hsn_code', 'hsn_code', { unique: false });
         }
         if (!db.objectStoreNames.contains(OFFLINE_ORDERS_STORE)) {
-          console.log('\u{1F9F1} Creating offline orders store');
+          console.log('Creating offline orders store');
           db.createObjectStore(OFFLINE_ORDERS_STORE, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(SESSION_STORE)) {
-          console.log('\u{1F9F1} Creating session store');
+          console.log('Creating session store');
           db.createObjectStore(SESSION_STORE, { keyPath: 'key' });
         }
         if (!db.objectStoreNames.contains(ORDERS_STORE)) {
-          console.log('\u{1F9F1} Creating orders store');
+          console.log('Creating orders store');
           db.createObjectStore(ORDERS_STORE, { keyPath: 'id' });
         }
+        if (!db.objectStoreNames.contains(ORDER_ITEMS_STORE)) {
+          console.log('Creating order items store');
+          const store = db.createObjectStore(ORDER_ITEMS_STORE, { keyPath: 'id', autoIncrement: true });
+          store.createIndex('order_id', 'order_id', { unique: false });
+        }
         if (!db.objectStoreNames.contains(BATCHES_STORE)) {
-          console.log('\u{1F9F1} Creating batches store');
+          console.log('Creating batches store');
           db.createObjectStore(BATCHES_STORE, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(TRANSACTIONS_STORE)) {
-          console.log('\u{1F9F1} Creating transactions store');
+          console.log('Creating transactions store');
           db.createObjectStore(TRANSACTIONS_STORE, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(CUSTOMERS_STORE)) {
-          console.log('\u{1F9F1} Creating customers store');
+          console.log('Creating customers store');
           db.createObjectStore(CUSTOMERS_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(SYNC_QUEUE_STORE)) {
+          console.log('Creating sync queue store');
+          const store = db.createObjectStore(SYNC_QUEUE_STORE, { keyPath: 'id', autoIncrement: true });
+          store.createIndex('status', 'status', { unique: false });
+          store.createIndex('order_id', 'order_id', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(CONFIG_STORE)) {
+          console.log('Creating config store');
+          db.createObjectStore(CONFIG_STORE, { keyPath: 'key' });
         }
       };
 
@@ -277,6 +302,11 @@ export const getProductByBarcode = async (barcode) => {
   return await withDbRetry(async (db) => {
     const transaction = db.transaction([STORE_NAME], 'readonly');
     const store = transaction.objectStore(STORE_NAME);
+    if (store.indexNames.contains('barcode')) {
+      const index = store.index('barcode');
+      const result = await waitForRequest(index.get(barcode));
+      return result || null;
+    }
     const result = await waitForRequest(store.get(barcode));
     return result || null;
   });
@@ -290,7 +320,7 @@ export const updateProduct = async (product) => {
   await withDbRetry(async (db) => {
     const transaction = db.transaction([STORE_NAME], 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
-    const existing = await waitForRequest(store.get(normalized.barcode));
+    const existing = await waitForRequest(store.get(normalized.id));
     const merged = existing
       ? Object.keys(normalized).reduce((acc, key) => {
           const value = normalized[key];
@@ -320,7 +350,7 @@ export const updateProductsBulk = async (products) => {
     const transaction = db.transaction([STORE_NAME], 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
     for (const product of safe) {
-      const existing = await waitForRequest(store.get(product.barcode));
+      const existing = await waitForRequest(store.get(product.id));
       const merged = existing
         ? Object.keys(product).reduce((acc, key) => {
             const value = product[key];
@@ -486,3 +516,28 @@ export const deleteOfflineOrdersByIds = async (ids) => {
 
 
 
+
+
+const normalizeConfigKey = (key) => String(key || '').trim();
+
+export const saveConfigValue = async (key, value) => {
+  const normalized = normalizeConfigKey(key);
+  if (!normalized) return;
+  await withDbRetry(async (db) => {
+    const transaction = db.transaction([CONFIG_STORE], 'readwrite');
+    const store = transaction.objectStore(CONFIG_STORE);
+    store.put({ key: normalized, value, updatedAt: new Date().toISOString() });
+    await waitForTransaction(transaction);
+  });
+};
+
+export const getConfigValue = async (key) => {
+  const normalized = normalizeConfigKey(key);
+  if (!normalized) return null;
+  return await withDbRetry(async (db) => {
+    const transaction = db.transaction([CONFIG_STORE], 'readonly');
+    const store = transaction.objectStore(CONFIG_STORE);
+    const result = await waitForRequest(store.get(normalized));
+    return result ? result.value : null;
+  });
+};

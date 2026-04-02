@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { calculateGST, normalizeGstMode } from '../services/gstService';
 
 const getProductPrice = (product) =>
   Number(
@@ -19,6 +20,20 @@ const getProductGst = (product) =>
       0
   );
 
+const applyGstTotals = (price, qty, gstPercent, gstMode) => {
+  const { basePrice, gstAmount, total } = calculateGST({
+    price,
+    qty,
+    gstPercent,
+    gstMode
+  });
+  return {
+    basePrice: Math.round((Number(basePrice || 0) + Number.EPSILON) * 100) / 100,
+    gstAmount: Math.round((Number(gstAmount || 0) + Number.EPSILON) * 100) / 100,
+    lineTotal: Math.round((Number(total || 0) + Number.EPSILON) * 100) / 100
+  };
+};
+
 const getProductStock = (product) => {
   const raw =
     product?.stock_quantity ??
@@ -32,7 +47,7 @@ const getProductStock = (product) => {
 
 const toKey = (product) => product?.id ?? product?.product_id ?? product?.productId ?? product?.barcode;
 
-const normalizeItem = (product, qty = 1) => ({
+const normalizeItem = (product, qty = 1, gstMode = 'INCLUSIVE') => ({
   key: toKey(product),
   id: product?.id ?? product?.product_id ?? product?.productId ?? null,
   barcode: product?.barcode ?? null,
@@ -40,6 +55,7 @@ const normalizeItem = (product, qty = 1) => ({
   mrp: Number(product?.mrp ?? product?.mrp_price ?? 0) || 0,
   price: getProductPrice(product),
   gstPercent: getProductGst(product),
+  ...applyGstTotals(getProductPrice(product), qty, getProductGst(product), gstMode),
   qty,
   is_weight_based: product?.is_weight_based ?? product?.isWeightBased ?? product?.weight_based ?? 0,
   __stock: getProductStock(product),
@@ -52,27 +68,53 @@ const isWeightBased = (item) => {
   return String(value) === '1';
 };
 
-export const useBillingStore = create((set) => ({
+export const useBillingStore = create((set, get) => ({
   items: [],
   selectedKey: null,
   isGSTEnabled: true,
+  gstMode: 'INCLUSIVE',
   setGSTEnabled: (value) => set({ isGSTEnabled: value }),
-  setItems: (items) => set({ items: Array.isArray(items) ? items : [] }),
+  setGstMode: (mode) =>
+    set((state) => {
+      const nextMode = normalizeGstMode(mode);
+      const updated = state.items.map((item) => ({
+        ...item,
+        ...applyGstTotals(item.price, item.qty, item.gstPercent, nextMode),
+      }));
+      return { gstMode: nextMode, items: updated };
+    }),
+  setItems: (items) => set((state) => {
+    const gstMode = state.gstMode || 'INCLUSIVE';
+    const nextItems = Array.isArray(items) ? items : [];
+    const normalized = nextItems.map((item) => ({
+      ...item,
+      ...applyGstTotals(item.price, item.qty, item.gstPercent, gstMode),
+    }));
+    return { items: normalized };
+  }),
   setSelectedKey: (key) => set({ selectedKey: key || null }),
   selectItem: (key) => set({ selectedKey: key }),
   clearCart: () => set({ items: [], selectedKey: null }),
   addItem: (product, qty = 1) => {
     const key = toKey(product);
     if (!key) return;
+    const gstMode = get().gstMode;
     set((state) => {
       const existing = state.items.find((item) => item.key === key);
       if (existing) {
+        const updatedQty = itemQty => itemQty + qty;
         const updated = state.items.map((item) =>
-          item.key === key ? { ...item, qty: item.qty + qty } : item
+          item.key === key
+            ? {
+                ...item,
+                qty: updatedQty(item.qty),
+                ...applyGstTotals(item.price, updatedQty(item.qty), item.gstPercent, gstMode),
+              }
+            : item
         );
         return { items: updated, selectedKey: key };
       }
-      const next = [...state.items, normalizeItem(product, qty)];
+      const next = [...state.items, normalizeItem(product, qty, gstMode)];
       return { items: next, selectedKey: key };
     });
   },
@@ -100,8 +142,15 @@ export const useBillingStore = create((set) => ({
         const nextSelected = state.selectedKey === key ? null : state.selectedKey;
         return { items: filtered, selectedKey: nextSelected };
       }
+      const gstMode = state.gstMode || 'INCLUSIVE';
       const updated = state.items.map((item) =>
-        item.key === key ? { ...item, qty: normalized } : item
+        item.key === key
+          ? {
+              ...item,
+              qty: normalized,
+              ...applyGstTotals(item.price, normalized, item.gstPercent, gstMode),
+            }
+          : item
       );
       return { items: updated };
     });
@@ -110,8 +159,15 @@ export const useBillingStore = create((set) => ({
     const parsed = Number(price);
     set((state) => {
       if (!Number.isFinite(parsed) || parsed < 0) return state;
+      const gstMode = state.gstMode || 'INCLUSIVE';
       const updated = state.items.map((item) =>
-        item.key === key ? { ...item, price: parsed } : item
+        item.key === key
+          ? {
+              ...item,
+              price: parsed,
+              ...applyGstTotals(parsed, item.qty, item.gstPercent, gstMode),
+            }
+          : item
       );
       return { items: updated };
     });
@@ -120,8 +176,15 @@ export const useBillingStore = create((set) => ({
     const parsed = Number(gstPercent);
     set((state) => {
       if (!Number.isFinite(parsed) || parsed < 0) return state;
+      const gstMode = state.gstMode || 'INCLUSIVE';
       const updated = state.items.map((item) =>
-        item.key === key ? { ...item, gstPercent: parsed } : item
+        item.key === key
+          ? {
+              ...item,
+              gstPercent: parsed,
+              ...applyGstTotals(item.price, item.qty, parsed, gstMode),
+            }
+          : item
       );
       return { items: updated };
     });
