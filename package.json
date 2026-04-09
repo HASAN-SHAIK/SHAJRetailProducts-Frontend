@@ -11,6 +11,7 @@
     "chart.js": "^4.4.6",
     "cypress": "^14.5.4",
     "dayjs": "^1.11.13",
+    "dexie": "^4.0.8",
     "js-cookie": "^3.0.5",
     "jsonwebtoken": "latest",
     "jspdf": "^2.5.2",

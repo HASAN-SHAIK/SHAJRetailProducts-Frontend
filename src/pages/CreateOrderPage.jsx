@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import api from '../utils/axios';
 import { getAllCustomers, saveCustomersBulk, upsertCustomersBulk, getProductByBarcode, updateProductsBulk } from '../core/db';
 import { searchLocalProducts, normalizeDisplayProduct } from '../utils/localProductSearch';
@@ -7,7 +7,6 @@ import { usePopup } from '../components/common/PopUp/PopupProvider';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearOrderDetails, setOrderDetails } from '../store/orderSlice';
 import { enqueueOfflineOrder } from '../utils/offlineOrders';
-import { saveProductsCache, searchCachedProducts } from '../utils/offlineProducts';
 import { loadCategoriesCache, saveCategoriesCache } from '../utils/offlineCategories';
 import { useBranchStore } from '../store/branchStore';
 import './CreateOrderPage.css';
@@ -120,7 +119,7 @@ const CreateOrderPage = () => {
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceSaving, setInvoiceSaving] = useState(false);
   const [invoiceError, setInvoiceError] = useState('');
-  const [invoiceMeta, setInvoiceMeta] = useState({ supplier_id: '', invoice_number: '' });
+  const [invoiceMeta, setInvoiceMeta] = useState({ supplier_id: '', invoice_number: '', payment_mode: 'cash' });
   const initialDraftStateRef = useRef(null);
   const hasPlanSyncRef = useRef(false);
   const orderDetails = useSelector((state) => state.order.orderDetails);
@@ -227,15 +226,6 @@ useEffect(() => {
           setCategories({ data: cached });
         } else {
           throw err;
-        }
-      }
-
-      if (navigator.onLine) {
-        try {
-          const productsRes = await api.get('/products');
-          saveProductsCache(productsRes.data);
-        } catch (err) {
-          console.log('Failed to cache products for offline search', err);
         }
       }
 
@@ -667,6 +657,7 @@ useEffect(() => {
       await api.post('/purchase/save', {
         supplier_id: invoiceMeta.supplier_id || undefined,
         invoice_number: invoiceMeta.invoice_number || undefined,
+        payment_mode: invoiceMeta.payment_mode || undefined,
         branch_id: effectiveBranchId || undefined,
         items: payloadItems
       });
@@ -895,19 +886,17 @@ useEffect(() => {
         });
         return;
       }
-      if (!navigator.onLine) {
-        const suggestions = searchCachedProducts(text);
-        const filtered = filterByProductType(suggestions);
-        if (latestSearchRef.current.sale[index] !== text) return;
-        setProducts((prev) => {
-          const updated = [...prev];
-          if (updated[index]) {
-            updated[index] = { ...updated[index], suggestions: filtered };
-          }
-          return updated;
-        });
-        return;
-      }
+        if (!navigator.onLine) {
+          if (latestSearchRef.current.sale[index] !== text) return;
+          setProducts((prev) => {
+            const updated = [...prev];
+            if (updated[index]) {
+              updated[index] = { ...updated[index], suggestions: [] };
+            }
+            return updated;
+          });
+          return;
+        }
       const response = await api.get(buildSearchUrl(text, 'sale'));
       const results = response?.data?.products || response?.data?.data || response?.data || [];
       const filtered = filterByProductType(results);
@@ -920,8 +909,7 @@ useEffect(() => {
         return updated;
       });
     } catch (err) {
-      const suggestions = searchCachedProducts(text);
-      const filtered = filterByProductType(suggestions);
+        const filtered = [];
       if (latestSearchRef.current.sale[index] !== text) return;
       setProducts((prev) => {
         const updated = [...prev];
@@ -1006,18 +994,17 @@ const handlePurchaseProductSearch = async (text, index) => {
       });
       return;
     }
-    if (!navigator.onLine) {
-      const suggestions = filterByProductType(searchCachedProducts(text));
-      if (latestSearchRef.current.purchase[index] !== text) return;
-      setProducts((prev) => {
-        const updated = [...prev];
-        if (updated[index]) {
-          updated[index] = { ...updated[index], suggestions };
-        }
-        return updated;
-      });
-      return;
-    }
+      if (!navigator.onLine) {
+        if (latestSearchRef.current.purchase[index] !== text) return;
+        setProducts((prev) => {
+          const updated = [...prev];
+          if (updated[index]) {
+            updated[index] = { ...updated[index], suggestions: [] };
+          }
+          return updated;
+        });
+        return;
+      }
     const response = await api.get(buildSearchUrl(text, 'purchase'));
     const results = response?.data?.products || response?.data?.data || response?.data || [];
     const filtered = filterByProductType(results);
@@ -1030,8 +1017,7 @@ const handlePurchaseProductSearch = async (text, index) => {
       return updated;
     });
   } catch (err) {
-    const suggestions = filterByProductType(searchCachedProducts(text));
-    const filtered = suggestions;
+    const filtered = [];
     if (latestSearchRef.current.purchase[index] !== text) return;
     setProducts((prev) => {
       const updated = [...prev];
@@ -1133,21 +1119,19 @@ const schedulePurchaseProductSearch = (text, index) => {
         setPurchaseModalSuggestions(suggestions);
         return;
       }
-      if (!navigator.onLine) {
-        const suggestions = filterByProductType(searchCachedProducts(text));
-        if (latestPurchaseModalSearchRef.current !== text) return;
-        setPurchaseModalSuggestions(suggestions);
-        return;
-      }
+        if (!navigator.onLine) {
+          if (latestPurchaseModalSearchRef.current !== text) return;
+          setPurchaseModalSuggestions([]);
+          return;
+        }
       const response = await api.get(buildSearchUrl(text, 'purchase'));
       const results = response?.data?.products || response?.data?.data || response?.data || [];
       const filtered = filterByProductType(results);
       if (latestPurchaseModalSearchRef.current !== text) return;
       setPurchaseModalSuggestions(Array.isArray(filtered) ? filtered : []);
-    } catch (err) {
-      const suggestions = filterByProductType(searchCachedProducts(text));
-      if (latestPurchaseModalSearchRef.current !== text) return;
-      setPurchaseModalSuggestions(suggestions);
+      } catch (err) {
+        if (latestPurchaseModalSearchRef.current !== text) return;
+        setPurchaseModalSuggestions([]);
       if (navigator.onLine) {
         if ((err.response?.data && err.response.data.message === 'Invalid Token') || err.response?.status === 401) {
           showPopup("Token Expired Please Login Again!", "Session");
@@ -1907,8 +1891,8 @@ const schedulePurchaseProductSearch = (text, index) => {
                   <div className="order-sidebar-title">{draft.label}</div>
                   <div className="order-sidebar-meta">
                     <span>{draft.transactionType || 'No type'}</span>
-                    <span className="order-sidebar-dot">•</span>
-                    <span>₹{getDraftTotal(draft).toFixed(2)}</span>
+                    <span className="order-sidebar-dot">â€¢</span>
+                    <span>â‚¹{getDraftTotal(draft).toFixed(2)}</span>
                   </div>
                 </button>
               ))}
@@ -2100,7 +2084,7 @@ const schedulePurchaseProductSearch = (text, index) => {
                   [{getProductTypeLabel(p)}]
                 </span>
                 {p.stock_quantity != null && p.stock_quantity !== '' && (
-                  <small className={Number(p.stock_quantity) < 5 ? 'text-danger' : 'text-muted'}>
+                  <small className={Number(p.stock_quantity) < 5 ? 'text-danger' : 'text-secondary'}>
                     Stock: {Number(p.stock_quantity)}
                   </small>
                 )}
@@ -2148,7 +2132,7 @@ const schedulePurchaseProductSearch = (text, index) => {
             )}
           </div>
           <div className="col-md-2">
-            {/* <label className="form-label small text-uppercase text-muted">
+            {/* <label className="form-label small text-uppercase text-secondary">
               {isWeightBasedProduct(p) ? 'Weight (kg)' : 'Quantity (pcs)'}
             </label> */}
             <input
@@ -2188,22 +2172,22 @@ const schedulePurchaseProductSearch = (text, index) => {
               disabled={!p.id || !canOverridePrice}
             />
             {!canOverridePrice ? (
-              <small className="form-text text-muted">Only admins can edit price</small>
+              <small className="form-text text-secondary">Only admins can edit price</small>
             ) : null}
             {p.default_selling_price != null && p.default_selling_price !== '' ? (
-              <small className="form-text text-muted">
-                Default: ₹{p.default_selling_price}
+              <small className="form-text text-secondary">
+                Default: â‚¹{p.default_selling_price}
               </small>
             ) : null}
             {profitPerUnit !== null ? (
               <small className={profitPerUnit < 0 ? 'text-danger' : 'text-success'}>
-                Profit/unit: ₹{profitPerUnit}
+                Profit/unit: â‚¹{profitPerUnit}
                 {marginPercent !== null ? ` (${marginPercent.toFixed(2)}%)` : ''}
               </small>
             ) : null}
           </div>
           <div className="col-md-1 d-flex align-items-center">
-            <button className="btn btn-danger btn-sm" onClick={() => removeProductRow(index)}>×</button>
+            <button className="btn btn-danger btn-sm" onClick={() => removeProductRow(index)}>Ã—</button>
           </div>
         </div>
       );
@@ -2286,7 +2270,7 @@ const schedulePurchaseProductSearch = (text, index) => {
                       : 'text-success'
                   }
                 >
-                  Profit/unit: ₹{computeProfitPerUnit(p.purchase_price, p.selling_price)}
+                  Profit/unit: â‚¹{computeProfitPerUnit(p.purchase_price, p.selling_price)}
                 </small>
               ) : null}
             </div>
@@ -2301,7 +2285,7 @@ const schedulePurchaseProductSearch = (text, index) => {
       </div>
     ))}
     <div className="col-1 d-flex align-items-center">
-      <button className="btn btn-danger btn-sm" onClick={() => removeProductRow(index)}>×</button>
+      <button className="btn btn-danger btn-sm" onClick={() => removeProductRow(index)}>Ã—</button>
     </div>
   </div>
 ))}
@@ -2337,7 +2321,7 @@ const schedulePurchaseProductSearch = (text, index) => {
 
       {(transactionType === 'sale' || transactionType === 'purchase') && (
         <div className="mb-3">
-          <strong>Total: ₹{totalAmount.toFixed(2)}</strong>
+          <strong>Total: â‚¹{totalAmount.toFixed(2)}</strong>
         </div>
       )}
 
@@ -2509,6 +2493,18 @@ const schedulePurchaseProductSearch = (text, index) => {
                   onChange={(e) => setInvoiceMeta((prev) => ({ ...prev, invoice_number: e.target.value }))}
                 />
               </div>
+              <div className="col-md-6">
+                <label>Payment Mode</label>
+                <select
+                  className="form-control"
+                  value={invoiceMeta.payment_mode || 'cash'}
+                  onChange={(e) => setInvoiceMeta((prev) => ({ ...prev, payment_mode: e.target.value }))}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="credit">Credit</option>
+                  <option value="online">Online</option>
+                </select>
+              </div>
               <div className="col-12">
                 <input
                   type="file"
@@ -2588,16 +2584,16 @@ const schedulePurchaseProductSearch = (text, index) => {
                                 {col.key === 'selling_price' && (
                                   <div className="invoice-price-hint">
                                     {row.existing_selling_price ? (
-                                      <span>Old: ₹{row.existing_selling_price}</span>
+                                      <span>Old: â‚¹{row.existing_selling_price}</span>
                                     ) : (
                                       <span>Old: -</span>
                                     )}
                                     {row.suggested_selling_price ? (
-                                      <span>Suggested: ₹{row.suggested_selling_price}</span>
+                                      <span>Suggested: â‚¹{row.suggested_selling_price}</span>
                                     ) : null}
                                     {profitPerUnit !== null ? (
                                       <span className={profitPerUnit < 0 ? 'text-danger' : 'text-success'}>
-                                        Profit/unit: ₹{profitPerUnit}
+                                        Profit/unit: â‚¹{profitPerUnit}
                                       </span>
                                     ) : null}
                                   </div>
@@ -2734,6 +2730,7 @@ const schedulePurchaseProductSearch = (text, index) => {
 };
 
 export default CreateOrderPage;
+
 
 
 

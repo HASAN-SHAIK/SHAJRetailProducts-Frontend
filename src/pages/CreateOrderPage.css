@@ -5,7 +5,6 @@
   padding: 40px 24px 64px;
   margin-top: 72px;
   background:
-    radial-gradient(800px 320px at 10% 0%, rgba(255, 190, 11, 0.22), transparent 60%),
     radial-gradient(900px 420px at 90% 10%, rgba(46, 196, 182, 0.2), transparent 60%),
     linear-gradient(135deg, #0b1221 0%, #0f1c3a 50%, #111827 100%);
   color: #e2e8f0;

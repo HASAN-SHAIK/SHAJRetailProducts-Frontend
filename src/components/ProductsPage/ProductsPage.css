@@ -1,5 +1,5 @@
 .products-page {
-  margin-top: 5vh;
+  /* margin-top: 16px; */
   color: #e2e8f0;
 }
 
@@ -82,6 +82,43 @@
   border-radius: 18px;
   padding: 16px;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+}
+
+.import-history-card {
+  margin-top: 18px;
+}
+
+.import-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.import-history-subtitle {
+  margin: 4px 0 0;
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.import-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.import-status.synced {
+  color: #34d399;
+}
+
+.import-status.failed {
+  color: #f87171;
+}
+
+.import-status.pending {
+  color: #fbbf24;
 }
 
 .products-table-wrapper {

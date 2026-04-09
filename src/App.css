@@ -4,6 +4,10 @@
   --nav-height: 110px;
 }
 
+.app-content {
+  padding-top: var(--nav-height);
+}
+
 .App {
   text-align: center;
   transition: all 1s;
@@ -12,7 +16,6 @@
 }
 html, body{
   background:
-    radial-gradient(900px 380px at 10% -5%, rgba(255, 190, 11, 0.18), transparent 60%),
     radial-gradient(1000px 500px at 90% 0%, rgba(46, 196, 182, 0.18), transparent 60%),
     linear-gradient(135deg, #0b1221 0%, #0f1c3a 50%, #0c1630 100%);
   min-height: 100vh;
@@ -49,9 +52,8 @@ html, body{
 .wow-page {
   min-height: 100vh;
   width: 100% !important;
-  padding: 60px 20px 64px;
+  /* padding: 60px 20px 64px; */
   background:
-    radial-gradient(900px 380px at 10% -5%, rgba(255, 190, 11, 0.18), transparent 60%),
     radial-gradient(1000px 500px at 90% 0%, rgba(46, 196, 182, 0.18), transparent 60%),
     linear-gradient(135deg, #0b1221 0%, #0f1c3a 50%, #0c1630 100%);
   color: #e2e8f0;
@@ -89,12 +91,7 @@ html, body{
 }
 
 .orb-a {
-  width: 220px;
-  height: 220px;
-  top: 6%;
-  left: -40px;
-  background: radial-gradient(circle, rgba(255, 190, 11, 0.9), rgba(255, 190, 11, 0));
-  animation-delay: 0s;
+  display: none;
 }
 
 .orb-b {
@@ -263,6 +260,10 @@ html, body{
   border: 1px solid rgba(148, 163, 184, 0.35);
   background: rgba(15, 23, 42, 0.7);
   color: #e2e8f0;
+}
+
+.wow-page .form-label {
+  color: var(--bs-secondary-color, #94a3b8);
 }
 
 .wow-page .form-control::placeholder {

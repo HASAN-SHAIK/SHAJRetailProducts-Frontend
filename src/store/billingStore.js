@@ -98,11 +98,13 @@ export const useBillingStore = create((set, get) => ({
   addItem: (product, qty = 1) => {
     const key = toKey(product);
     if (!key) return;
+    const parsedQty = Number(qty);
+    const safeQty = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
     const gstMode = get().gstMode;
     set((state) => {
       const existing = state.items.find((item) => item.key === key);
       if (existing) {
-        const updatedQty = itemQty => itemQty + qty;
+        const updatedQty = (itemQty) => itemQty + safeQty;
         const updated = state.items.map((item) =>
           item.key === key
             ? {
@@ -114,7 +116,7 @@ export const useBillingStore = create((set, get) => ({
         );
         return { items: updated, selectedKey: key };
       }
-      const next = [...state.items, normalizeItem(product, qty, gstMode)];
+      const next = [...state.items, normalizeItem(product, safeQty, gstMode)];
       return { items: next, selectedKey: key };
     });
   },

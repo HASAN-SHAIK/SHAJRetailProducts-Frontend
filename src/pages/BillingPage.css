@@ -1,7 +1,16 @@
 ﻿.billing-page {
   padding: 24px;
-  padding-top: 120px;
+  /* padding-top: 24px; */
   color: #e2e8f0;
+  background: transparent;
+}
+
+.billing-page-shell {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 22px;
+  padding: 24px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
 }
 
 .billing-main {
@@ -85,6 +94,13 @@
   border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
+.billing-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .billing-table {
   width: 100%;
   border-collapse: collapse;
@@ -107,6 +123,11 @@
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.section-title {
+  margin: 16px 0 10px;
+  color: #cbd5f5;
 }
 
 .billing-row {
@@ -284,6 +305,10 @@
   gap: 2px;
 }
 
+.billing-name span {
+  font-size: 0.9rem;
+}
+
 .billing-stock {
   font-size: 0.7rem;
   color: #94a3b8;
@@ -295,6 +320,12 @@
   gap: 6px;
   font-size: 0.85rem;
   color: #cbd5f5;
+}
+
+.billing-static {
+  font-size: 0.9rem;
+  color: #e2e8f0;
+  font-weight: 600;
 }
 
 .billing-input {
@@ -497,6 +528,12 @@
   margin-top: 16px;
 }
 
+.purchase-total {
+  margin-right: auto;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
 @media (max-width: 1024px) {
   .billing-main {
     grid-template-columns: 1fr;
@@ -506,7 +543,7 @@
 @media (max-width: 768px) {
   .billing-page {
     padding: 16px;
-    padding-top: 96px;
+    padding-top: 16px;
   }
 
   .billing-center {

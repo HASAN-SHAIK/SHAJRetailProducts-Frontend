@@ -1,0 +1,481 @@
+import api from './axios';
+import {
+  addInventorySyncQueueEntry,
+  updateInventorySyncQueueEntry,
+  getInventorySyncQueueEntries,
+  findInventorySyncQueueEntry,
+  addSyncLog,
+  getProductCacheById,
+  getSupplierCacheById,
+  updateProductsBulk,
+  updateSuppliersCacheBulk,
+  deleteProductsCacheByIds,
+  deleteSuppliersCacheByIds,
+  getLocalPurchaseById,
+  getLocalPurchaseItems,
+  upsertLocalPurchase,
+  upsertLocalProduct,
+  upsertLocalSupplier,
+  upsertLocalPurchaseReturn,
+  getLocalPurchaseReturnById,
+  replaceProductIdReferences,
+  replaceSupplierIdReferences,
+  getTransactionById,
+  upsertAccountingTransaction,
+  db,
+} from '../core/db';
+import { runDeltaSync } from './deltaSync';
+
+const SYNC_INTERVAL_MS = 30000;
+let syncTimer = null;
+let isSyncing = false;
+
+const nowIso = () => new Date().toISOString();
+
+const normalizeStatus = (value) => {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'pending' || normalized === 'synced' || normalized === 'failed') {
+    return normalized;
+  }
+  return 'pending';
+};
+
+const emitSyncEvent = (type) => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (type === 'purchase') {
+      window.dispatchEvent(new CustomEvent('offline-purchase-updated'));
+    }
+    if (type === 'purchase_return') {
+      window.dispatchEvent(new CustomEvent('offline-purchase-return-updated'));
+    }
+  } catch {
+    // ignore
+  }
+};
+
+const buildProductPayload = (product) => {
+  if (!product) return null;
+  const barcodeValue = product.barcode || product.product_barcode || product.productBarcode || '';
+  const payload = {
+    product_name: product.name ?? product.product_name ?? '',
+    company: product.company ?? product.company_name ?? '',
+    category: product.category ?? product.category_name ?? '',
+    purchase_price: product.purchase_price ?? null,
+    selling_price: product.selling_price ?? null,
+    mrp: product.mrp ?? product.mrp_price ?? null,
+    stock_quantity: product.stock_quantity ?? product.stock ?? null,
+    hsn_code: product.hsn_code ?? null,
+    gst_percentage: product.gst_percentage ?? product.gst_percent ?? null,
+    is_batch_enabled: product.is_batch_enabled ?? null,
+    batch_number: product.batch_number ?? null,
+    expiry_date: product.expiry_date ?? null,
+    time_for_delivery: product.time_for_delivery ?? null,
+    is_weight_based: product.is_weight_based ?? null,
+  };
+  if (barcodeValue && !String(barcodeValue).startsWith('id:')) {
+    payload.barcode = barcodeValue;
+  }
+  return payload;
+};
+
+const buildSupplierPayload = (supplier) => {
+  if (!supplier) return null;
+  return {
+    name: supplier.name ?? '',
+    mobile: supplier.mobile ?? supplier.phone ?? '',
+    email: supplier.email ?? '',
+    gst_number: supplier.gst_number ?? '',
+    credit_limit: supplier.credit_limit ?? 0,
+    address: supplier.address ?? '',
+    is_active: supplier.is_active ?? true,
+  };
+};
+
+const setProductSyncStatus = async (productId, status, extras = {}) => {
+  if (!productId) return;
+  const normalized = normalizeStatus(status);
+  const existingLocal = await db.products.get(productId);
+  await upsertLocalProduct({
+    ...(existingLocal || { id: productId }),
+    syncStatus: normalized,
+    sync_status: normalized,
+    updatedAt: nowIso(),
+    ...extras,
+  });
+  const existingCache = await getProductCacheById(productId);
+  if (existingCache) {
+    await updateProductsBulk([{ ...existingCache, sync_status: normalized, updated_at: nowIso(), ...extras }]);
+  }
+};
+
+const setSupplierSyncStatus = async (supplierId, status, extras = {}) => {
+  if (!supplierId) return;
+  const normalized = normalizeStatus(status);
+  const existingLocal = await db.suppliers.get(supplierId);
+  await upsertLocalSupplier({
+    ...(existingLocal || { id: supplierId }),
+    syncStatus: normalized,
+    sync_status: normalized,
+    updatedAt: nowIso(),
+    ...extras,
+  });
+  const existingCache = await getSupplierCacheById(supplierId);
+  if (existingCache) {
+    await updateSuppliersCacheBulk([{ ...existingCache, sync_status: normalized, updated_at: nowIso(), ...extras }]);
+  }
+};
+
+const setPurchaseSyncStatus = async (purchaseId, status, extras = {}) => {
+  if (!purchaseId) return;
+  const normalized = normalizeStatus(status);
+  const existing = await getLocalPurchaseById(purchaseId);
+  await upsertLocalPurchase({
+    ...(existing || { id: purchaseId }),
+    syncStatus: normalized,
+    sync_status: normalized,
+    updatedAt: nowIso(),
+    ...extras,
+  });
+};
+
+const setReturnSyncStatus = async (returnId, status, extras = {}) => {
+  if (!returnId) return;
+  const normalized = normalizeStatus(status);
+  const existing = await getLocalPurchaseReturnById(returnId);
+  await upsertLocalPurchaseReturn({
+    ...(existing || { id: returnId }),
+    syncStatus: normalized,
+    sync_status: normalized,
+    updatedAt: nowIso(),
+    ...extras,
+  });
+};
+
+export const enqueueInventorySync = async ({ type, entityId, action }) => {
+  if (!type || !entityId || !action) return null;
+  const existing = await findInventorySyncQueueEntry(type, entityId, action);
+  const next = {
+    type,
+    entityId,
+    action,
+    status: 'pending',
+    retries: existing?.retries ?? 0,
+    updated_at: nowIso(),
+    createdAt: existing?.createdAt ?? nowIso(),
+  };
+  if (existing) {
+    return await updateInventorySyncQueueEntry({ ...existing, ...next, id: existing.id });
+  }
+  return await addInventorySyncQueueEntry(next);
+};
+
+const resolveServerId = (response) =>
+  response?.data?.id ||
+  response?.data?.product_id ||
+  response?.data?.supplier_id ||
+  response?.data?.order_id ||
+  response?.data?.return_id ||
+  response?.data?.data?.id ||
+  response?.data?.data?.order_id ||
+  null;
+
+const syncProductEntry = async (entry) => {
+  const product = await getProductCacheById(entry.entityId);
+  if (!product && entry.action !== 'delete') {
+    await setProductSyncStatus(entry.entityId, 'synced', { last_error: 'missing' });
+    return { status: 'synced', note: 'missing product' };
+  }
+  if (entry.action === 'delete') {
+    if (String(entry.entityId).startsWith('temp_')) {
+      await deleteProductsCacheByIds([entry.entityId]);
+      await db.products.delete(entry.entityId);
+      return { status: 'synced', note: 'local delete' };
+    }
+    await api.delete(`/products/${encodeURIComponent(entry.entityId)}`);
+    await deleteProductsCacheByIds([entry.entityId]);
+    await db.products.delete(entry.entityId);
+    return { status: 'synced' };
+  }
+  const payload = buildProductPayload(product);
+  if (!payload) throw new Error('missing payload');
+  if (entry.action === 'create') {
+    const response = await api.post('/products', payload);
+    const serverProduct = response?.data?.product || response?.data?.data || response?.data || null;
+    const serverId = serverProduct?.id ?? resolveServerId(response);
+    if (serverId && serverId !== entry.entityId) {
+      await replaceProductIdReferences(entry.entityId, serverId);
+      await db.products.delete(entry.entityId);
+      await upsertLocalProduct({
+        ...(serverProduct || product),
+        id: serverId,
+        syncStatus: 'synced',
+        sync_status: 'synced',
+        updatedAt: nowIso(),
+      });
+    } else {
+      await setProductSyncStatus(entry.entityId, 'synced');
+    }
+    if (serverProduct) {
+      await updateProductsBulk([{ ...serverProduct, sync_status: 'synced' }]);
+    }
+    return { status: 'synced', serverId };
+  }
+  await api.put(`/products/${encodeURIComponent(entry.entityId)}`, payload);
+  await setProductSyncStatus(entry.entityId, 'synced');
+  return { status: 'synced' };
+};
+
+const syncSupplierEntry = async (entry) => {
+  const supplier = await getSupplierCacheById(entry.entityId);
+  if (!supplier && entry.action !== 'delete') {
+    await setSupplierSyncStatus(entry.entityId, 'synced', { last_error: 'missing' });
+    return { status: 'synced', note: 'missing supplier' };
+  }
+  if (entry.action === 'delete') {
+    if (String(entry.entityId).startsWith('temp_')) {
+      await deleteSuppliersCacheByIds([entry.entityId]);
+      await db.suppliers.delete(entry.entityId);
+      return { status: 'synced', note: 'local delete' };
+    }
+    await api.delete(`/suppliers/${encodeURIComponent(entry.entityId)}`);
+    await deleteSuppliersCacheByIds([entry.entityId]);
+    await db.suppliers.delete(entry.entityId);
+    return { status: 'synced' };
+  }
+  const payload = buildSupplierPayload(supplier);
+  if (!payload) throw new Error('missing payload');
+  if (entry.action === 'create') {
+    const response = await api.post('/suppliers', payload);
+    const serverSupplier = response?.data?.supplier || response?.data?.data || response?.data || null;
+    const serverId = serverSupplier?.id ?? resolveServerId(response);
+    if (serverId && serverId !== entry.entityId) {
+      await replaceSupplierIdReferences(entry.entityId, serverId);
+      await db.suppliers.delete(entry.entityId);
+      await upsertLocalSupplier({
+        ...(serverSupplier || supplier),
+        id: serverId,
+        syncStatus: 'synced',
+        sync_status: 'synced',
+        updatedAt: nowIso(),
+      });
+    } else {
+      await setSupplierSyncStatus(entry.entityId, 'synced');
+    }
+    if (serverSupplier) {
+      await updateSuppliersCacheBulk([{ ...serverSupplier, sync_status: 'synced' }]);
+    }
+    return { status: 'synced', serverId };
+  }
+  await api.put(`/suppliers/${encodeURIComponent(entry.entityId)}`, payload);
+  await setSupplierSyncStatus(entry.entityId, 'synced');
+  return { status: 'synced' };
+};
+
+const syncPurchaseEntry = async (entry) => {
+  const purchase = await getLocalPurchaseById(entry.entityId);
+  if (!purchase) {
+    await setPurchaseSyncStatus(entry.entityId, 'synced', { last_error: 'missing' });
+    return { status: 'synced', note: 'missing purchase' };
+  }
+  const items = await getLocalPurchaseItems(entry.entityId);
+  const payloadItems = items.map((item) => ({
+    product_id: item.__local_product ? undefined : item.productId ?? item.product_id,
+    barcode: item.barcode || undefined,
+    name: item.name || undefined,
+    category: item.category || undefined,
+    company: item.company || undefined,
+    mrp: item.mrp || undefined,
+    quantity: Number(item.quantity || 0),
+    purchase_price: Number(item.purchase_price || 0),
+    selling_price: Number(item.selling_price || 0),
+    gst_percent: Number(item.gst_percent || 0),
+    expiry_date: item.expiry_date || null,
+  }));
+  const response = await api.post('/purchases', {
+    branch_id: purchase.branchId ?? purchase.branch_id ?? null,
+    supplier_id: purchase.supplierId ?? purchase.supplier_id ?? null,
+    invoice_number: purchase.invoiceNumber ?? purchase.invoice_number ?? null,
+    payment_mode: purchase.paymentMode ?? purchase.payment_mode ?? null,
+    items: payloadItems,
+  });
+  const serverId = resolveServerId(response);
+  await setPurchaseSyncStatus(entry.entityId, 'synced', {
+    serverId: serverId ?? purchase.serverId ?? null,
+    syncedAt: nowIso(),
+  });
+  return { status: 'synced', serverId };
+};
+
+const syncPurchaseReturnEntry = async (entry) => {
+  const returnEntry = await getLocalPurchaseReturnById(entry.entityId);
+  if (!returnEntry) {
+    await setReturnSyncStatus(entry.entityId, 'synced', { last_error: 'missing' });
+    return { status: 'synced', note: 'missing return' };
+  }
+  const purchaseId = returnEntry.purchaseId ?? returnEntry.purchase_id ?? null;
+  if (purchaseId) {
+    const purchase = await getLocalPurchaseById(purchaseId);
+    if (purchase && purchase.serverId) {
+      returnEntry.purchaseId = purchase.serverId;
+    } else if (String(purchaseId).startsWith('temp_')) {
+      throw new Error('purchase_not_synced');
+    }
+  }
+  const response = await api.post('/purchase-returns', {
+    purchase_id: returnEntry.purchaseId ?? null,
+    supplier_id: returnEntry.supplierId ?? returnEntry.supplier_id ?? null,
+    branch_id: returnEntry.branchId ?? returnEntry.branch_id ?? null,
+    reason: returnEntry.reason ?? null,
+    items: returnEntry.items ?? [],
+  });
+  const serverId = resolveServerId(response);
+  await setReturnSyncStatus(entry.entityId, 'synced', {
+    serverId: serverId ?? returnEntry.serverId ?? null,
+    syncedAt: nowIso(),
+  });
+  return { status: 'synced', serverId };
+};
+
+const syncAccountingEntry = async (entry) => {
+  const txn = await getTransactionById(entry.entityId);
+  if (!txn) {
+    return { status: 'synced', note: 'missing transaction' };
+  }
+  const txnType = String(txn.txn_type || txn.txnType || '').toLowerCase();
+  if (txnType !== 'receipt' && txnType !== 'payment') {
+    await upsertAccountingTransaction({
+      ...txn,
+      sync_status: 'synced',
+      synced_at: nowIso(),
+    });
+    return { status: 'synced', note: 'noop' };
+  }
+  const payload = {
+    amount: Number(txn.amount ?? txn.total_price ?? 0),
+    payment_mode: txn.payment_mode || 'cash',
+    notes: txn.notes || null,
+  };
+  if (txnType === 'receipt') {
+    payload.customer_id = txn.party_id || txn.partyId;
+  } else {
+    payload.supplier_id = txn.party_id || txn.partyId;
+  }
+  const response = await api.post(`/accounts/${txnType === 'receipt' ? 'receipt' : 'payment'}`, payload);
+  const serverId = response?.data?.data?.id ?? response?.data?.id ?? null;
+  await upsertAccountingTransaction({
+    ...txn,
+    sync_status: 'synced',
+    synced_at: nowIso(),
+    server_id: serverId,
+  });
+  return { status: 'synced', serverId };
+};
+
+const syncEntry = async (entry) => {
+  switch (entry.type) {
+    case 'product':
+      return await syncProductEntry(entry);
+    case 'supplier':
+      return await syncSupplierEntry(entry);
+    case 'purchase':
+      return await syncPurchaseEntry(entry);
+    case 'purchase_return':
+      return await syncPurchaseReturnEntry(entry);
+    case 'accounting_txn':
+      return await syncAccountingEntry(entry);
+    default:
+      return { status: 'synced', note: 'unsupported' };
+  }
+};
+
+export const processInventorySyncQueue = async () => {
+  if (!navigator.onLine || isSyncing) return [];
+  isSyncing = true;
+  const synced = [];
+  try {
+    const pending = await getInventorySyncQueueEntries(['pending', 'failed']);
+    for (const entry of pending) {
+      try {
+        const processingEntry = { ...entry, status: 'processing', updated_at: nowIso() };
+        await updateInventorySyncQueueEntry(processingEntry);
+        const result = await syncEntry(processingEntry);
+        await updateInventorySyncQueueEntry({
+          ...processingEntry,
+          status: 'synced',
+          updated_at: nowIso(),
+        });
+        await addSyncLog({
+          type: entry.type,
+          entityId: entry.entityId,
+          status: 'synced',
+          message: result?.note || null,
+        });
+        synced.push({ ...entry, ...result, status: 'synced' });
+        emitSyncEvent(entry.type);
+      } catch (error) {
+        const retries = (entry?.retries ?? 0) + 1;
+        const shouldHoldPending = error?.message === 'purchase_not_synced';
+        await updateInventorySyncQueueEntry({
+          ...entry,
+          status: shouldHoldPending ? 'pending' : 'failed',
+          retries,
+          updated_at: nowIso(),
+          last_error: error?.message || 'sync_failed',
+        });
+        await addSyncLog({
+          type: entry.type,
+          entityId: entry.entityId,
+          status: shouldHoldPending ? 'pending' : 'failed',
+          message: error?.message || 'sync_failed',
+        });
+        if (!shouldHoldPending) {
+          if (entry.type === 'product') {
+            await setProductSyncStatus(entry.entityId, 'failed', { last_error: error?.message || 'sync_failed' });
+          } else if (entry.type === 'supplier') {
+            await setSupplierSyncStatus(entry.entityId, 'failed', { last_error: error?.message || 'sync_failed' });
+          } else if (entry.type === 'purchase') {
+            await setPurchaseSyncStatus(entry.entityId, 'failed', { last_error: error?.message || 'sync_failed' });
+          } else if (entry.type === 'purchase_return') {
+            await setReturnSyncStatus(entry.entityId, 'failed', { last_error: error?.message || 'sync_failed' });
+          } else if (entry.type === 'accounting_txn') {
+            const txn = await getTransactionById(entry.entityId);
+            if (txn) {
+              await upsertAccountingTransaction({
+                ...txn,
+                sync_status: 'failed',
+                last_error: error?.message || 'sync_failed',
+              });
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    isSyncing = false;
+  }
+  if (synced.length) {
+    runDeltaSync().catch(() => {});
+  }
+  return synced;
+};
+
+export const startInventorySyncWorker = () => {
+  if (syncTimer) return syncTimer;
+  syncTimer = setInterval(() => {
+    processInventorySyncQueue().catch(() => {});
+  }, SYNC_INTERVAL_MS);
+  return syncTimer;
+};
+
+export const stopInventorySyncWorker = () => {
+  if (syncTimer) {
+    clearInterval(syncTimer);
+    syncTimer = null;
+  }
+};
+
+export const syncAllInventory = async () => {
+  await processInventorySyncQueue();
+  await runDeltaSync().catch(() => {});
+};

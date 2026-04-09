@@ -1,10 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import api from '../../utils/axios';
 import './OrdersPage.css';
 import { usePopup } from '../common/PopUp/PopupProvider';
-import { getOfflineOrderQueue, processOfflineQueue } from '../../utils/offlineOrders';
-import { clearOrdersCache, getAllCachedOrders, replaceAllOrders, upsertOrders } from '../../db/ordersDb';
-import { getSessionValue, saveSessionValue } from '../../core/db';
+import { enqueueOfflineOrder, getOfflineOrderQueue, processOfflineQueue } from '../../utils/offlineOrders';
+import {
+  clearOrdersCache,
+  getAllCachedOrders,
+  getCachedOrderDetails,
+  getCachedOrderById,
+  getCachedOrderTransactions,
+  replaceAllOrders,
+  upsertOrderDetailsCache,
+  upsertOrders,
+} from '../../db/ordersDb';
+import { getSessionValue, saveSessionValue, saveTransactionsBulk } from '../../core/db';
 import { useSelector } from 'react-redux';
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -49,6 +58,7 @@ const OrdersPage = ({ navigate }) => {
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [drawerError, setDrawerError] = useState('');
   const [drawerOrder, setDrawerOrder] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentSubmittingId, setPaymentSubmittingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -76,7 +86,6 @@ const OrdersPage = ({ navigate }) => {
   const [returnReason, setReturnReason] = useState('Damaged');
   const [refundMode, setRefundMode] = useState('cash');
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
-  const [offlineOrders, setOfflineOrders] = useState([]);
   const [syncingOffline, setSyncingOffline] = useState(false);
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappSending, setWhatsappSending] = useState(false);
@@ -119,7 +128,14 @@ const OrdersPage = ({ navigate }) => {
       currency: 'INR',
       maximumFractionDigits: 2,
     }).format(Number.isFinite(amount) ? amount : 0);
-  }, []);
+  }, [gstInvoiceEnabled, shopDetails, shopDetailsLoading]);
+
+  const generateLocalTxnId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return `local-pay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  };
 
   const buildRangeParams = useCallback(() => {
     const params = {
@@ -200,7 +216,12 @@ const OrdersPage = ({ navigate }) => {
         if (sortBy === 'created_at') {
           return String(a.created_at || '').localeCompare(String(b.created_at || '')) * direction;
         }
-        return (Number(a.id || 0) - Number(b.id || 0)) * direction;
+        const aId = Number(a.id);
+        const bId = Number(b.id);
+        if (Number.isFinite(aId) && Number.isFinite(bId)) {
+          return (aId - bId) * direction;
+        }
+        return String(a.created_at || '').localeCompare(String(b.created_at || '')) * direction;
       });
 
       const total = filtered.length;
@@ -350,20 +371,31 @@ const OrdersPage = ({ navigate }) => {
         const queue = await getOfflineOrderQueue();
         const list = Array.isArray(queue) ? queue : [];
         setPendingSyncCount(list.length);
-        setOfflineOrders(list);
       } catch {
         setPendingSyncCount(0);
-        setOfflineOrders([]);
       }
     };
     refreshPending();
     window.addEventListener('focus', refreshPending);
     window.addEventListener('offline-queue-updated', refreshPending);
+    const handleOrdersCacheUpdated = () => {
+      loadCachedOrders();
+    };
+    const handleOrdersSyncRequired = () => {
+      if (!navigator.onLine) return;
+      syncOrdersSince().finally(() => {
+        loadCachedOrders();
+      });
+    };
+    window.addEventListener('orders-cache-updated', handleOrdersCacheUpdated);
+    window.addEventListener('orders-sync-required', handleOrdersSyncRequired);
     return () => {
       window.removeEventListener('focus', refreshPending);
       window.removeEventListener('offline-queue-updated', refreshPending);
+      window.removeEventListener('orders-cache-updated', handleOrdersCacheUpdated);
+      window.removeEventListener('orders-sync-required', handleOrdersSyncRequired);
     };
-  }, []);
+  }, [loadCachedOrders, syncOrdersSince]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -379,10 +411,57 @@ const OrdersPage = ({ navigate }) => {
     setDrawerError('');
     setDrawerOrder(null);
     try {
+      const cached = await getCachedOrderDetails(orderId);
+      const hasCachedItems = Array.isArray(cached?.items) && cached.items.length > 0;
+      if (cached) {
+        setDrawerOrder(cached);
+      }
+
+      const shouldFallback = !cached || !hasCachedItems;
+      if (!shouldFallback) {
+        if (gstInvoiceEnabled && !shopDetails && !shopDetailsLoading && navigator.onLine) {
+          setShopDetailsLoading(true);
+          try {
+            const shopRes = await api.get('/shop-details/me');
+            const shopPayload = shopRes?.data?.shop_details || shopRes?.data?.data || shopRes?.data || {};
+            setShopDetails(shopPayload);
+          } catch (innerErr) {
+            console.error('Failed to load shop details', innerErr);
+          } finally {
+            setShopDetailsLoading(false);
+          }
+        }
+        return;
+      }
+
+      if (!navigator.onLine) {
+        setDrawerError('Order details not available offline.');
+        return;
+      }
+
       const res = await api.get(`/orders/${orderId}`);
       const payload = res?.data || {};
       setCustomerDetailsEnabled(Boolean(payload.customer_details_enabled));
-      setDrawerOrder(payload.order || payload);
+      const serverOrder = payload.order || payload;
+      setDrawerOrder(serverOrder);
+
+      const serverItems =
+        serverOrder?.items ||
+        serverOrder?.products ||
+        payload.items ||
+        payload.products ||
+        [];
+      const serverPayments =
+        serverOrder?.payment_history ||
+        serverOrder?.payments ||
+        payload.payment_history ||
+        payload.payments ||
+        [];
+      upsertOrderDetailsCache({
+        order: serverOrder,
+        items: serverItems,
+        payments: serverPayments,
+      }).catch(() => {});
 
       if (gstInvoiceEnabled && !shopDetails && !shopDetailsLoading) {
         setShopDetailsLoading(true);
@@ -391,7 +470,6 @@ const OrdersPage = ({ navigate }) => {
           const shopPayload = shopRes?.data?.shop_details || shopRes?.data?.data || shopRes?.data || {};
           setShopDetails(shopPayload);
         } catch (innerErr) {
-          // non-blocking for order drawer
           console.error('Failed to load shop details', innerErr);
         } finally {
           setShopDetailsLoading(false);
@@ -413,7 +491,17 @@ const OrdersPage = ({ navigate }) => {
     setDrawerOpen(false);
     setDrawerOrder(null);
     setDrawerError('');
+    setPaymentAmount('');
   };
+
+  useEffect(() => {
+    if (!drawerOrder?.id) return;
+    const total = Number(drawerOrder.total_amount || 0);
+    const paid = Number(drawerOrder.total_paid || 0);
+    const returned = Number(drawerOrder.returned_amount || 0);
+    const balance = Math.max(total - paid - returned, 0);
+    setPaymentAmount(balance > 0 ? balance.toFixed(2) : '');
+  }, [drawerOrder?.id]);
 
   const buildReturnItems = (order) => {
     const items = Array.isArray(order?.items)
@@ -425,6 +513,11 @@ const OrdersPage = ({ navigate }) => {
       const soldQty = Number(item?.quantity ?? item?.qty ?? 0);
       const returnedQty = Number(item?.returned_quantity ?? item?.returned_qty ?? 0);
       const remainingQty = Math.max(soldQty - returnedQty, 0);
+      const lineTotal = Number(item?.line_total ?? 0);
+      const baseUnitPrice =
+        soldQty > 0 && Number.isFinite(lineTotal)
+          ? lineTotal / soldQty
+          : Number(item?.selling_price ?? item?.price ?? 0);
       return {
         key: item?.product_id ?? item?.id ?? `${idx}`,
         product_id: item?.product_id ?? item?.id,
@@ -432,7 +525,8 @@ const OrdersPage = ({ navigate }) => {
         sold_qty: soldQty,
         returned_qty: returnedQty,
         remaining_qty: remainingQty,
-        unit_price: Number(item?.selling_price ?? item?.price ?? 0),
+        unit_price: baseUnitPrice,
+        line_total: lineTotal,
         is_weight_based: item?.is_weight_based === 1 || item?.is_weight_based === true,
         return_qty: '',
       };
@@ -455,10 +549,6 @@ const OrdersPage = ({ navigate }) => {
       event.stopPropagation();
     }
     if (!orderId) return;
-    if (!navigator.onLine) {
-      showPopup('Return requires an internet connection.', 'Offline');
-      return;
-    }
     setReturnModalOpen(true);
     setReturnLoading(true);
     setReturnError('');
@@ -467,8 +557,15 @@ const OrdersPage = ({ navigate }) => {
       if (drawerOrder?.id === orderId) {
         orderData = drawerOrder;
       } else {
+        orderData = await getCachedOrderDetails(orderId);
+      }
+      if (!orderData && navigator.onLine) {
         const res = await api.get(`/orders/${orderId}`);
         orderData = res?.data?.order || res?.data || null;
+      }
+      if (!orderData && !navigator.onLine) {
+        showPopup('Return requires an internet connection.', 'Offline');
+        throw new Error('Order not available offline');
       }
       if (!orderData) {
         throw new Error('Order not found.');
@@ -517,14 +614,24 @@ const OrdersPage = ({ navigate }) => {
     });
   };
 
-  const returnTotal = useMemo(() => {
-    return returnItems.reduce((sum, item) => {
+  const returnSummary = useMemo(() => {
+    const totalQty = returnItems.reduce((sum, item) => sum + Number(item.sold_qty || 0), 0);
+    const itemsLineTotal = returnItems.reduce((sum, item) => sum + Number(item.line_total || 0), 0);
+    const orderTotal = Number(returnOrder?.total_amount || 0);
+    const extraDiscount = Math.max(itemsLineTotal - orderTotal, 0);
+    const discountPerUnit = totalQty > 0 ? extraDiscount / totalQty : 0;
+    let itemsRefund = 0;
+    let discountAdjust = 0;
+    returnItems.forEach((item) => {
       const qty = Number(item.return_qty || 0);
-      const price = Number(item.unit_price || 0);
-      if (!Number.isFinite(qty) || qty <= 0) return sum;
-      return sum + qty * price;
-    }, 0);
-  }, [returnItems]);
+      const unitPrice = Number(item.unit_price || 0);
+      if (!Number.isFinite(qty) || qty <= 0) return;
+      itemsRefund += qty * unitPrice;
+      discountAdjust += qty * discountPerUnit;
+    });
+    const finalRefund = Math.max(itemsRefund - discountAdjust, 0);
+    return { itemsRefund, discountAdjust, finalRefund, discountPerUnit };
+  }, [returnItems, returnOrder]);
 
   const handleProcessReturn = async () => {
     if (!returnOrder?.id || returnSubmitting) return;
@@ -637,20 +744,87 @@ const OrdersPage = ({ navigate }) => {
 
     try {
       setPaymentSubmittingId(order.id);
-      await api.post('/orders/mark-paid', {
-        order_id: order.id,
-        payment_mode: paymentMode,
-      });
-      fetchOrdersFromServer();
-      if (drawerOpen) {
-        fetchOrderDetails(order.id);
+      const balance = Number(order.balance ?? 0);
+      const parsedAmount = Number(paymentAmount);
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        showPopup('Enter a valid payment amount', 'Validation');
+        return;
       }
+      if (Number.isFinite(balance) && parsedAmount > balance) {
+        showPopup('Payment amount exceeds balance', 'Validation');
+        return;
+      }
+      const currentOrder = (await getCachedOrderById(order.id)) || order;
+      const totalPaid = Number(currentOrder?.total_paid || 0) + parsedAmount;
+      const totalAmount = Number(currentOrder?.total_amount || 0);
+      const returnedAmount = Number(currentOrder?.returned_amount || 0);
+      const nextBalance = Math.max(totalAmount - totalPaid - returnedAmount, 0);
+      const nextStatus = nextBalance <= 0 ? 'paid' : 'partial';
+      const updatedOrder = {
+        ...currentOrder,
+        total_paid: totalPaid,
+        balance: nextBalance,
+        payment_status: nextStatus,
+        payment_mode: paymentMode,
+      };
+
+      const localTxn = {
+        id: generateLocalTxnId(),
+        order_id: currentOrder?.id ?? order.id,
+        amount: parsedAmount,
+        payment_mode: paymentMode,
+        created_at: new Date().toISOString(),
+        txn_type: 'payment',
+        direction: 'in',
+      };
+
+      await upsertOrders([updatedOrder]);
+      await saveTransactionsBulk([localTxn]);
+
+      setOrders((prev) =>
+        prev.map((row) => (row.id === updatedOrder.id ? { ...row, ...updatedOrder } : row))
+      );
+      if (drawerOpen && drawerOrder?.id === updatedOrder.id) {
+        const existingPayments = await getCachedOrderTransactions(updatedOrder.id);
+        const mergedPayments = existingPayments.some((p) => p?.id === localTxn.id)
+          ? existingPayments
+          : [...existingPayments, localTxn];
+        setDrawerOrder((prev) => ({
+          ...prev,
+          ...updatedOrder,
+          payment_history: mergedPayments,
+        }));
+      }
+
+      if (!navigator.onLine) {
+        await enqueueOfflineOrder({
+          type: 'mark-paid',
+          orderId: updatedOrder.id,
+          payload: {
+            order_id: updatedOrder.id,
+            payment_mode: paymentMode,
+            amount_paid: parsedAmount,
+          },
+        });
+        showPopup('Saved Offline', 'Offline');
+        return;
+      }
+
+      await api.post('/orders/mark-paid', {
+        order_id: updatedOrder.id,
+        payment_mode: paymentMode,
+        amount_paid: parsedAmount,
+      });
     } catch (err) {
         if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
           showPopup('Token Expired Please Login Again!', 'Session');
           navigate('/logout');
           return;
         }
+      if (!err.response && !navigator.onLine) {
+        showPopup('Saved Offline', 'Offline');
+        return;
+      }
       showPopup('Failed to mark order as paid.', 'Error');
     } finally {
       setPaymentSubmittingId((current) => (current === order.id ? null : current));
@@ -746,10 +920,8 @@ const OrdersPage = ({ navigate }) => {
         const queue = await getOfflineOrderQueue();
         const list = Array.isArray(queue) ? queue : [];
         setPendingSyncCount(list.length);
-        setOfflineOrders(list);
       } catch {
         setPendingSyncCount(0);
-        setOfflineOrders([]);
       }
       fetchOrdersFromServer();
     }
@@ -1145,8 +1317,14 @@ const OrdersPage = ({ navigate }) => {
     }
   };
 
-  const handleRowClick = (orderId) => {
-    openDrawer(orderId);
+  const handleRowClick = (order) => {
+    if (!order) return;
+    const isPending = order?.sync_status === 'pending' || order?.is_offline === true;
+    if (isPending) {
+      showPopup('This order is pending sync. Please sync to view full details.', 'Pending Sync');
+      return;
+    }
+    openDrawer(order.id);
   };
 
   const handleSortToggle = (field) => {
@@ -1161,7 +1339,7 @@ const OrdersPage = ({ navigate }) => {
 
   const getSortIndicator = (field) => {
     if (sortBy !== field) return '';
-    return sortOrder === 'asc' ? '▲' : '▼';
+    return sortOrder === 'asc' ? 'â–²' : 'â–¼';
   };
 
   const getProductNames = (order) => {
@@ -1206,6 +1384,10 @@ const OrdersPage = ({ navigate }) => {
     ['completed', 'partially_returned'].includes(order?.order_status);
 
   const renderPaymentCell = (order) => {
+    const isPending = order?.sync_status === 'pending' || order?.is_offline === true;
+    if (isPending) {
+      return <span className="payment-badge pending">Pending Sync</span>;
+    }
     const status = order.payment_status;
     const orderStatus = order.order_status || '';
     const isFullyReturned = orderStatus === 'fully_returned';
@@ -1268,13 +1450,13 @@ const OrdersPage = ({ navigate }) => {
   const gstEnabledForOrder =
     drawerOrder?.is_gst_enabled === true || drawerOrder?.gst_enabled === true;
 
-  const returnEnabled = true;
+  const returnEnabled = false;
   const hasActions = receiptModuleEnabled || whatsappEnabled || returnEnabled;
 
   return (
     <div className="orders-page">
       <div className="mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-        <div className="text-muted">
+        <div className="text-secondary">
           Offline queue: {pendingSyncCount}
         </div>
         <button
@@ -1286,66 +1468,6 @@ const OrdersPage = ({ navigate }) => {
           {syncingOffline ? 'Syncing...' : 'Sync Offline Orders'}
         </button>
       </div>
-      {offlineOrders.length > 0 && (
-        <div className="orders-card mb-3">
-          <div className="orders-card-header">
-            <h5 className="mb-0">Pending Offline Orders</h5>
-          </div>
-          <div className="orders-table-wrapper">
-            <table className="orders-table">
-              <thead>
-                <tr>
-                  <th>Local ID</th>
-                  <th>Type</th>
-                  <th>Total</th>
-                  <th>Payment</th>
-                  <th>Created</th>
-                  <th>Items</th>
-                </tr>
-              </thead>
-              <tbody>
-                {offlineOrders.map((entry) => {
-                  const payload = entry.payload || {};
-                  const items = Array.isArray(payload.products) ? payload.products : [];
-                  const computedSubtotal = items.reduce((sum, item) => {
-                    const qty = Number(item.quantity || item.qty || 0);
-                    const price = Number(item.price || item.selling_price || 0);
-                    return sum + qty * price;
-                  }, 0);
-                  const computedGst = payload.is_gst_enabled
-                    ? items.reduce((sum, item) => {
-                        const qty = Number(item.quantity || item.qty || 0);
-                        const price = Number(item.price || item.selling_price || 0);
-                        const gst = Number(item.gst_percent || item.gst || 0);
-                        return sum + (qty * price * gst) / 100;
-                      }, 0)
-                    : 0;
-                  const total =
-                    payload.total_amount ??
-                    payload.total_price ??
-                    computedSubtotal + computedGst;
-                  const payment =
-                    payload.payment_method ||
-                    payload.payment_mode ||
-                    payload.payment ||
-                    '-';
-                  const type = payload.transaction_type || payload.type || entry.type || '-';
-                  return (
-                    <tr key={entry.id}>
-                      <td>{entry.id}</td>
-                      <td>{type}</td>
-                      <td>{formatMoney(total)}</td>
-                      <td>{payment}</td>
-                      <td>{formatDate(entry.createdAt)}</td>
-                      <td>{items.length}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
       <div className="orders-page-header">
         <div>
           {/* <h2 className="orders-title">Orders</h2> */}
@@ -1476,27 +1598,44 @@ const OrdersPage = ({ navigate }) => {
                   <td colSpan={customerDetailsEnabled ? (hasActions ? 8 : 7) : (hasActions ? 7 : 6)} className="empty-state">No orders found.</td>
                 </tr>
               )}
-              {!isLoading && !errorMessage && orders.map((order) => (
+              {!isLoading && !errorMessage && orders.map((order) => {
+                const isPending = order?.sync_status === 'pending' || order?.is_offline === true;
+                const orderIdRaw = order?.id;
+                const orderIdText =
+                  typeof orderIdRaw === 'string' && orderIdRaw.startsWith('local:')
+                    ? 'LOCAL'
+                    : orderIdRaw;
+                return (
                 <tr
                   key={order.id}
                   className="orders-row"
-                  onClick={() => handleRowClick(order.id)}
+                  onClick={() => handleRowClick(order)}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
-                      handleRowClick(order.id);
+                      handleRowClick(order);
                     }
                   }}
                 >
-                  <td>#{order.id}</td>
+                  <td>
+                    <span className="order-id-cell">
+                      #{orderIdText}
+                      {isPending && (
+                        <i
+                          className="bi bi-arrow-repeat sync-icon"
+                          title="Pending sync"
+                        />
+                      )}
+                    </span>
+                  </td>
                   <td>{renderProductSummary(order)}</td>
                   {customerDetailsEnabled && <td>{order.customer_name || '-'}</td>}
                   <td>{formatMoney(order.total_amount)}</td>
                   <td>{order?.is_gst_enabled === true || order?.gst_enabled === true ? 'Yes' : 'No'}</td>
                   <td>{renderPaymentCell(order)}</td>
                   <td>{formatDate(order.created_at)}</td>
-                  {hasActions && (
+                  {hasActions && !isPending && (
                     <td>
                       {returnEnabled && isReturnEligible(order) && (
                         <button
@@ -1527,7 +1666,8 @@ const OrdersPage = ({ navigate }) => {
                     </td>
                   )}
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>
@@ -1698,13 +1838,29 @@ const OrdersPage = ({ navigate }) => {
                     </button>
                   )}
                   {balance > 0 ? (
-                    <button
-                      className="btn btn-primary"
-                      onClick={(event) => handlePaymentAction(event, drawerOrder)}
-                      disabled={paymentSubmittingId === drawerOrder?.id}
-                    >
-                      {paymentSubmittingId === drawerOrder?.id ? 'Saving...' : 'Add Payment'}
-                    </button>
+                    <>
+                      <div className="payment-input-group">
+                        <label>
+                          Amount
+                          <input
+                            type="number"
+                            className="form-control form-control-sm"
+                            min="0"
+                            step="0.01"
+                            value={paymentAmount}
+                            onChange={(event) => setPaymentAmount(event.target.value)}
+                          />
+                        </label>
+                        <small className="text-secondary">Balance: {formatMoney(balance)}</small>
+                      </div>
+                      <button
+                        className="btn btn-primary"
+                        onClick={(event) => handlePaymentAction(event, drawerOrder)}
+                        disabled={paymentSubmittingId === drawerOrder?.id}
+                      >
+                        {paymentSubmittingId === drawerOrder?.id ? 'Saving...' : 'Add Payment'}
+                      </button>
+                    </>
                   ) : (
                     <span className="payment-badge paid">Fully Paid</span>
                   )}
@@ -1773,7 +1929,7 @@ const OrdersPage = ({ navigate }) => {
                                 disabled={Number(item.remaining_qty || 0) <= 0}
                                 onChange={(event) => handleReturnQtyChange(idx, event.target.value)}
                               />
-                              <small className="text-muted">Remaining: {item.remaining_qty}</small>
+                              <small className="text-secondary">Remaining: {item.remaining_qty}</small>
                             </td>
                             <td>{formatMoney(item.unit_price)}</td>
                             <td>{formatMoney(amount)}</td>
@@ -1808,10 +1964,25 @@ const OrdersPage = ({ navigate }) => {
                       ))}
                     </select>
                   </div>
+                <div className="return-total">
+                  <span>Items Refund</span>
+                  <strong>{formatMoney(returnSummary.itemsRefund)}</strong>
+                </div>
+                {returnSummary.discountAdjust > 0 && (
                   <div className="return-total">
-                    <span>Refund Total</span>
-                    <strong>{formatMoney(returnTotal)}</strong>
+                    <span>Discount Adjustment</span>
+                    <strong>-{formatMoney(returnSummary.discountAdjust)}</strong>
                   </div>
+                )}
+                <div className="return-total">
+                  <span>Final Refund</span>
+                  <strong>{formatMoney(returnSummary.finalRefund)}</strong>
+                </div>
+                {returnSummary.discountAdjust > 0 && (
+                  <small className="text-secondary d-block">
+                    Discount benefit will be adjusted on return.
+                  </small>
+                )}
                 </div>
                 <div className="return-actions">
                   <button className="btn btn-outline-secondary" onClick={closeReturnModal}>
@@ -1857,7 +2028,7 @@ const OrdersPage = ({ navigate }) => {
               <p className="mb-2">
                 <strong>{shopDetails.shop_name || shopDetails.name || shopDetails.business_name}</strong>
                 {(shopDetails.gst_number || shopDetails.gstin || shopDetails.gstin_number) && (
-                  <> · GST: {shopDetails.gst_number || shopDetails.gstin || shopDetails.gstin_number}</>
+                  <> Â· GST: {shopDetails.gst_number || shopDetails.gstin || shopDetails.gstin_number}</>
                 )}
               </p>
             )}
@@ -1953,3 +2124,4 @@ const OrdersPage = ({ navigate }) => {
 };
 
 export default OrdersPage;
+

@@ -1,0 +1,196 @@
+.context-sidebar {
+  position: fixed;
+  top: var(--nav-height, 64px);
+  left: 5px;
+  width: 240px;
+  /* background: rgba(15, 23, 42, 0.9);
+  background-color: rgba(15, 23, 42, 0.9);
+  background-image: none; */
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  padding: 20px 18px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  height: calc(100vh - 140px);
+  overflow-y: auto;
+  transition: width 0.25s ease, left 0.25s ease, padding 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.context-sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(30, 41, 59, 0.8) rgba(15, 23, 42, 0.9);
+}
+
+.context-sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.context-sidebar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 999px;
+}
+
+.context-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(30, 41, 59, 0.8);
+  border-radius: 999px;
+  border: 2px solid rgba(15, 23, 42, 0.9);
+}
+
+.context-sidebar__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #7dd3fc;
+  margin-bottom: 0;
+}
+
+.context-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  gap: 12px;
+}
+
+.context-sidebar__toggle {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.5);
+  color: #e2e8f0;
+  border-radius: 10px;
+  width: 40px;
+  height: 36px;
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-direction: column;
+  cursor: pointer;
+}
+
+.context-sidebar__toggle span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.context-sidebar__toggle.is-open span:nth-child(1) {
+  transform: translateY(5px) rotate(45deg);
+}
+
+.context-sidebar__toggle.is-open span:nth-child(2) {
+  opacity: 0;
+}
+
+.context-sidebar__toggle.is-open span:nth-child(3) {
+  transform: translateY(-5px) rotate(-45deg);
+}
+
+.context-sidebar__toggle:hover {
+  background: rgba(56, 189, 248, 0.18);
+}
+
+.context-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.context-sidebar__section {
+  margin-top: 6px;
+  margin-bottom: -2px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: rgba(148, 163, 184, 0.8);
+  padding-left: 4px;
+}
+
+.context-sidebar__link {
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: #e2e8f0;
+  text-decoration: none;
+  background: rgba(30, 41, 59, 0.4);
+  font-weight: 600;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.context-sidebar__link:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: #f8fafc;
+  transform: translateX(4px);
+}
+
+.context-sidebar__link.active {
+  background: rgba(56, 189, 248, 0.2);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.4);
+}
+
+.context-sidebar.collapsed {
+  width: 28px;
+  padding: 12px;
+  left: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  height: auto;
+}
+
+.context-sidebar.collapsed .context-sidebar__title {
+  display: none;
+}
+
+.context-sidebar.collapsed .context-sidebar__nav {
+  display: none;
+}
+
+.context-sidebar.collapsed .context-sidebar__link-text {
+  display: none;
+}
+
+.context-sidebar.collapsed .context-sidebar__header {
+  justify-content: center;
+  margin-bottom: 0;
+}
+
+.context-sidebar.collapsed .context-sidebar__toggle {
+  width: 30px;
+  height: 30px;
+  padding: 4px;
+  font-size: 0.85rem;
+}
+
+.context-layout.is-collapsed .context-content {
+  margin-left: 60px;
+}
+
+.context-layout {
+  display: block;
+  min-height: calc(100vh - var(--nav-height, 64px));
+}
+
+.context-content {
+  min-width: 0;
+  margin-left: 320px;
+  /* padding: calc(var(--nav-height) + 12px) 24px 24px; */
+  transition: margin-left 0.25s ease, padding 0.25s ease;
+}
+
+@media (max-width: 1024px) {
+  .context-content {
+    margin-left: 0;
+    padding: calc(var(--nav-height, 64px) + 8px) 16px 24px;
+  }
+}

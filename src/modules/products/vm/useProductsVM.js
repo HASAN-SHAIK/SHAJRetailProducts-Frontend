@@ -1,29 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../../../utils/axios';
-import { updateProductsBulk } from '../../../core/db';
-import { saveProductsCache } from '../../../utils/offlineProducts';
-
-const extractList = (res) => {
-  const payload = res?.data?.products || res?.data?.data || res?.data || [];
-  return Array.isArray(payload) ? payload : [];
-};
+import { getAllProducts } from '../../../core/db';
+import { runDeltaSync } from '../../../utils/deltaSync';
 
 export const useProductsVM = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const fetchProducts = useCallback(async () => {
+  const fetchProducts = useCallback(async (skipSync = false) => {
     setLoading(true);
     setError('');
     try {
-      const res = await api.get('/products');
-      const list = extractList(res);
-      setProducts(list);
-      if (list.length) {
-        updateProductsBulk(list).catch(() => {});
-        saveProductsCache(list);
+      if (!skipSync && navigator.onLine) {
+        await runDeltaSync({ branchId: null });
       }
+      const localAll = await getAllProducts();
+      const list = (Array.isArray(localAll) ? localAll : []).filter(
+        (item) => !item?.is_deleted
+      );
+      setProducts(list);
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to load products');
       setProducts([]);
@@ -45,7 +41,10 @@ export const useProductsVM = () => {
     }));
     if (!payload.length) return { success: false };
     await api.put('/products/bulk-update', { products: payload });
-    await fetchProducts();
+    if (navigator.onLine) {
+      await runDeltaSync({ branchId: null });
+    }
+    await fetchProducts(true);
     return { success: true };
   };
 

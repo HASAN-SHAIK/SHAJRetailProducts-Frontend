@@ -1,0 +1,120 @@
+.staff-expenses-page {
+  display: grid;
+  gap: 20px;
+}
+
+.staff-expenses-page .form-label {
+  color: #ffffff;
+}
+
+.staff-expenses-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+}
+
+.staff-expenses-header h2 {
+  margin: 0;
+  font-size: 1.4rem;
+  color: #e2e8f0;
+}
+
+.offline-chip {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(248, 113, 113, 0.15);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: #fca5a5;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.staff-expenses-card {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.25);
+}
+
+.staff-expenses-card h4 {
+  margin: 0 0 12px;
+  color: #cbd5f5;
+}
+
+.staff-expenses-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.staff-expenses-table th,
+.staff-expenses-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.staff-expenses-table th {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: #7dd3fc;
+}
+
+.sync-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sync-dot::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
+}
+
+.sync-dot.synced::before {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
+}
+
+.staff-expenses-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.staff-expenses-form {
+  display: grid;
+  gap: 12px;
+}
+
+.staff-expenses-form .row {
+  align-items: end;
+}
+
+.staff-expenses-form label {
+  color: #cbd5f5;
+  font-size: 0.85rem;
+}
+
+.pill-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.2);
+  color: #bae6fd;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}

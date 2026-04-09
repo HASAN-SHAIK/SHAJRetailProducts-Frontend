@@ -1,22 +1,11 @@
-import { initDB } from '../core/db';
-
-const ORDERS_STORE = 'orders';
-
-const waitForRequest = (request) =>
-  new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-
-const waitForTransaction = (transaction) =>
-  new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error);
-  });
+import { db, saveTransactionsBulk } from '../core/db';
 
 const normalizeOrder = (order) => ({
   id: order?.id ?? null,
+  local_id: order?.local_id ?? null,
+  client_order_id: order?.client_order_id ?? null,
+  sync_status: order?.sync_status ?? null,
+  is_offline: order?.is_offline ?? null,
   branch_id: order?.branch_id ?? null,
   products_summary: order?.products_summary ?? order?.product_summary ?? '',
   product_names: order?.product_names ?? [],
@@ -39,26 +28,105 @@ export const upsertOrders = async (orders) => {
   const list = Array.isArray(orders) ? orders : [];
   const normalized = list.map(normalizeOrder).filter((item) => item.id !== null);
   if (!normalized.length) return 0;
-
-  const db = await initDB();
-  const transaction = db.transaction([ORDERS_STORE], 'readwrite');
-  const store = transaction.objectStore(ORDERS_STORE);
-  normalized.forEach((order) => store.put(order));
-  await waitForTransaction(transaction);
+  await db.orders.bulkPut(normalized);
   return normalized.length;
 };
+
+const normalizeOrderKey = (orderId) => {
+  if (orderId === null || orderId === undefined) return null;
+  const raw = String(orderId);
+  if (raw.startsWith('local:')) return raw;
+  const asNumber = Number(orderId);
+  if (Number.isFinite(asNumber)) return asNumber;
+  return raw;
+};
+
+const normalizeOrderItem = (item, orderId) => ({
+  ...item,
+  order_id: item?.order_id ?? item?.orderId ?? orderId,
+});
 
 export const replaceAllOrders = async (orders) => {
   const list = Array.isArray(orders) ? orders : [];
   const normalized = list.map(normalizeOrder).filter((item) => item.id !== null);
-
-  const db = await initDB();
-  const transaction = db.transaction([ORDERS_STORE], 'readwrite');
-  const store = transaction.objectStore(ORDERS_STORE);
-  store.clear();
-  normalized.forEach((order) => store.put(order));
-  await waitForTransaction(transaction);
+  await db.orders.clear();
+  if (normalized.length) {
+    await db.orders.bulkPut(normalized);
+  }
   return normalized.length;
+};
+
+export const getCachedOrderById = async (orderId) => {
+  if (!orderId) return null;
+  const key = normalizeOrderKey(orderId);
+  if (key === null) return null;
+  const direct = await db.orders.get(key);
+  if (direct) return direct;
+  if (key !== orderId) {
+    return await db.orders.get(orderId);
+  }
+  return null;
+};
+
+export const getCachedOrderItems = async (orderId) => {
+  const key = normalizeOrderKey(orderId);
+  if (key === null) return [];
+  try {
+    return await db.order_items.where('order_id').equals(key).toArray();
+  } catch {
+    const all = await db.order_items.toArray();
+    return all.filter((item) => String(item?.order_id) === String(orderId));
+  }
+};
+
+export const replaceCachedOrderItems = async (orderId, items = []) => {
+  const key = normalizeOrderKey(orderId);
+  if (key === null) return 0;
+  const list = Array.isArray(items) ? items : [];
+  await db.order_items.where('order_id').equals(key).delete();
+  if (list.length) {
+    await db.order_items.bulkPut(list.map((item) => normalizeOrderItem(item, key)));
+  }
+  return list.length;
+};
+
+export const getCachedOrderTransactions = async (orderId) => {
+  const key = normalizeOrderKey(orderId);
+  if (key === null) return [];
+  try {
+    return await db.transactions.where('order_id').equals(key).toArray();
+  } catch {
+    const all = await db.transactions.toArray();
+    return all.filter((txn) => String(txn?.order_id) === String(orderId));
+  }
+};
+
+export const upsertOrderDetailsCache = async ({ order, items, payments } = {}) => {
+  if (order) {
+    await upsertOrders([order]);
+  }
+  if (order?.id && items) {
+    await replaceCachedOrderItems(order.id, items);
+  }
+  if (order?.id && Array.isArray(payments) && payments.length) {
+    const normalized = payments.map((payment) => ({
+      ...payment,
+      order_id: payment?.order_id ?? payment?.orderId ?? order.id,
+    }));
+    await saveTransactionsBulk(normalized);
+  }
+};
+
+export const getCachedOrderDetails = async (orderId) => {
+  const order = await getCachedOrderById(orderId);
+  if (!order) return null;
+  const items = await getCachedOrderItems(orderId);
+  const payments = await getCachedOrderTransactions(orderId);
+  return {
+    ...order,
+    items: items.length ? items : order.items || order.products || [],
+    payment_history: payments,
+  };
 };
 
 export const getCachedOrdersPage = async ({ page = 1, limit = 20 } = {}) => {
@@ -66,12 +134,7 @@ export const getCachedOrdersPage = async ({ page = 1, limit = 20 } = {}) => {
   const safeLimit = Math.max(Number(limit) || 20, 1);
   const offset = (safePage - 1) * safeLimit;
 
-  const db = await initDB();
-  const transaction = db.transaction([ORDERS_STORE], 'readonly');
-  const store = transaction.objectStore(ORDERS_STORE);
-  const allOrders = (await waitForRequest(store.getAll())) || [];
-  await waitForTransaction(transaction);
-
+  const allOrders = await db.orders.toArray();
   const sorted = allOrders
     .slice()
     .sort((a, b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
@@ -81,20 +144,18 @@ export const getCachedOrdersPage = async ({ page = 1, limit = 20 } = {}) => {
 };
 
 export const getAllCachedOrders = async () => {
-  const db = await initDB();
-  const transaction = db.transaction([ORDERS_STORE], 'readonly');
-  const store = transaction.objectStore(ORDERS_STORE);
-  const allOrders = (await waitForRequest(store.getAll())) || [];
-  await waitForTransaction(transaction);
-  return allOrders;
+  return await db.orders.toArray();
 };
 
 export const clearOrdersCache = async () => {
-  const db = await initDB();
-  const transaction = db.transaction([ORDERS_STORE], 'readwrite');
-  const store = transaction.objectStore(ORDERS_STORE);
-  store.clear();
-  await waitForTransaction(transaction);
+  await db.orders.clear();
+};
+
+export const deleteOrdersByIds = async (ids = []) => {
+  const list = Array.isArray(ids) ? ids.filter((id) => id !== null && id !== undefined) : [];
+  if (!list.length) return 0;
+  await db.orders.bulkDelete(list);
+  return list.length;
 };
 
 export default {
@@ -103,4 +164,5 @@ export default {
   getCachedOrdersPage,
   getAllCachedOrders,
   clearOrdersCache,
+  deleteOrdersByIds,
 };

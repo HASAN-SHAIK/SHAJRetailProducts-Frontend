@@ -1,0 +1,26 @@
+﻿.accounts-page .accounts-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  align-items: end;
+}
+
+.accounts-page .accounts-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.accounts-page .accounts-form button {
+  align-self: center;
+  height: 40px;
+}
+
+.accounts-page .text-secondary,
+.accounts-page .accounts-form .text-secondary,
+.accounts-page .accounts-form small.text-secondary {
+  color: #ffffff !important;
+  opacity: 1;
+}
+

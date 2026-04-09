@@ -4,10 +4,8 @@ import Dashboard from './pages/Dashboard';
 import ProtectedRoute from './components/common/protectedRoute';
 import { ThemeProvider } from './ThemeContext';
 import Orders from './pages/Orders';
-import Expenses from './pages/Expenses';
 import Navbar from './components/common/Navbar/Navbar';
 import { useEffect, useRef, useState } from 'react';
-import ProductsPage from './components/ProductsPage';
 import Transactions from './pages/Transactions';
 import CreateOrderPage from './pages/CreateOrderPage';
 import './App.css';
@@ -16,8 +14,14 @@ import Logout from './pages/Logout';
 import Footer from './components/Footer/Footer';
 import { setUserDetails } from './store/userSlice';
 import api from './utils/axios';
-import { preloadAllCaches, preloadProductsToIndexedDb } from './utils/indexedDb';
+import { preloadAllCaches } from './utils/indexedDb';
 import { processOfflineQueue } from './utils/offlineOrders';
+import { syncAllStaffExpenses } from './utils/staffExpensesSync';
+import { syncAllReturnsCorrections } from './utils/returnsCorrectionsSync';
+import { startImportSyncWorker, stopImportSyncWorker, syncAllImports } from './utils/importSync';
+import { startCustomerSyncWorker, stopCustomerSyncWorker, syncAllCustomers } from './utils/customersSync';
+import { runDeltaSync } from './utils/deltaSync';
+import { processInventorySyncQueue, startInventorySyncWorker, stopInventorySyncWorker } from './utils/inventorySync';
 import { setTenantConfig, setTenantConfigStatus, setSubscriptionStatus, setTenantIdentity } from './store/tenantSlice';
 import SubscriptionExpired from './pages/SubscriptionExpired';
 import { decodeJwtPayload } from './utils/jwt';
@@ -35,7 +39,41 @@ import OrderDetailsMobile from './mobile/pages/OrderDetailsMobile';
 import ProductsMobile from './mobile/pages/ProductsMobile';
 import ReportsMobile from './mobile/pages/ReportsMobile';
 import SettingsMobile from './mobile/pages/SettingsMobile';
-import BillingPage from './pages/BillingPage';
+import ContextLayout from './components/layout/ContextLayout';
+import RetailBilling from './pages/billing/RetailBilling';
+import WholesaleBilling from './pages/billing/WholesaleBilling';
+import StaffList from './pages/staffExpenses/StaffList';
+import StaffForm from './pages/staffExpenses/StaffForm';
+import SalaryTracking from './pages/staffExpenses/SalaryTracking';
+import ExpenseAdd from './pages/staffExpenses/ExpenseAdd';
+import ExpenseDailyReport from './pages/staffExpenses/ExpenseDailyReport';
+import ExpenseMonthlyReport from './pages/staffExpenses/ExpenseMonthlyReport';
+import ExpenseStaffReport from './pages/staffExpenses/ExpenseStaffReport';
+import SalesReturn from './pages/returnsCorrections/SalesReturn';
+import ReturnHistory from './pages/returnsCorrections/ReturnHistory';
+import EditBill from './pages/returnsCorrections/EditBill';
+import CorrectionHistory from './pages/returnsCorrections/CorrectionHistory';
+import TaxReports from './pages/returnsCorrections/TaxReports';
+import GstSummary from './pages/returnsCorrections/GstSummary';
+import EwayBill from './pages/returnsCorrections/EwayBill';
+import GstFilingData from './pages/returnsCorrections/GstFilingData';
+import ProductCatalog from './pages/inventory/ProductCatalog';
+import Purchase from './pages/inventory/Purchase';
+import PurchaseBook from './pages/inventory/PurchaseBook';
+import PurchaseDetail from './pages/inventory/PurchaseDetail';
+import PurchaseReturn from './pages/inventory/PurchaseReturn';
+import Suppliers from './pages/inventory/Suppliers';
+import SupplierForm from './pages/inventory/SupplierForm';
+import SupplierDetail from './pages/inventory/SupplierDetail';
+import CustomerList from './pages/customers/CustomerList';
+import CustomerForm from './pages/customers/CustomerForm';
+import CustomerDetail from './pages/customers/CustomerDetail';
+import ReceiptEntry from './pages/accounts/ReceiptEntry';
+import PaymentEntry from './pages/accounts/PaymentEntry';
+import CashBook from './pages/accounts/CashBook';
+import BankBook from './pages/accounts/BankBook';
+import Ledger from './pages/accounts/Ledger';
+import Outstanding from './pages/accounts/Outstanding';
 // import BillingModule from './modules/billing';
 import BranchDevices from './pages/BranchDevices';
 
@@ -208,13 +246,16 @@ useEffect(() => {
       setBranches(branches);
       if (!selectedBranchId && branches.length > 0) {
         if (userDetails?.role === 'admin') {
-          setSelectedBranchId('all');
+          setSelectedBranchId('all', { confirmed: false, name: 'All' });
         } else {
-          setSelectedBranchId(branches[0].id);
+          setSelectedBranchId(branches[0].id, {
+            confirmed: false,
+            name: branches[0]?.name || ''
+          });
         }
       }
     } catch (err) {
-      setBranches([]);
+      // Keep previous branches on error to avoid flicker/reset.
     }
   };
   fetchBranches();
@@ -273,15 +314,29 @@ useEffect(() => {
   const syncOfflineOrders = async () => {
     if (!navigator.onLine) return;
     try {
+      await syncAllCustomers();
       await processOfflineQueue(api);
+      await processInventorySyncQueue();
+      await syncAllStaffExpenses();
+      await syncAllReturnsCorrections();
+      await syncAllImports();
+      await runDeltaSync({ branchId: selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null });
     } catch (err) {
       console.log('Offline order sync failed', err);
     }
   };
   syncOfflineOrders();
   window.addEventListener('online', syncOfflineOrders);
-  return () => window.removeEventListener('online', syncOfflineOrders);
-}, []);
+  startInventorySyncWorker();
+  startImportSyncWorker();
+  startCustomerSyncWorker();
+  return () => {
+    window.removeEventListener('online', syncOfflineOrders);
+    stopInventorySyncWorker();
+    stopImportSyncWorker();
+    stopCustomerSyncWorker();
+  };
+}, [selectedBranchId]);
 
 useEffect(() => {
   const handleOnline = () => setIsOnline(true);
@@ -360,172 +415,217 @@ const tenantBannerColor = (() => {
           <Navbar user_name={userDetails && userDetails.user_name} />
         </div>
       )}
-      {showServerDownBanner && (
-        <div className="server-offline-indicator" title="Server is offline. You can still place orders at the same speed.">
-          <span className="server-offline-dot" />
-          <span className="server-offline-text">Offline Mode</span>
-        </div>
-      )}
-      {showTenantBanner && (
-        <div
-          className="tenant-status-banner"
-          style={
-            tenantBannerColor
-              ? { background: tenantBannerColor, backgroundImage: 'none' }
-              : undefined
-          }
-        >
-          {tenantBannerDays === null
-            ? 'Subscription status notice'
-            : `Your subscription will expire in ${tenantBannerDays} day${tenantBannerDays === 1 ? '' : 's'}.`}
-        </div>
-      )}
-      <Routes>
-        <Route path="/" element={<LoginPage navigate={navigate} />} />
-        <Route path="/login" element={<Navigate to="/" replace />} />
-        <Route path="/subscription-expired" element={<SubscriptionExpired />} />
-        <Route
-          path="/m"
-          element={<Navigate to="/m/dashboard" replace />}
-        />
-        <Route
-          path="/m/dashboard"
-          element={
-            <ProtectedRoute>
-              <DashboardMobile />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/m/orders"
-          element={
-            <ProtectedRoute>
-              <OrdersMobile />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/m/orders/:id"
-          element={
-            <ProtectedRoute>
-              <OrderDetailsMobile />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/m/products"
-          element={
-            <ProtectedRoute>
-              <ProductsMobile />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/m/reports"
-          element={
-            <ProtectedRoute>
-              <ReportsMobile />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/m/settings"
-          element={
-            <ProtectedRoute>
-              <SettingsMobile />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <ThemeProvider>
-                {reportsEnabled ? <Dashboard navigate={navigate} /> : <Navigate to="/neworder" replace />}
-              </ThemeProvider>
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path='/orders'
-          element={
-            <ProtectedRoute>
-              <Orders navigate={navigate} userRole={userDetails && userDetails.role} />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/expenses"
-          element={
-            <ProtectedRoute>
-              <Expenses />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/products"
-          element={
-            <ProtectedRoute>
-              <ProductsPage navigate={navigate} userRole={userDetails && userDetails.role} />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/transactions"
-          element={
-            <ProtectedRoute>
-              <Transactions navigate={navigate} userRole={userDetails && userDetails.role} />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/neworder"
-          element={
-            <ProtectedRoute>
-              <CreateOrderPage  />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/billing"
-          element={
-            <ProtectedRoute>
-              <BillingPage navigate={navigate} />
-            </ProtectedRoute>
-          }
-        />
-        {/* <Route
-          path="/billing-new"
-          element={
-            <ProtectedRoute>
-              <BillingModule />
-            </ProtectedRoute>
-          }
-        /> */}
-        <Route
-          path="/branch-devices"
-          element={
-            <ProtectedRoute>
-              <BranchDevices />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/support"
-          element={
-            <ProtectedRoute>
-              <Support navigate={navigate} />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path='/logout'
-          element={
-            <Logout />
-          }
-        />
-        <Route path="*" element={userDetails ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />
-      </Routes>
+      <div
+        className={
+          userDetails && !AUTH_PAGES.includes(location.pathname) && !isMobileRoute
+            ? 'app-content'
+            : undefined
+        }
+      >
+        {showServerDownBanner && (
+          <div className="server-offline-indicator" title="Server is offline. You can still place orders at the same speed.">
+            <span className="server-offline-dot" />
+            <span className="server-offline-text">Offline Mode</span>
+          </div>
+        )}
+        {showTenantBanner && (
+          <div
+            className="tenant-status-banner"
+            style={
+              tenantBannerColor
+                ? { background: tenantBannerColor, backgroundImage: 'none' }
+                : undefined
+            }
+          >
+            {tenantBannerDays === null
+              ? 'Subscription status notice'
+              : `Your subscription will expire in ${tenantBannerDays} day${tenantBannerDays === 1 ? '' : 's'}.`}
+          </div>
+        )}
+        <Routes>
+          <Route path="/" element={<LoginPage navigate={navigate} />} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="/subscription-expired" element={<SubscriptionExpired />} />
+          <Route
+            path="/m"
+            element={<Navigate to="/m/dashboard" replace />}
+          />
+          <Route
+            path="/m/dashboard"
+            element={
+              <ProtectedRoute>
+                <DashboardMobile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/m/orders"
+            element={
+              <ProtectedRoute>
+                <OrdersMobile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/m/orders/:id"
+            element={
+              <ProtectedRoute>
+                <OrderDetailsMobile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/m/products"
+            element={
+              <ProtectedRoute>
+                <ProductsMobile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/m/reports"
+            element={
+              <ProtectedRoute>
+                <ReportsMobile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/m/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsMobile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <ThemeProvider>
+                  {reportsEnabled ? <Dashboard navigate={navigate} /> : <Navigate to="/neworder" replace />}
+                </ThemeProvider>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path='/orders'
+            element={
+              <ProtectedRoute>
+                <Orders navigate={navigate} userRole={userDetails && userDetails.role} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/products"
+            element={
+              <ProtectedRoute>
+                <Navigate to="/inventory/catalog" replace />
+              </ProtectedRoute>
+            }
+          />
+          {/* <Route
+            path="/transactions"
+            element={
+              <ProtectedRoute>
+                <Transactions navigate={navigate} userRole={userDetails && userDetails.role} />
+              </ProtectedRoute>
+            }
+          /> */}
+          <Route
+            path="/neworder"
+            element={
+              <ProtectedRoute>
+                <CreateOrderPage  />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            element={
+              <ProtectedRoute>
+                <ContextLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/billing" element={<Navigate to="/billing/retail" replace />} />
+            <Route path="/billing/retail" element={<RetailBilling />} />
+            <Route path="/billing/wholesale" element={<WholesaleBilling />} />
+            <Route path="/inventory" element={<Navigate to="/inventory/catalog" replace />} />
+            <Route path="/staff-expenses" element={<Navigate to="/staff-expenses/staff/list" replace />} />
+            <Route path="/returns-corrections" element={<Navigate to="/returns-corrections/returns/new" replace />} />
+            <Route path="/accounts" element={<Navigate to="/accounts/receipt" replace />} />
+            <Route
+              path="/inventory/catalog"
+              element={<ProductCatalog navigate={navigate} userRole={userDetails && userDetails.role} />}
+            />
+            <Route path="/staff-expenses/staff/list" element={<StaffList />} />
+            <Route path="/staff-expenses/staff/add" element={<StaffForm />} />
+            <Route path="/staff-expenses/staff/edit/:staffId" element={<StaffForm />} />
+            <Route path="/staff-expenses/staff/salary" element={<SalaryTracking />} />
+            <Route path="/staff-expenses/expenses/add" element={<ExpenseAdd />} />
+            <Route path="/staff-expenses/expenses/daily" element={<ExpenseDailyReport />} />
+            <Route path="/staff-expenses/expenses/monthly" element={<ExpenseMonthlyReport />} />
+            <Route path="/staff-expenses/expenses/staff-wise" element={<ExpenseStaffReport />} />
+            <Route path="/returns-corrections/returns/new" element={<SalesReturn />} />
+            <Route path="/returns-corrections/returns/history" element={<ReturnHistory />} />
+            <Route path="/returns-corrections/corrections/edit" element={<EditBill />} />
+            <Route path="/returns-corrections/corrections/history" element={<CorrectionHistory />} />
+            <Route path="/returns-corrections/gst/reports" element={<TaxReports />} />
+            <Route path="/returns-corrections/gst/summary" element={<GstSummary />} />
+            <Route path="/returns-corrections/gst/eway" element={<EwayBill />} />
+            <Route path="/returns-corrections/gst/filing" element={<GstFilingData />} />
+            <Route path="/inventory/purchase" element={<Purchase />} />
+            <Route path="/inventory/purchases" element={<PurchaseBook />} />
+            <Route path="/inventory/purchases/:id" element={<PurchaseDetail />} />
+            <Route path="/inventory/purchase-returns" element={<PurchaseReturn />} />
+            <Route path="/inventory/suppliers" element={<Suppliers />} />
+            <Route path="/inventory/suppliers/new" element={<SupplierForm />} />
+            <Route path="/inventory/suppliers/:id" element={<SupplierDetail />} />
+            <Route path="/inventory/suppliers/:id/edit" element={<SupplierForm />} />
+            <Route path="/accounts/receipt" element={<ReceiptEntry />} />
+            <Route path="/accounts/payment" element={<PaymentEntry />} />
+            <Route path="/accounts/cashbook" element={<CashBook />} />
+            <Route path="/accounts/bankbook" element={<BankBook />} />
+            <Route path="/accounts/ledger" element={<Ledger />} />
+            <Route path="/accounts/outstanding" element={<Outstanding />} />
+            <Route path="/customers" element={<CustomerList />} />
+            <Route path="/customers/new" element={<CustomerForm />} />
+            <Route path="/customers/:id" element={<CustomerDetail />} />
+            <Route path="/customers/:id/edit" element={<CustomerForm />} />
+          </Route>
+          {/* <Route
+            path="/billing-new"
+            element={
+              <ProtectedRoute>
+                <BillingModule />
+              </ProtectedRoute>
+            }
+          /> */}
+          <Route
+            path="/branch-devices"
+            element={
+              <ProtectedRoute>
+                <BranchDevices />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/support"
+            element={
+              <ProtectedRoute>
+                <Support navigate={navigate} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path='/logout'
+            element={
+              <Logout />
+            }
+          />
+          <Route path="*" element={userDetails ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />
+        </Routes>
+      </div>
     </>
   );
 }

@@ -1,7 +1,7 @@
 import api from './axios';
 import { saveBatchesBulk, saveCustomersBulk, saveProductsBulk, saveTransactionsBulk } from '../core/db';
-import { saveProductsCache } from './offlineProducts';
 import { replaceAllOrders } from '../db/ordersDb';
+import { runDeltaSync } from './deltaSync';
 
 const extractProductsPayload = (response) => {
   const payload = response?.data?.data ?? response?.data?.products ?? response?.data ?? [];
@@ -32,29 +32,7 @@ const normalizeProduct = (product) => {
 
 export const preloadProductsToIndexedDb = async (options = {}) => {
   const branchId = options?.branchId;
-  console.log('\u{1F4E6} Fetching products from API');
-  const headers =
-    branchId && branchId !== 'all' ? { 'x-branch-id': branchId } : undefined;
-  const res = await api.get('/products/cache-db', { headers });
-  const payload = res?.data || {};
-  const products = extractProductsPayload(res);
-  const batches = Array.isArray(payload?.batches) ? payload.batches : [];
-  if (products.length) {
-    saveProductsCache(products);
-  }
-  const normalizedProducts = products.map((product) => normalizeProduct(product));
-  // Some tenants/products may not have barcodes. Cache whatever we can instead
-  // of failing the whole preload.
-  const safeProducts = normalizedProducts.filter(Boolean);
-  if (!safeProducts.length) return;
-  console.log('\u{1F4E5} Bulk inserting products');
-  const savedCount = await saveProductsBulk(safeProducts);
-  if (batches.length) {
-    await saveBatchesBulk(batches).catch(() => {});
-  } else {
-    await preloadBatchesToIndexedDb({ branchId }).catch(() => {});
-  }
-  console.log('\u2705 IndexedDB fully loaded', savedCount);
+  await runDeltaSync({ branchId }).catch(() => {});
 };
 
 const extractCustomersPayload = (response) => {
@@ -139,19 +117,11 @@ const extractBatchesPayload = (response) => {
 
 export const preloadBatchesToIndexedDb = async (options = {}) => {
   const branchId = options?.branchId;
-  const headers =
-    branchId && branchId !== 'all' ? { 'x-branch-id': branchId } : undefined;
-  const res = await api.get('/batches', { headers });
-  const batches = extractBatchesPayload(res);
-  if (!batches.length) return 0;
-  return await saveBatchesBulk(batches);
+  await runDeltaSync({ branchId }).catch(() => {});
+  return 0;
 };
 
 export const preloadAllCaches = async (options = {}) => {
   const branchId = options?.branchId;
-  await preloadProductsToIndexedDb({ branchId }).catch(() => {});
-  await preloadBatchesToIndexedDb({ branchId }).catch(() => {});
-  await preloadCustomersToIndexedDb().catch(() => {});
-  await preloadOrdersToIndexedDb().catch(() => {});
-  await preloadTransactionsToIndexedDb().catch(() => {});
+  await runDeltaSync({ branchId }).catch(() => {});
 };

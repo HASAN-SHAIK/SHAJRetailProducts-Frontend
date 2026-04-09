@@ -5,12 +5,25 @@ import api from '../../utils/axios';
 import { Modal } from 'bootstrap';
 import AddProductModalComponent from './AddModalComponent/AddProductModalComponent';
 import { useSelector } from 'react-redux';
-import { saveProductsCache } from '../../utils/offlineProducts';
 import { preloadAllCaches, preloadProductsToIndexedDb } from '../../utils/indexedDb';
-import { getAllProducts, updateProduct, updateProductsBulk, getProductByBarcode } from '../../core/db';
+import {
+  addOfflineImport,
+  addSyncQueueItem,
+  getAllProducts,
+  getProductByBarcode,
+  getOfflineImports,
+  getSyncQueueItems,
+  updateProduct,
+  updateProductsBulk,
+  updateSyncQueueItem,
+} from '../../core/db';
+import { runDeltaSync } from '../../utils/deltaSync';
 import { usePopup } from '../common/PopUp/PopupProvider';
 import EditProductModal from './EditOrderModal/EditProductModal';
 import { useBranchStore } from '../../store/branchStore';
+import { createOfflineProduct, deleteOfflineProduct, updateOfflineProduct } from '../../utils/offlineProducts';
+import { syncAllInventory } from '../../utils/inventorySync';
+import { syncAllImports } from '../../utils/importSync';
 
 const ProductsPage = ({ navigate }) => {
 const IMPORT_CHUNK_SIZE = 100;
@@ -18,6 +31,7 @@ const IMPORT_CHUNK_SIZE = 100;
  const [productUpdateFlag, setProductUpdateFlag] = useState(false);
  const userDetails = useSelector((state) => state.user.userDetails);
  const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
+ const effectiveBranchId = selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null;
  const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
  const features = tenantConfig?.features || tenantConfig?.plan_features || tenantConfig || {};
  const weightBasedEnabled =
@@ -82,12 +96,7 @@ const IMPORT_CHUNK_SIZE = 100;
       }
       if (payload.expiry_date === '') payload.expiry_date = null;
       if (payload.batch_number === '') payload.batch_number = null;
-      const createRes = await api.post('/products', payload); // Your endpoint
-      const createdProduct = extractProductFromResponse(createRes);
-      if (createdProduct) {
-        updateProduct(createdProduct).catch(() => {});
-      }
-      // Optional: show success toast, close modal, refresh product list
+      await createOfflineProduct(payload);
       setFormData({
         product_name: '',
         company: '',
@@ -108,11 +117,9 @@ const IMPORT_CHUNK_SIZE = 100;
       const modalElement = document.getElementById('addProductModal');
       const modal = Modal.getInstance(modalElement);
       modal.hide();
-      showPopup("Product added successfully!", "Success");
+      showPopup("Product saved offline. Will sync in background.", "Offline");
       setForceApiFetch(true);
-      // Toggle to ensure `fetchProducts()` runs even if the flag is already truthy.
       setProductUpdateFlag((prev) => !prev);
-      // Keep `shajretaildb` (IndexedDB) in sync immediately.
       if (navigator.onLine) {
         preloadProductsToIndexedDb({ branchId: selectedBranchId }).catch(() => {});
       }
@@ -203,10 +210,31 @@ const IMPORT_CHUNK_SIZE = 100;
   const [importPreviewError, setImportPreviewError] = useState('');
   const [importParsing, setImportParsing] = useState(false);
   const [autoCategoryEnabled, setAutoCategoryEnabled] = useState(true);
+  const [syncingInventory, setSyncingInventory] = useState(false);
+  const [importHistory, setImportHistory] = useState([]);
+  const [importHistoryLoading, setImportHistoryLoading] = useState(false);
 
   useEffect(() => {
     fetchCategories();
   }, []);
+
+  const loadImportHistory = useCallback(async () => {
+    setImportHistoryLoading(true);
+    try {
+      const list = await getOfflineImports();
+      const safe = Array.isArray(list) ? list : [];
+      safe.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      setImportHistory(safe);
+    } catch {
+      setImportHistory([]);
+    } finally {
+      setImportHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadImportHistory();
+  }, [loadImportHistory]);
 
   useEffect(() => {
     if (!formData.product_name) {
@@ -293,18 +321,6 @@ const IMPORT_CHUNK_SIZE = 100;
     setForceApiFetch(true);
     fetchProducts();
   }, [selectedBranchId]);
-
-  const buildParams = useCallback(() => {
-    const params = {
-      page: pagination.page,
-      limit: pagination.limit,
-      search: searchQuery || undefined,
-      category_id: selectedCategory || undefined,
-      sort_by: sortBy,
-      sort_order: sortOrder,
-    };
-    return params;
-  }, [pagination.page, pagination.limit, searchQuery, selectedCategory, sortBy, sortOrder]);
 
   const normalizeValue = (value) => String(value ?? '').toLowerCase();
   const normalizeNumericInput = (value) => {
@@ -460,41 +476,29 @@ const IMPORT_CHUNK_SIZE = 100;
     setIsLoading(true);
     setErrorMessage('');
     try {
-      if (!forceApiFetch) {
-        const localAll = await getAllProducts();
-        const localList = Array.isArray(localAll) ? localAll : [];
-        if (localList.length > 0) {
-          const localFiltered = applyLocalFilters(localList);
-          if (localFiltered.length > 0 || (!searchQuery && !selectedCategory)) {
-            const { paged, totalRecords, totalPages, page } = paginateItems(localFiltered);
-            setProducts(paged);
-            setDataSource('indexeddb');
-            setCacheMeta({ total: localList.length, shown: paged.length });
-            setPagination((prev) => ({
-              ...prev,
-              page,
-              total_pages: totalPages,
-              total_records: totalRecords,
-            }));
-            return;
-          }
-        }
+      let localAll = await getAllProducts();
+      let localList = (Array.isArray(localAll) ? localAll : []).filter(
+        (item) => !item?.is_deleted
+      );
+
+      if (navigator.onLine && (forceApiFetch || localList.length === 0)) {
+        await runDeltaSync({ branchId: effectiveBranchId });
+        localAll = await getAllProducts();
+        localList = (Array.isArray(localAll) ? localAll : []).filter(
+          (item) => !item?.is_deleted
+        );
       }
 
-      const response = await api.get('/products', { params: buildParams() });
-      const payload = response?.data || {};
-      const list = Array.isArray(payload.products) ? payload.products : [];
-      setProducts(list);
-      setDataSource('server');
-      setCacheMeta({ total: payload.pagination?.total_records ?? list.length, shown: list.length });
-      saveProductsCache(list);
-      setForceApiFetch(false);
+      const localFiltered = applyLocalFilters(localList);
+      const { paged, totalRecords, totalPages, page } = paginateItems(localFiltered);
+      setProducts(paged);
+      setDataSource('indexeddb');
+      setCacheMeta({ total: localList.length, shown: paged.length });
       setPagination((prev) => ({
         ...prev,
-        page: payload.pagination?.page || prev.page,
-        limit: payload.pagination?.limit || prev.limit,
-        total_pages: payload.pagination?.total_pages || 1,
-        total_records: payload.pagination?.total_records || 0,
+        page,
+        total_pages: totalPages,
+        total_records: totalRecords,
       }));
     } catch (err) {
       if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
@@ -573,10 +577,6 @@ const IMPORT_CHUNK_SIZE = 100;
     if (savingBulk) return;
     const pendingKeys = Object.keys(editedMap);
     if (!pendingKeys.length) return;
-    if (!navigator.onLine || window.__serverOffline) {
-      showPopup('You are offline. Please reconnect to save changes.', 'Offline');
-      return;
-    }
     const hydratedEntries = await Promise.all(
       pendingKeys.map(async (key) => {
         const entry = editedMap[key];
@@ -622,6 +622,7 @@ const IMPORT_CHUNK_SIZE = 100;
         if (Object.prototype.hasOwnProperty.call(entry, 'gst_percent')) {
           payload.gst_percentage = entry.gst_percent;
         }
+        if (!payload.id) return null;
         return Object.keys(payload).length ? payload : null;
       })
       .filter(Boolean);
@@ -630,27 +631,9 @@ const IMPORT_CHUNK_SIZE = 100;
 
     setSavingBulk(true);
     try {
-      await api.put('/products/bulk-update', { products: updates });
-      const updatedItemsForDb = hydratedEntries
-        .map((item) => {
-          if (!item?.entry) return null;
-          const entry = item.entry;
-          const base = entry.source ? { ...entry.source } : {};
-            if (Object.prototype.hasOwnProperty.call(entry, 'purchase_price')) {
-              base.purchase_price = entry.purchase_price;
-            }
-            if (Object.prototype.hasOwnProperty.call(entry, 'mrp')) {
-              base.mrp = entry.mrp;
-            }
-            if (Object.prototype.hasOwnProperty.call(entry, 'selling_price')) {
-              base.selling_price = entry.selling_price;
-            }
-          if (Object.prototype.hasOwnProperty.call(entry, 'gst_percent')) {
-            base.gst_percentage = entry.gst_percent;
-          }
-          return base;
-        })
-        .filter((item) => item && (item.barcode || item.id));
+      for (const update of updates) {
+        await updateOfflineProduct(update);
+      }
       setProducts((prev) =>
         prev.map((product) => {
           const key = getProductKey(product);
@@ -672,10 +655,7 @@ const IMPORT_CHUNK_SIZE = 100;
           return updated;
         })
       );
-      if (updatedItemsForDb.length) {
-        updateProductsBulk(updatedItemsForDb).catch(() => {});
-      }
-      showPopup('Products updated successfully!', 'Success');
+      showPopup('Products saved offline. Will sync in background.', 'Offline');
       setEditedMap({});
       setForceApiFetch(true);
       setProductUpdateFlag((prev) => !prev);
@@ -684,6 +664,18 @@ const IMPORT_CHUNK_SIZE = 100;
       showPopup('Failed to save product updates.', 'Error');
     } finally {
       setSavingBulk(false);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    if (syncingInventory) return;
+    setSyncingInventory(true);
+    try {
+      await syncAllInventory();
+      setForceApiFetch(true);
+      setProductUpdateFlag((prev) => !prev);
+    } finally {
+      setSyncingInventory(false);
     }
   };
 
@@ -782,13 +774,11 @@ const IMPORT_CHUNK_SIZE = 100;
     try {
       setIsEditingProduct(true);
       const payload = barcodeEnabled ? updatedProduct : (({ barcode, ...rest }) => rest)(updatedProduct);
-      const response = await api.put(`/products/${updatedProduct.id}`, payload);
-      if (response.status === 200) {
-        showPopup('Product updated successfully!', 'Success');
-        setEditTarget(null);
-        setForceApiFetch(true);
-        setProductUpdateFlag((prev) => !prev);
-      }
+      await updateOfflineProduct(payload);
+      showPopup('Product saved offline. Will sync in background.', 'Offline');
+      setEditTarget(null);
+      setForceApiFetch(true);
+      setProductUpdateFlag((prev) => !prev);
     } catch (error) {
       console.error('Failed to update product:', error);
       showPopup('Error updating product', 'Error');
@@ -812,8 +802,8 @@ const IMPORT_CHUNK_SIZE = 100;
     if (!productId) return;
     setDeletingId(productId);
     try {
-      await api.delete(`/products/${productId}`);
-      showPopup('Product deleted', 'Success');
+      await deleteOfflineProduct(productId);
+      showPopup('Product deleted. Will sync in background.', 'Offline');
       closeDeleteModal();
       setForceApiFetch(true);
       setProductUpdateFlag((prev) => !prev);
@@ -1303,60 +1293,174 @@ const IMPORT_CHUNK_SIZE = 100;
       return;
     }
 
-    const chunkRows = (rows, size) => {
-      const chunks = [];
-      for (let i = 0; i < rows.length; i += size) {
-        chunks.push(rows.slice(i, i + size));
+    const makeUuid = () => {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
       }
-      return chunks;
+      return `import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     };
 
     setImporting(true);
     setImportError('');
     try {
-      const chunks = chunkRows(payloadRows, IMPORT_CHUNK_SIZE);
-      const aggregate = {
-        total: payloadRows.length,
-        inserted: 0,
-        updated: 0,
-        skipped: 0,
-        errors: []
-      };
+      const importId = makeUuid();
+      const createdAt = new Date().toISOString();
+      const localProducts = await getAllProducts();
+      const productsList = Array.isArray(localProducts) ? localProducts : [];
+      const barcodeMap = new Map(
+        productsList
+          .filter((item) => item?.barcode)
+          .map((item) => [String(item.barcode), item])
+      );
+      const nameMap = new Map(
+        productsList
+          .filter((item) => item?.name || item?.product_name)
+          .map((item) => [String(item.name || item.product_name).toLowerCase(), item])
+      );
 
-      for (let idx = 0; idx < chunks.length; idx += 1) {
-        const chunk = chunks[idx];
-        const response = await api.post('/products/import-rows', { rows: chunk });
-        const summary =
-          response?.data?.summary ||
-          response?.data?.data?.summary ||
-          response?.data?.data ||
-          response?.data?.summary ||
+      const items = [];
+      const batchesMap = new Map();
+      const productsToUpsert = new Map();
+
+      payloadRows.forEach((row) => {
+        const qty = Number(row.stock_quantity || 0);
+        const name = String(row.name || '').trim();
+        const barcode = row.barcode ? String(row.barcode).trim() : null;
+        let existing =
+          (barcode && barcodeMap.get(barcode)) ||
+          (name && nameMap.get(name.toLowerCase())) ||
           null;
 
-        if (summary) {
-          aggregate.inserted += Number(summary.inserted || 0);
-          aggregate.updated += Number(summary.updated || 0);
-          aggregate.skipped += Number(summary.skipped || 0);
-          if (Array.isArray(summary.errors) && summary.errors.length > 0) {
-            aggregate.errors.push(
-              ...summary.errors.map((entry) => ({
-                row: entry?.row,
-                message: entry?.message || 'Import failed'
-              }))
-            );
-          }
+        if (!existing) {
+          const tempId = `temp:${makeUuid()}`;
+          existing = {
+            id: tempId,
+            name,
+            product_name: name,
+            barcode: barcode || `id:${tempId}`,
+            company: row.company || null,
+            category: row.category || null,
+            hsn_code: row.hsn_code || null,
+            gst_percentage: row.gst_percentage ?? null,
+            selling_price: row.selling_price ?? null,
+            purchase_price: row.purchase_price ?? null,
+            mrp: row.mrp ?? null,
+            stock_quantity: 0,
+            branch_id: effectiveBranchId || null,
+            is_batch_enabled: row.batch_number ? 1 : 0,
+          };
         }
+
+        const updated = {
+          ...existing,
+          name: name || existing.name,
+          product_name: name || existing.product_name,
+          company: row.company ?? existing.company ?? null,
+          category: row.category ?? existing.category ?? null,
+          hsn_code: row.hsn_code ?? existing.hsn_code ?? null,
+          gst_percentage: row.gst_percentage ?? existing.gst_percentage ?? null,
+          selling_price: row.selling_price ?? existing.selling_price ?? null,
+          purchase_price: row.purchase_price ?? existing.purchase_price ?? null,
+          mrp: row.mrp ?? existing.mrp ?? null,
+          stock_quantity: Number(existing.stock_quantity || 0) + qty,
+          branch_id: existing.branch_id ?? effectiveBranchId ?? null,
+          is_batch_enabled: row.batch_number ? 1 : existing.is_batch_enabled ?? 0,
+        };
+
+        productsToUpsert.set(updated.id, updated);
+
+        items.push({
+          id: makeUuid(),
+          importId,
+          productId: updated.id,
+          productName: updated.name || updated.product_name || name,
+          qty: qty,
+          costPrice: row.purchase_price ?? null,
+          mrp: row.mrp ?? null,
+          batchNo: row.batch_number || null,
+          expiryDate: row.expiry_date || null,
+          barcode: barcode || updated.barcode || null,
+          company: row.company || updated.company || null,
+          category: row.category || updated.category || null,
+          hsnCode: row.hsn_code || updated.hsn_code || null,
+          gstPercent: row.gst_percentage ?? updated.gst_percentage ?? null,
+          sellingPrice: row.selling_price ?? updated.selling_price ?? null,
+        });
+
+        const batchKey = `${updated.id}::${row.batch_number || 'no-batch'}::${row.expiry_date || ''}`;
+        const existingBatch = batchesMap.get(batchKey);
+        const nextBatch = {
+          id: existingBatch?.id || batchKey,
+          productId: updated.id,
+          batchNo: row.batch_number || null,
+          qty: (existingBatch?.qty || 0) + qty,
+          costPrice: row.purchase_price ?? existingBatch?.costPrice ?? null,
+          mrp: row.mrp ?? existingBatch?.mrp ?? null,
+          expiryDate: row.expiry_date || existingBatch?.expiryDate || null,
+        };
+        batchesMap.set(batchKey, nextBatch);
+      });
+
+      const importEntry = {
+        id: importId,
+        createdAt,
+        totalItems: items.length,
+        status: 'pending',
+      };
+
+      await addOfflineImport({
+        importEntry,
+        items,
+        batches: Array.from(batchesMap.values()),
+      });
+
+      if (productsToUpsert.size > 0) {
+        await updateProductsBulk(Array.from(productsToUpsert.values()));
       }
 
-      setImportResult(aggregate);
-      showPopup('Import completed.', 'Success');
+      await addSyncQueueItem({
+        type: 'import',
+        refId: importId,
+        payload: {
+          importId,
+          createdAt,
+          items: items.map((item) => ({
+            productId: item.productId,
+            name: item.productName,
+            qty: item.qty,
+            costPrice: item.costPrice,
+            mrp: item.mrp,
+            batchNo: item.batchNo,
+            expiryDate: item.expiryDate,
+            barcode: item.barcode,
+            company: item.company,
+            category: item.category,
+            hsnCode: item.hsnCode,
+            gstPercent: item.gstPercent,
+            sellingPrice: item.sellingPrice,
+          })),
+          branchId: effectiveBranchId || undefined,
+        },
+        status: 'pending',
+        retryCount: 0,
+      });
+
+      setImportResult({
+        total: items.length,
+        inserted: items.length,
+        updated: 0,
+        skipped: 0,
+        errors: [],
+      });
+      showPopup('Imported Successfully', 'Offline');
       setForceApiFetch(true);
       setProductUpdateFlag((prev) => !prev);
+      loadImportHistory();
       if (navigator.onLine) {
-        preloadProductsToIndexedDb({ branchId: selectedBranchId }).catch(() => {});
+        syncAllImports().catch(() => {});
       }
     } catch (err) {
-      const message = err?.response?.data?.message || 'Import failed.';
+      const message = err?.message || 'Import failed.';
       setImportError(message);
       showPopup(message, 'Error');
     } finally {
@@ -1385,6 +1489,27 @@ const IMPORT_CHUNK_SIZE = 100;
     importMissingRequired > 0
       ? `Please fill required fields. Missing in ${importMissingRequired} row(s).`
       : '';
+
+  const handleRetryImport = async (importId) => {
+    if (!importId) return;
+    try {
+      const queue = await getSyncQueueItems({ type: 'import' });
+      const entry = queue.find((item) => item.refId === importId || item.importId === importId);
+      if (entry) {
+        await updateSyncQueueItem({
+          ...entry,
+          status: 'pending',
+          retryCount: Number(entry.retryCount || 0),
+        });
+      }
+      await loadImportHistory();
+      if (navigator.onLine) {
+        syncAllImports().catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const renderEditableCell = (product, field, formatter) => {
     const key = getProductKey(product);
@@ -1488,6 +1613,14 @@ const IMPORT_CHUNK_SIZE = 100;
             >
               Refresh from Server
             </button>
+            <button
+              className="btn btn-outline-secondary"
+              onClick={handleSyncNow}
+              type="button"
+              disabled={syncingInventory}
+            >
+              {syncingInventory ? 'Syncing...' : 'Sync Now'}
+            </button>
             {userDetails.role === 'admin' && (
               <button className="btn btn-outline-info" onClick={() => setImportModalOpen(true)}>
                 Import Products
@@ -1580,6 +1713,7 @@ const IMPORT_CHUNK_SIZE = 100;
                   </th>
                   <th>Expiry Date</th>
                   <th>Status</th>
+                  <th>Sync</th>
                   {userDetails.role === 'admin' && <th>Actions</th>}
                 </tr>
               </thead>
@@ -1595,19 +1729,21 @@ const IMPORT_CHUNK_SIZE = 100;
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
+                    <td><span className="skeleton-block" /></td>
                     {userDetails.role === 'admin' && <td><span className="skeleton-block" /></td>}
                   </tr>
                 ))}
                 {!isLoading && errorMessage && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 10 : 9} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 12 : 11} className="empty-state">
                       {errorMessage}
                     </td>
                   </tr>
                 )}
                 {!isLoading && !errorMessage && products.length === 0 && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 10 : 9} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 12 : 11} className="empty-state">
                       No products found.
                     </td>
                   </tr>
@@ -1644,6 +1780,14 @@ const IMPORT_CHUNK_SIZE = 100;
                         <span className={`stock-badge ${lowStock ? 'low' : 'ok'}`}>
                           {lowStock ? 'Low Stock' : 'In Stock'}
                         </span>
+                      </td>
+                      <td>
+                        {(() => {
+                          const status = (displayProduct.sync_status || displayProduct.syncStatus || 'synced').toLowerCase();
+                          if (status === 'pending') return '🟡 Pending';
+                          if (status === 'failed') return '🔴 Failed';
+                          return '🟢 Synced';
+                        })()}
                       </td>
                       {userDetails.role === 'admin' && (
                         <td className="actions-cell">
@@ -1691,6 +1835,73 @@ const IMPORT_CHUNK_SIZE = 100;
             >
               Next
             </button>
+          </div>
+        </div>
+
+        <div className="products-card import-history-card">
+          <div className="import-history-header">
+            <div>
+              <h4>Import History</h4>
+              <p className="import-history-subtitle">Offline-first imports with sync status.</p>
+            </div>
+            <button
+              className="btn btn-outline-primary btn-sm"
+              type="button"
+              onClick={() => syncAllImports().then(loadImportHistory)}
+              disabled={!navigator.onLine}
+            >
+              Sync Now
+            </button>
+          </div>
+          <div className="products-table-wrapper">
+            <table className="products-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Items</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importHistoryLoading && (
+                  <tr>
+                    <td colSpan={4} className="empty-state">Loading...</td>
+                  </tr>
+                )}
+                {!importHistoryLoading && importHistory.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="empty-state">No imports yet.</td>
+                  </tr>
+                )}
+                {!importHistoryLoading && importHistory.map((entry) => {
+                  const status = String(entry.status || 'pending').toLowerCase();
+                  return (
+                    <tr key={entry.id}>
+                      <td>{formatDate(entry.createdAt)}</td>
+                      <td>{entry.totalItems || 0}</td>
+                      <td>
+                        {status === 'synced' && <span className="import-status synced">🟢 Synced</span>}
+                        {status === 'failed' && <span className="import-status failed">🔴 Failed</span>}
+                        {status !== 'synced' && status !== 'failed' && (
+                          <span className="import-status pending">🟡 Pending Sync</span>
+                        )}
+                      </td>
+                      <td>
+                        {status === 'failed' && (
+                          <button
+                            className="btn btn-outline-warning btn-sm"
+                            onClick={() => handleRetryImport(entry.id)}
+                          >
+                            Retry
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
 

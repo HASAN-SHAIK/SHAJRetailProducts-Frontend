@@ -1,6 +1,7 @@
 .custom-navbar {
   position: relative;
   width: 100%;
+  min-width: 1100px;
   background: linear-gradient(120deg, rgba(11, 18, 33, 0.95), rgba(18, 32, 66, 0.9));
   padding: 0.85rem 1.5rem;
   margin: 0px !important;
@@ -19,7 +20,8 @@
   left: 0;
   right: 0;
   z-index: 2000;
-  height: var(--nav-height);
+  /* height: var(--nav-height); */
+  min-width: 1100px;
 }
 
 .nav-left {
@@ -88,6 +90,164 @@
   margin-left: 6px;
 }
 
+.nav-branch-control {
+  gap: 8px;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.nav-branch-label {
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.8);
+}
+
+.nav-branch-select {
+  min-width: 200px;
+  border-radius: 999px;
+  border: 1px solid rgba(125, 211, 252, 0.4);
+  background: rgba(15, 23, 42, 0.65);
+  color: #f8fafc;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.25);
+  padding: 6px 14px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.nav-branch-select:focus {
+  border-color: rgba(56, 189, 248, 0.7);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+  outline: none;
+}
+
+.nav-branch-select option {
+  color: #0f172a;
+}
+
+.nav-branch-dropdown {
+  position: relative;
+}
+
+.nav-branch-pill {
+  border-radius: 999px;
+  border: 1px solid rgba(125, 211, 252, 0.4);
+  background: rgba(15, 23, 42, 0.65);
+  color: white !important;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.25);
+  padding: 6px 16px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  min-width: 200px;
+  text-align: left;
+}
+
+.nav-branch-pill::after {
+  display: none;
+}
+
+.nav-branch-pill:hover,
+.nav-branch-pill:focus {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.7);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+  color: #ffffff;
+}
+
+.nav-branch-menu {
+  background: linear-gradient(120deg, rgba(11, 18, 33, 0.98), rgba(18, 32, 66, 0.98));
+  border: 1px solid rgba(125, 211, 252, 0.3);
+  border-radius: 14px;
+  padding: 6px;
+  width: 100%;
+  min-width: 100%;
+}
+
+.nav-branch-menu .dropdown-item {
+  color: #ffffff;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.nav-branch-menu .dropdown-item:hover,
+.nav-branch-menu .dropdown-item:focus {
+  background: rgba(56, 189, 248, 0.2);
+  color: #ffffff;
+}
+
+.nav-settings-dropdown {
+  position: relative;
+}
+
+.nav-settings-pill::after {
+  display: none;
+}
+
+.nav-settings-menu {
+  background: linear-gradient(120deg, rgba(11, 18, 33, 0.98), rgba(18, 32, 66, 0.98));
+  border: 1px solid rgba(125, 211, 252, 0.3);
+  border-radius: 14px;
+  padding: 6px;
+  width: 100%;
+  min-width: 100%;
+}
+
+.nav-settings-menu .dropdown-item {
+  color: #ffffff;
+  border-radius: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+.nav-settings-menu .dropdown-item.text-danger {
+  color: #fca5a5 !important;
+}
+
+.nav-settings-menu .dropdown-item:hover,
+.nav-settings-menu .dropdown-item:focus {
+  background: rgba(56, 189, 248, 0.2);
+  color: #ffffff;
+}
+
+.nav-toggle {
+  display: none;
+  width: 44px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 211, 252, 0.4);
+  background: rgba(15, 23, 42, 0.6);
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex-direction: column;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.nav-toggle span {
+  display: block;
+  width: 22px;
+  height: 2px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.nav-toggle.is-open span:nth-child(1) {
+  transform: translateY(6px) rotate(45deg);
+}
+
+.nav-toggle.is-open span:nth-child(2) {
+  opacity: 0;
+}
+
+.nav-toggle.is-open span:nth-child(3) {
+  transform: translateY(-6px) rotate(-45deg);
+}
+
 span.m-1{
   font-size: 1.5rem;
 }
@@ -133,20 +293,49 @@ span.m-1{
 }
 
 @media (max-width: 992px) {
+  .custom-navbar,
+  .navbar-style {
+    min-width: 100%;
+  }
   .custom-navbar {
     padding: 0.75rem 1rem;
   }
 
+  .nav-toggle {
+    display: inline-flex;
+  }
+
   .nav-actions {
     width: 100%;
-    display: flex;
+    display: none;
     flex-wrap: wrap;
     gap: 10px;
     justify-content: flex-start;
   }
 
+  .nav-actions.is-open {
+    display: flex;
+  }
+
   .nav-actions .btn {
     margin-left: 0;
+  }
+
+  .nav-branch-control {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .nav-branch-select {
+    flex: 1;
+  }
+
+  .nav-branch-pill {
+    width: 100%;
+  }
+
+  .nav-settings-dropdown {
+    width: 100%;
   }
 
   .nav-cta {
