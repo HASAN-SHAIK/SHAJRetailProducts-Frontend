@@ -398,7 +398,7 @@ const IMPORT_CHUNK_SIZE = 100;
       } else {
         existing[field] = normalized;
       }
-      const hasEdits = ['purchase_price', 'mrp', 'selling_price', 'gst_percent'].some((entry) =>
+      const hasEdits = ['purchase_price', 'mrp', 'selling_price', 'gst_percent', 'stock_quantity'].some((entry) =>
         Object.prototype.hasOwnProperty.call(existing, entry)
       );
       if (!hasEdits) {
@@ -622,6 +622,9 @@ const IMPORT_CHUNK_SIZE = 100;
         if (Object.prototype.hasOwnProperty.call(entry, 'gst_percent')) {
           payload.gst_percentage = entry.gst_percent;
         }
+        if (Object.prototype.hasOwnProperty.call(entry, 'stock_quantity')) {
+          payload.stock_quantity = entry.stock_quantity;
+        }
         return Object.keys(payload).length ? payload : null;
       })
       .filter(Boolean);
@@ -648,6 +651,9 @@ const IMPORT_CHUNK_SIZE = 100;
           if (Object.prototype.hasOwnProperty.call(entry, 'gst_percent')) {
             base.gst_percentage = entry.gst_percent;
           }
+          if (Object.prototype.hasOwnProperty.call(entry, 'stock_quantity')) {
+            base.stock_quantity = entry.stock_quantity;
+          }
           return base;
         })
         .filter((item) => item && (item.barcode || item.id));
@@ -668,6 +674,9 @@ const IMPORT_CHUNK_SIZE = 100;
             }
           if (Object.prototype.hasOwnProperty.call(draft, 'gst_percent')) {
             updated.gst_percentage = draft.gst_percent;
+          }
+          if (Object.prototype.hasOwnProperty.call(draft, 'stock_quantity')) {
+            updated.stock_quantity = draft.stock_quantity;
           }
           return updated;
         })
@@ -1616,7 +1625,8 @@ const IMPORT_CHUNK_SIZE = 100;
                   const extra = extraDetailsByBarcode?.[product?.barcode] || {};
                   const displayProduct = mergeNonEmptyFields(product, extra);
                   const rowKey = getProductKey(displayProduct);
-                  const stock = Number(displayProduct.stock_quantity ?? displayProduct.quantity ?? 0);
+                  const draftStockValue = getDraftValue(displayProduct, 'stock_quantity');
+                  const stock = Number(draftStockValue ?? displayProduct.quantity ?? 0);
                   const minStock = Number(displayProduct.min_stock_level ?? 0);
                   const lowStock = minStock > 0 && stock <= minStock;
                   return (
@@ -1638,7 +1648,12 @@ const IMPORT_CHUNK_SIZE = 100;
                       <td>{renderEditableCell(displayProduct, 'purchase_price', formatMoney)}</td>
                       <td>{renderEditableCell(displayProduct, 'selling_price', formatMoney)}</td>
                       <td>{renderEditableCell(displayProduct, 'gst_percent', formatPercent)}</td>
-                      <td>{stock}</td>
+                      <td>
+                        {renderEditableCell(displayProduct, 'stock_quantity', (value) => {
+                          if (value === null || value === undefined || value === '') return '-';
+                          return String(value);
+                        })}
+                      </td>
                       <td>{formatDate(displayProduct.expiry_date || displayProduct.expiryDate)}</td>
                       <td>
                         <span className={`stock-badge ${lowStock ? 'low' : 'ok'}`}>
