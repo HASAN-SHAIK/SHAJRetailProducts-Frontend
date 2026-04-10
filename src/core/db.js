@@ -1007,6 +1007,19 @@ export const replaceCustomerIdReferences = async (oldId, newId) => {
   } catch {
     // ignore offline order remap errors
   }
+  try {
+    const cachedOrders = await db.orders.toArray();
+    if (cachedOrders.length) {
+      const updatedOrders = cachedOrders.map((order) => {
+        const orderCustomerId = order?.customer_id ?? order?.customerId ?? null;
+        if (String(orderCustomerId) !== String(oldId)) return order;
+        return { ...order, customer_id: newId };
+      });
+      await db.orders.bulkPut(updatedOrders);
+    }
+  } catch {
+    // ignore cached order remap errors
+  }
 };
 
 export const getOfflinePurchaseReturns = async (status = null) => {

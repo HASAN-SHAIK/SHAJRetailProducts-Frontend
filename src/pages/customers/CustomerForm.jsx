@@ -12,6 +12,7 @@ const defaultForm = {
   shop_name: '',
   gst_number: '',
   credit_limit: '',
+  current_balance: '',
   address: '',
   location: '',
   notes: '',
@@ -90,10 +91,23 @@ const CustomerForm = () => {
     setError('');
     try {
       const payload = { ...form };
+      let savedCustomer = null;
+      let response = null;
       if (isEdit) {
-        await api.put(`/customers/${id}`, payload);
+        response = await api.put(`/customers/${id}`, payload);
+        savedCustomer = response?.data?.data?.customer || response?.data?.customer || response?.data?.data || null;
       } else {
-        await api.post('/customers', payload);
+        response = await api.post('/customers', payload);
+        savedCustomer = response?.data?.data?.customer || response?.data?.customer || response?.data?.data || null;
+      }
+      if (!savedCustomer) {
+        const possibleId = response?.data?.data?.id || response?.data?.id || null;
+        if (possibleId) {
+          savedCustomer = { ...payload, id: possibleId };
+        }
+      }
+      if (savedCustomer) {
+        upsertCustomersBulk([savedCustomer]).catch(() => {});
       }
       navigate('/customers');
     } catch (err) {
@@ -143,12 +157,16 @@ const CustomerForm = () => {
                   GST Number
                   <input className="form-control form-control-sm billing-input" value={form.gst_number || ''} onChange={handleChange('gst_number')} />
                 </label>
-                <label className="billing-label">
-                  Credit Limit
-                  <input className="form-control form-control-sm billing-input" type="number" value={form.credit_limit || ''} onChange={handleChange('credit_limit')} />
-                </label>
               </>
             )}
+            <label className="billing-label">
+              Credit Limit
+              <input className="form-control form-control-sm billing-input" type="number" value={form.credit_limit || ''} onChange={handleChange('credit_limit')} />
+            </label>
+            <label className="billing-label">
+              Current Balance
+              <input className="form-control form-control-sm billing-input" type="number" value={form.current_balance || ''} onChange={handleChange('current_balance')} />
+            </label>
             <label className="billing-label">
               Address
               <input className="form-control form-control-sm billing-input" value={form.address || ''} onChange={handleChange('address')} />

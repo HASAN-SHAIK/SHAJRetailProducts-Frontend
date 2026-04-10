@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../utils/axios';
 import { getCustomerById, upsertCustomersBulk } from '../../core/db';
+import { getCachedOrdersByCustomer, upsertOrders } from '../../db/ordersDb';
 import './Customers.css';
 
 const CustomerDetail = () => {
@@ -23,7 +24,8 @@ const CustomerDetail = () => {
     setError('');
     const cached = await getCustomerById(resolveCustomerId(id));
     if (cached) {
-      setData({ customer: cached, orders: [], payments: [] });
+      const cachedOrders = await getCachedOrdersByCustomer(cached);
+      setData({ customer: cached, orders: cachedOrders, payments: [] });
     }
     if (!navigator.onLine || (cached && !forceRemote)) {
       setLoading(false);
@@ -35,6 +37,9 @@ const CustomerDetail = () => {
       setData(payload);
       if (payload?.customer) {
         upsertCustomersBulk([payload.customer]).catch(() => {});
+      }
+      if (Array.isArray(payload?.orders) && payload.orders.length) {
+        upsertOrders(payload.orders).catch(() => {});
       }
     } catch {
       if (!cached) {

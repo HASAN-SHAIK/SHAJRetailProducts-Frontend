@@ -258,6 +258,12 @@ const buildLocalOrderFromEntry = (entry) => {
     payload.total_amount ??
     payload.total_price ??
     computedSubtotal + computedGst;
+  const payments = Array.isArray(payload.payments) ? payload.payments : [];
+  const totalPaid = payments.reduce((sum, pay) => {
+    const amt = Number(pay?.amount_paid ?? pay?.amount ?? 0);
+    return Number.isFinite(amt) ? sum + amt : sum;
+  }, 0);
+  const paymentStatus = totalPaid >= totalAmount && totalAmount > 0 ? 'paid' : null;
   return {
     id: localId,
     local_id: entry.id,
@@ -270,11 +276,12 @@ const buildLocalOrderFromEntry = (entry) => {
     product_count: products.length,
     customer_name: payload.customer_name || null,
     customer_phone: payload.customer_phone || null,
+    customer_id: payload.customer_id || null,
     total_amount: totalAmount,
-    total_paid: 0,
+    total_paid: totalPaid || 0,
     returned_amount: 0,
     balance: null,
-    payment_status: null,
+    payment_status: paymentStatus,
     payment_mode: payload.payment_mode || payload.payment_method || payload.payment || null,
     order_status: payload.order_status || 'pending',
     is_gst_enabled: payload.is_gst_enabled === true,

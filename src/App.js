@@ -76,6 +76,7 @@ import Ledger from './pages/accounts/Ledger';
 import Outstanding from './pages/accounts/Outstanding';
 // import BillingModule from './modules/billing';
 import BranchDevices from './pages/BranchDevices';
+import SetupScreen from './pages/SetupScreen';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
@@ -96,9 +97,14 @@ function App() {
   const [serverOffline, setServerOffline] = useState(
     typeof window !== 'undefined' && window.__serverOffline === true
   );
+  const [setupInProgress, setSetupInProgress] = useState(false);
+  const [setupReady, setSetupReady] = useState(false);
   const [tenantBanner, setTenantBanner] = useState(null);
   const bannerFetchRef = useRef({ userId: null, inFlight: false });
   const preloadOnceRef = useRef(false);
+  const setupInProgressRef = useRef(false);
+  const setupDidRunRef = useRef(false);
+  const initialSyncDoneRef = useRef(false);
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const location = useLocation();
@@ -117,15 +123,156 @@ function App() {
     planFeatures.advanced_reports === true ||
     planFeatures.analytical_reports === true ||
     tenantConfig?.enable_reports !== false;
-
-useEffect(() => {
-  const checkSession = async () => {
-    try {
-      if (!navigator.onLine) return;
+  useEffect(() => {
+    const runSetup = async () => {
+      if (!userDetails) {
+        setSetupReady(false);
+        setupDidRunRef.current = false;
+        return;
+      }
       if (AUTH_PAGES.includes(location.pathname)) return;
-      const res = await api.get('/auth/getLogin');
-      dispatch(setUserDetails(res.data.user)); // optional (for username)
-      if (res?.data?.user) {
+      if (location.pathname === '/subscription-expired') return;
+      if (location.pathname !== '/setup') return;
+      if (setupInProgressRef.current || setupDidRunRef.current) return;
+      setupInProgressRef.current = true;
+      setupDidRunRef.current = true;
+      setSetupInProgress(true);
+      try {
+        await preloadAllCaches().catch((err) => {
+          console.error('IndexedDB preload failed', err);
+        });
+
+        if (tenantConfigStatus !== 'loading' && tenantConfigStatus !== 'loaded') {
+          dispatch(setTenantConfigStatus('loading'));
+        }
+        try {
+          const payload = await resolveTenantConfig();
+          dispatch(setTenantConfig(payload));
+          if (payload.subscription_status || payload.subscriptionStatus) {
+            dispatch(setSubscriptionStatus(payload.subscription_status || payload.subscriptionStatus));
+          }
+        } catch (err) {
+          const code = err?.response?.data?.code;
+          if (code === 'SUBSCRIPTION_INACTIVE') {
+            dispatch(setSubscriptionStatus('inactive'));
+            dispatch(setTenantConfigStatus('loaded'));
+            dispatch(setTenantConfig(null));
+          } else {
+            dispatch(setTenantConfigStatus('error'));
+            console.error('Failed to fetch tenant config', err);
+          }
+        }
+
+        if (navigator.onLine) {
+          try {
+            const payload = await getSettings();
+            const features = payload?.plan_features || payload?.features || payload || {};
+            setWhatsappEnabled(
+              payload?.whatsapp_bill_module === true ||
+              features?.whatsapp_bill_module === true ||
+              features?.WHATSAPP_BILL === true
+            );
+          } catch {
+            setWhatsappEnabled(false);
+          }
+        }
+
+        let branchIdForSync = selectedBranchId;
+        if (navigator.onLine) {
+          try {
+            const payload = await getBranches();
+            const list = payload?.branches || payload?.data?.branches || payload?.data || [];
+            const branches = Array.isArray(list) ? list : [];
+            setBranches(branches);
+            if (!selectedBranchId && branches.length > 0) {
+              if (userDetails?.role === 'admin') {
+                setSelectedBranchId('all', { confirmed: false, name: 'All' });
+                branchIdForSync = 'all';
+              } else {
+                setSelectedBranchId(branches[0].id, {
+                  confirmed: false,
+                  name: branches[0]?.name || ''
+                });
+                branchIdForSync = branches[0].id;
+              }
+            }
+          } catch {
+            // keep previous branches on error
+          }
+        }
+
+        if (navigator.onLine && branchIdForSync && branchIdForSync !== 'all') {
+          try {
+            await api.get('/auth/getLogin');
+          } catch {
+            // handled by interceptors
+          }
+        }
+
+        if (navigator.onLine && userDetails?.id) {
+          try {
+            const res = await api.get('/banner');
+            const payload = res?.data?.data || res?.data || {};
+            const rawDaysLeft = payload.days_left ?? payload.daysLeft;
+            const parsedDaysLeft = rawDaysLeft === null || rawDaysLeft === undefined ? null : Number(rawDaysLeft);
+            setTenantBanner({
+              enabled: payload.show_banner === true || payload.showBanner === true,
+              color: payload.bannerColor || payload.color || null,
+              daysLeft: Number.isFinite(parsedDaysLeft) ? parsedDaysLeft : null,
+            });
+          } catch (err) {
+            console.error('Failed to fetch tenant banner', err);
+            setTenantBanner(null);
+          }
+        }
+
+        if (navigator.onLine) {
+          try {
+            await syncAllCustomers();
+            await processOfflineQueue(api);
+            await processInventorySyncQueue();
+            await syncAllStaffExpenses();
+            await syncAllReturnsCorrections();
+            await syncAllImports();
+            await runDeltaSync({
+              branchId: branchIdForSync && branchIdForSync !== 'all' ? branchIdForSync : null
+            });
+            initialSyncDoneRef.current = true;
+          } catch (err) {
+            console.log('Offline order sync failed', err);
+          }
+        }
+      } finally {
+        setSetupInProgress(false);
+        setSetupReady(true);
+        setupInProgressRef.current = false;
+        navigate(isMobileDevice ? '/m/dashboard' : '/dashboard', { replace: true });
+      }
+    };
+    runSetup();
+  }, [
+    userDetails,
+    location.pathname,
+    tenantConfigStatus,
+    dispatch,
+    setWhatsappEnabled,
+    setBranches,
+    setSelectedBranchId,
+    selectedBranchId,
+    isMobileDevice,
+    navigate,
+  ]);
+
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        if (setupInProgress || setupDidRunRef.current) return;
+        if (!navigator.onLine) return;
+        if (AUTH_PAGES.includes(location.pathname)) return;
+        if (location.pathname === '/setup') return;
+        const res = await api.get('/auth/getLogin');
+        dispatch(setUserDetails(res.data.user)); // optional (for username)
+        if (res?.data?.user) {
         dispatch(setTenantIdentity({
           tenantId: res.data.user.tenant_id,
           role: res.data.user.role,
@@ -148,10 +295,11 @@ useEffect(() => {
   checkSession();
 }, [dispatch, location.pathname, navigate]);
 
-useEffect(() => {
-  if (!location.pathname.startsWith('/dashboard')) return;
-  if (preloadOnceRef.current) return;
-  preloadOnceRef.current = true;
+  useEffect(() => {
+    if (!location.pathname.startsWith('/dashboard')) return;
+    if (preloadOnceRef.current) return;
+    if (setupInProgress) return;
+    preloadOnceRef.current = true;
   preloadAllCaches().catch((err) => {
     console.error('IndexedDB preload failed', err);
   });
@@ -161,6 +309,7 @@ useEffect(() => {
   if (!userDetails) return;
   if (!isMobileDevice) return;
   if (isMobileRoute) return;
+  if (location.pathname === '/setup') return;
   if (AUTH_PAGES.includes(location.pathname)) return;
   if (location.pathname === '/subscription-expired') return;
   navigate('/m/dashboard', { replace: true });
@@ -193,6 +342,7 @@ useEffect(() => {
 
 useEffect(() => {
   const fetchTenantConfig = async () => {
+    if (setupInProgress || setupDidRunRef.current) return;
     if (!userDetails || tenantConfigStatus === 'loading' || tenantConfigStatus === 'loaded') return;
     dispatch(setTenantConfigStatus('loading'));
     try {
@@ -218,6 +368,7 @@ useEffect(() => {
 
 useEffect(() => {
   const fetchSettings = async () => {
+    if (setupInProgress || setupDidRunRef.current) return;
     if (!userDetails) return;
     if (!navigator.onLine) return;
     try {
@@ -237,6 +388,7 @@ useEffect(() => {
 
 useEffect(() => {
   const fetchBranches = async () => {
+    if (setupInProgress || setupDidRunRef.current) return;
     if (!userDetails) return;
     if (!navigator.onLine) return;
     try {
@@ -263,6 +415,7 @@ useEffect(() => {
 
 useEffect(() => {
   const registerDeviceForBranch = async () => {
+    if (setupInProgress || setupDidRunRef.current) return;
     if (!userDetails) return;
     if (!navigator.onLine) return;
     if (!selectedBranchId || selectedBranchId === 'all') return;
@@ -277,6 +430,7 @@ useEffect(() => {
 
 useEffect(() => {
   if (!tenantConfig) return;
+  if (setupInProgress) return;
   const features = tenantConfig?.plan_features || tenantConfig?.features || tenantConfig || {};
   if (features?.WHATSAPP_BILL === true || features?.whatsapp_bill_module === true) {
     setWhatsappEnabled(true);
@@ -285,6 +439,7 @@ useEffect(() => {
 
 useEffect(() => {
   const fetchTenantBanner = async () => {
+    if (setupInProgress || setupDidRunRef.current) return;
     const userId = userDetails?.id;
     if (!userId || !navigator.onLine) return;
     if (bannerFetchRef.current.inFlight) return;
@@ -325,7 +480,10 @@ useEffect(() => {
       console.log('Offline order sync failed', err);
     }
   };
-  syncOfflineOrders();
+  if (!setupReady) return undefined;
+  if (!initialSyncDoneRef.current) {
+    syncOfflineOrders();
+  }
   window.addEventListener('online', syncOfflineOrders);
   startInventorySyncWorker();
   startImportSyncWorker();
@@ -336,7 +494,7 @@ useEffect(() => {
     stopImportSyncWorker();
     stopCustomerSyncWorker();
   };
-}, [selectedBranchId]);
+}, [selectedBranchId, setupReady]);
 
 useEffect(() => {
   const handleOnline = () => setIsOnline(true);
@@ -351,6 +509,7 @@ useEffect(() => {
 
   useEffect(() => {
     const handleLoginSuccess = () => {
+    if (setupInProgress || setupDidRunRef.current) return;
     preloadAllCaches().catch((err) => {
       console.error('IndexedDB preload failed', err);
     });
@@ -396,7 +555,7 @@ useEffect(() => {
 }, [location.pathname, navigate, showPopup]);
 
 const showServerDownBanner = !isOnline || serverOffline;
-const showTenantBanner = tenantBanner?.enabled === true;
+const showTenantBanner = tenantBanner?.enabled === true && location.pathname === '/dashboard';
 const tenantBannerDays = Number.isFinite(tenantBanner?.daysLeft) ? tenantBanner.daysLeft : null;
 const tenantBannerColor = (() => {
   if (tenantBannerDays !== null) {
@@ -410,7 +569,7 @@ const tenantBannerColor = (() => {
     <>
       <ScrollToTop />
       {userDetails && !AUTH_PAGES.includes(location.pathname) && 
-      !isMobileRoute && (
+      !isMobileRoute && !setupInProgress && location.pathname !== '/setup' && (
         <div className='sticky-top'>
           <Navbar user_name={userDetails && userDetails.user_name} />
         </div>
@@ -445,6 +604,14 @@ const tenantBannerColor = (() => {
         <Routes>
           <Route path="/" element={<LoginPage navigate={navigate} />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route
+            path="/setup"
+            element={
+              <ProtectedRoute>
+                <SetupScreen />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/subscription-expired" element={<SubscriptionExpired />} />
           <Route
             path="/m"

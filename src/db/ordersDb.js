@@ -12,6 +12,7 @@ const normalizeOrder = (order) => ({
   product_count: order?.product_count ?? 0,
   customer_name: order?.customer_name ?? null,
   customer_phone: order?.customer_phone ?? order?.customer_mobile ?? null,
+  customer_id: order?.customer_id ?? order?.customerId ?? null,
   total_amount: order?.total_amount ?? order?.total_price ?? 0,
   total_paid: order?.total_paid ?? 0,
   returned_amount: order?.returned_amount ?? 0,
@@ -145,6 +146,27 @@ export const getCachedOrdersPage = async ({ page = 1, limit = 20 } = {}) => {
 
 export const getAllCachedOrders = async () => {
   return await db.orders.toArray();
+};
+
+export const getCachedOrdersByCustomer = async (customer = {}) => {
+  const customerId = customer?.id ?? customer?.customer_id ?? customer?.customerId ?? null;
+  const customerPhone = customer?.phone ?? customer?.mobile ?? customer?.customer_phone ?? null;
+  const list = await db.orders.toArray();
+  if (!list.length) return [];
+  if (customerId !== null && customerId !== undefined && customerId !== '') {
+    const byId = list.filter(
+      (order) =>
+        String(order?.customer_id ?? order?.customerId ?? '') === String(customerId)
+    );
+    if (byId.length) return byId;
+  }
+  if (customerPhone) {
+    return list.filter(
+      (order) =>
+        String(order?.customer_phone ?? order?.customer_mobile ?? '') === String(customerPhone)
+    );
+  }
+  return [];
 };
 
 export const clearOrdersCache = async () => {

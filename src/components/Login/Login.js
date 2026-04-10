@@ -9,8 +9,7 @@ import { setUserDetails } from '../../store/userSlice'; // Assuming you have a R
 import logo from '../../Images/logo.png';
 import { getDeviceId } from '../../utils/device';
 import { decodeJwtPayload } from '../../utils/jwt';
-import { setTenantConfig, setTenantConfigStatus, setTenantIdentity, setSubscriptionStatus } from '../../store/tenantSlice';
-import { preloadAllCaches } from '../../utils/indexedDb';
+import { setTenantIdentity } from '../../store/tenantSlice';
 import { saveAuthToken, saveSessionInfo } from '../../utils/sessionStorage';
 
 const Login = ( ) => {
@@ -62,40 +61,8 @@ const Login = ( ) => {
       }
       dispatch(setUserDetails(userPayload)); // Dispatch user details to Redux store
 
-      dispatch(setTenantConfigStatus('loading'));
-      try {
-        const configRes = await api.get('/platform/config');
-        const payload = configRes?.data?.data || configRes?.data || {};
-        dispatch(setTenantConfig(payload));
-        if (payload.subscription_status || payload.subscriptionStatus) {
-          dispatch(setSubscriptionStatus(payload.subscription_status || payload.subscriptionStatus));
-        }
-      } catch (err) {
-        const code = err?.response?.data?.code;
-        if (code === 'SUBSCRIPTION_INACTIVE') {
-          dispatch(setSubscriptionStatus('inactive'));
-          dispatch(setTenantConfigStatus('loaded'));
-          dispatch(setTenantConfig(null));
-          setIsLoading(false);
-          navigate('/subscription-expired');
-          return;
-        }
-        dispatch(setTenantConfigStatus('error'));
-        console.error('Failed to fetch tenant config', err);
-      }
-      try {
-        let branchId = null;
-        try {
-          branchId = localStorage.getItem('selected_branch_id');
-        } catch (err) {
-          branchId = null;
-        }
-        await preloadAllCaches({ branchId });
-      } catch (err) {
-        console.error('IndexedDB preload failed', err);
-      }
       setIsLoading(false);
-      navigate('/dashboard');
+      navigate('/setup');
     } catch (err) {
       setIsLoading(false);
       console.error('Login error:', err);

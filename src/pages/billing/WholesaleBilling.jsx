@@ -233,6 +233,17 @@ const WholesaleBilling = () => {
     }
     setIsSubmitting(true);
     try {
+      const isCredit = paymentMethod === 'credit';
+      const payments = !isCredit
+        ? [
+            {
+              client_payment_id: `pay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              amount_paid: totals.grandTotal,
+              payment_mode: paymentMethod,
+              created_at: new Date().toISOString(),
+            },
+          ]
+        : [];
       const payload = {
         type: 'sale',
         transaction_type: 'sale',
@@ -246,6 +257,7 @@ const WholesaleBilling = () => {
         customer_name: customer.name.trim(),
         customer_phone: customer.phone.trim(),
         total_amount: totals.grandTotal,
+        payments,
         products: items.map((item) => ({
           product_id: item.id,
           barcode: item.barcode,

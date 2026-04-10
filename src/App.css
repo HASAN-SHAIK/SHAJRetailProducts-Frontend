@@ -443,3 +443,114 @@ html, body{
     transform: rotate(360deg);
   }
 }
+
+.setup-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px;
+  background:
+    radial-gradient(900px 450px at 10% 0%, rgba(59, 130, 246, 0.18), transparent 60%),
+    radial-gradient(900px 450px at 90% 10%, rgba(16, 185, 129, 0.18), transparent 60%),
+    linear-gradient(135deg, #0b1221 0%, #0f1c3a 55%, #0c1630 100%);
+  z-index: 10000;
+  text-align: center;
+  color: #f8fafc;
+  transition: padding 0.6s ease;
+}
+
+.setup-video-card {
+  width: min(1200px, 95vw);
+  height: min(70vh, 720px);
+  border-radius: 24px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 30px 70px rgba(15, 23, 42, 0.6);
+  position: relative;
+  transition: transform 1.2s ease, opacity 1.2s ease;
+}
+
+.setup-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #0b1221;
+  object-fit: cover;
+}
+
+.setup-caption {
+  padding: 12px 16px 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-size: 16px;
+  text-transform: uppercase;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.setup-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: transform 1.2s ease, opacity 1.2s ease;
+  position: relative;
+}
+
+.setup-unmute {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(226, 232, 240, 0.4);
+  background: rgba(15, 23, 42, 0.7);
+  color: #f8fafc;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.setup-unmute:hover {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.setup-overlay--done {
+  gap: 0;
+}
+
+.setup-video-card--done {
+  opacity: 0;
+  transform: translateY(-28px) scale(0.98);
+  pointer-events: none;
+}
+
+.setup-status--done {
+  transform: translateY(-160px) scale(1.05);
+}
+
+.setup-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 3px solid rgba(226, 232, 240, 0.35);
+  border-top-color: #38bdf8;
+  animation: setup-spin 0.9s linear infinite;
+}
+
+@keyframes setup-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
