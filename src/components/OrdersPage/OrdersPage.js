@@ -2,7 +2,7 @@
 import api from '../../utils/axios';
 import './OrdersPage.css';
 import { usePopup } from '../common/PopUp/PopupProvider';
-import { enqueueOfflineOrder, getOfflineOrderQueue, processOfflineQueue } from '../../utils/offlineOrders';
+import { enqueueOfflineOrder } from '../../utils/offlineOrders';
 import {
   clearOrdersCache,
   getAllCachedOrders,
@@ -22,14 +22,15 @@ import SendWhatsAppButton from '../WhatsApp/SendWhatsAppButton';
 import { sendBillViaWhatsApp } from '../../services/whatsappService';
 import { useWhatsappStore } from '../../store/whatsappStore';
 import { useBranchStore } from '../../store/branchStore';
+import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 
 const OrdersPage = ({ navigate }) => {
   const ORDER_CACHE_FULL_SYNC_LIMIT = 2000;
   const ORDER_CACHE_PAGE_SIZE = 100;
   const { showPopup } = usePopup();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
-  const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
-  const gstInvoiceEnabled = planFeatures.GST_invoice_enabled === true;
+  const planFeatures = getTenantFeatures(tenantConfig);
+  const gstInvoiceEnabled = hasFeature(tenantConfig, 'gst_invoice_enabled');
   const receiptModuleEnabled = [
     planFeatures.receipt_module_enabled,
     planFeatures.receipt_module,
@@ -85,8 +86,6 @@ const OrdersPage = ({ navigate }) => {
   const [returnItems, setReturnItems] = useState([]);
   const [returnReason, setReturnReason] = useState('Damaged');
   const [refundMode, setRefundMode] = useState('cash');
-  const [pendingSyncCount, setPendingSyncCount] = useState(0);
-  const [syncingOffline, setSyncingOffline] = useState(false);
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappSending, setWhatsappSending] = useState(false);
   const [whatsappTarget, setWhatsappTarget] = useState(null);
@@ -129,6 +128,12 @@ const OrdersPage = ({ navigate }) => {
       maximumFractionDigits: 2,
     }).format(Number.isFinite(amount) ? amount : 0);
   }, [gstInvoiceEnabled, shopDetails, shopDetailsLoading]);
+
+  const getBillingType = useCallback((order = {}) => {
+    const raw = String(order?.billing_type || order?.billingType || '').trim().toLowerCase();
+    if (raw === 'wholesale') return 'wholesale';
+    return 'retail';
+  }, []);
 
   const generateLocalTxnId = () => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -366,18 +371,6 @@ const OrdersPage = ({ navigate }) => {
   }, [selectedBranchId, fetchOrders]);
 
   useEffect(() => {
-    const refreshPending = async () => {
-      try {
-        const queue = await getOfflineOrderQueue();
-        const list = Array.isArray(queue) ? queue : [];
-        setPendingSyncCount(list.length);
-      } catch {
-        setPendingSyncCount(0);
-      }
-    };
-    refreshPending();
-    window.addEventListener('focus', refreshPending);
-    window.addEventListener('offline-queue-updated', refreshPending);
     const handleOrdersCacheUpdated = () => {
       loadCachedOrders();
     };
@@ -390,8 +383,6 @@ const OrdersPage = ({ navigate }) => {
     window.addEventListener('orders-cache-updated', handleOrdersCacheUpdated);
     window.addEventListener('orders-sync-required', handleOrdersSyncRequired);
     return () => {
-      window.removeEventListener('focus', refreshPending);
-      window.removeEventListener('offline-queue-updated', refreshPending);
       window.removeEventListener('orders-cache-updated', handleOrdersCacheUpdated);
       window.removeEventListener('orders-sync-required', handleOrdersSyncRequired);
     };
@@ -906,27 +897,6 @@ const OrdersPage = ({ navigate }) => {
     openWhatsAppModal(order);
   };
 
-  const handleOfflineSync = async () => {
-    if (!navigator.onLine) return;
-    if (syncingOffline) return;
-    try {
-      setSyncingOffline(true);
-      await processOfflineQueue(api);
-    } catch (err) {
-      console.error('Offline order sync failed', err);
-    } finally {
-      setSyncingOffline(false);
-      try {
-        const queue = await getOfflineOrderQueue();
-        const list = Array.isArray(queue) ? queue : [];
-        setPendingSyncCount(list.length);
-      } catch {
-        setPendingSyncCount(0);
-      }
-      fetchOrdersFromServer();
-    }
-  };
-
   const formatReceiptAmount = (value) => {
     const numeric = Number(value || 0);
     if (!Number.isFinite(numeric)) return '0';
@@ -1319,7 +1289,8 @@ const OrdersPage = ({ navigate }) => {
 
   const handleRowClick = (order) => {
     if (!order) return;
-    const isPending = order?.sync_status === 'pending' || order?.is_offline === true;
+    const isLocalId = typeof order?.id === 'string' && order.id.startsWith('local:');
+    const isPending = order?.is_offline === true || isLocalId;
     if (isPending) {
       showPopup('This order is pending sync. Please sync to view full details.', 'Pending Sync');
       return;
@@ -1384,7 +1355,8 @@ const OrdersPage = ({ navigate }) => {
     ['completed', 'partially_returned'].includes(order?.order_status);
 
   const renderPaymentCell = (order) => {
-    const isPending = order?.sync_status === 'pending' || order?.is_offline === true;
+    const isLocalId = typeof order?.id === 'string' && order.id.startsWith('local:');
+    const isPending = order?.is_offline === true || isLocalId;
     if (isPending) {
       return <span className="payment-badge pending">Pending Sync</span>;
     }
@@ -1455,19 +1427,6 @@ const OrdersPage = ({ navigate }) => {
 
   return (
     <div className="orders-page">
-      <div className="mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-        <div className="text-secondary">
-          Offline queue: {pendingSyncCount}
-        </div>
-        <button
-          type="button"
-          className="btn btn-outline-primary"
-          onClick={handleOfflineSync}
-          disabled={!navigator.onLine || syncingOffline || pendingSyncCount === 0}
-        >
-          {syncingOffline ? 'Syncing...' : 'Sync Offline Orders'}
-        </button>
-      </div>
       <div className="orders-page-header">
         <div>
           {/* <h2 className="orders-title">Orders</h2> */}
@@ -1599,12 +1558,15 @@ const OrdersPage = ({ navigate }) => {
                 </tr>
               )}
               {!isLoading && !errorMessage && orders.map((order) => {
-                const isPending = order?.sync_status === 'pending' || order?.is_offline === true;
+                const isLocalId = typeof order?.id === 'string' && order.id.startsWith('local:');
+                const isPending = order?.is_offline === true || isLocalId;
                 const orderIdRaw = order?.id;
                 const orderIdText =
                   typeof orderIdRaw === 'string' && orderIdRaw.startsWith('local:')
                     ? 'LOCAL'
                     : orderIdRaw;
+                const billingType = getBillingType(order);
+                const isWholesale = billingType === 'wholesale';
                 return (
                 <tr
                   key={order.id}
@@ -1621,6 +1583,9 @@ const OrdersPage = ({ navigate }) => {
                   <td>
                     <span className="order-id-cell">
                       #{orderIdText}
+                      {isWholesale && (
+                        <span className="order-type-tag wholesale">Wholesale</span>
+                      )}
                       {isPending && (
                         <i
                           className="bi bi-arrow-repeat sync-icon"

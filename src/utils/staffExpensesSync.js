@@ -130,29 +130,55 @@ const emitSyncEvent = () => {
 };
 
 export const processStaffExpensesSync = async () => {
-  if (!navigator.onLine) return [];
+  if (!navigator.onLine) return { synced: [], failed: [] };
   const synced = [];
-  const staffPending = await db.staff.where('isSynced').equals(false).toArray();
-  const salaryPending = await db.salaries.where('isSynced').equals(false).toArray();
-  const expensePending = await db.expenses.where('isSynced').equals(false).toArray();
+  const failed = [];
+  // Use toArray+filter to avoid IDB key-range edge cases on some IndexedDB states.
+  const staffPending = (await db.staff.toArray()).filter((entry) => entry?.isSynced !== true);
+  const salaryPending = (await db.salaries.toArray()).filter((entry) => entry?.isSynced !== true);
+  const expensePending = (await db.expenses.toArray()).filter((entry) => entry?.isSynced !== true);
 
   for (const staff of staffPending) {
-    await syncStaffRecord(staff);
-    synced.push({ type: 'staff', id: staff.staffId });
+    try {
+      await syncStaffRecord(staff);
+      synced.push({ type: 'staff', id: staff.staffId });
+    } catch (error) {
+      failed.push({
+        type: 'staff',
+        id: staff.staffId,
+        message: error?.response?.data?.error || error?.message || 'sync failed',
+      });
+    }
   }
   for (const salary of salaryPending) {
-    await syncSalaryRecord(salary);
-    synced.push({ type: 'salary', id: salary.salaryId });
+    try {
+      await syncSalaryRecord(salary);
+      synced.push({ type: 'salary', id: salary.salaryId });
+    } catch (error) {
+      failed.push({
+        type: 'salary',
+        id: salary.salaryId,
+        message: error?.response?.data?.error || error?.message || 'sync failed',
+      });
+    }
   }
   for (const expense of expensePending) {
-    await syncExpenseRecord(expense);
-    synced.push({ type: 'expense', id: expense.expenseId });
+    try {
+      await syncExpenseRecord(expense);
+      synced.push({ type: 'expense', id: expense.expenseId });
+    } catch (error) {
+      failed.push({
+        type: 'expense',
+        id: expense.expenseId,
+        message: error?.response?.data?.error || error?.message || 'sync failed',
+      });
+    }
   }
 
   if (synced.length) {
     emitSyncEvent();
   }
-  return synced;
+  return { synced, failed };
 };
 
 const mergeRemoteRecords = async (table, records, idKey) => {
@@ -179,15 +205,62 @@ const mergeRemoteRecords = async (table, records, idKey) => {
 };
 
 export const syncAllStaffExpenses = async () => {
-  await processStaffExpensesSync();
-  if (!navigator.onLine) return;
-  const [staffRes, salaryRes, expenseRes] = await Promise.all([
+  const queueResult = await processStaffExpensesSync();
+  if (!navigator.onLine) return queueResult;
+
+  const remoteFetches = await Promise.allSettled([
     api.get('/staff'),
     api.get('/salary'),
     api.get('/expenses'),
   ]);
-  await mergeRemoteRecords(db.staff, staffRes?.data?.staff || staffRes?.data?.data || staffRes?.data || [], 'staffId');
-  await mergeRemoteRecords(db.salaries, salaryRes?.data?.salaries || salaryRes?.data?.data || salaryRes?.data || [], 'salaryId');
-  await mergeRemoteRecords(db.expenses, expenseRes?.data?.expenses || expenseRes?.data?.data || expenseRes?.data || [], 'expenseId');
+
+  const remoteErrors = [];
+  const [staffRes, salaryRes, expenseRes] = remoteFetches;
+
+  if (staffRes.status === 'fulfilled') {
+    await mergeRemoteRecords(
+      db.staff,
+      staffRes.value?.data?.staff || staffRes.value?.data?.data || staffRes.value?.data || [],
+      'staffId'
+    );
+  } else {
+    remoteErrors.push(staffRes.reason?.response?.data?.error || staffRes.reason?.message || 'staff refresh failed');
+  }
+
+  if (salaryRes.status === 'fulfilled') {
+    await mergeRemoteRecords(
+      db.salaries,
+      salaryRes.value?.data?.salaries || salaryRes.value?.data?.data || salaryRes.value?.data || [],
+      'salaryId'
+    );
+  } else {
+    remoteErrors.push(salaryRes.reason?.response?.data?.error || salaryRes.reason?.message || 'salary refresh failed');
+  }
+
+  if (expenseRes.status === 'fulfilled') {
+    await mergeRemoteRecords(
+      db.expenses,
+      expenseRes.value?.data?.expenses || expenseRes.value?.data?.data || expenseRes.value?.data || [],
+      'expenseId'
+    );
+  } else {
+    remoteErrors.push(expenseRes.reason?.response?.data?.error || expenseRes.reason?.message || 'expense refresh failed');
+  }
+
   emitSyncEvent();
+
+  const result = {
+    synced: queueResult?.synced || [],
+    failed: [...(queueResult?.failed || [])],
+    remoteErrors,
+  };
+
+  if (!result.synced.length && result.failed.length && remoteErrors.length) {
+    const first = result.failed[0]?.message || remoteErrors[0] || 'sync failed';
+    const error = new Error(first);
+    error.details = result;
+    throw error;
+  }
+
+  return result;
 };

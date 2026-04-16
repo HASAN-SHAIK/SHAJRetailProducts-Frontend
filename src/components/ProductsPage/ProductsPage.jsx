@@ -9,38 +9,49 @@ import { preloadAllCaches, preloadProductsToIndexedDb } from '../../utils/indexe
 import {
   addOfflineImport,
   addSyncQueueItem,
+  getAllBatches,
   getAllProducts,
   getProductByBarcode,
   getOfflineImports,
   getSyncQueueItems,
-  updateProduct,
+  updateBatchesBulk,
   updateProductsBulk,
   updateSyncQueueItem,
 } from '../../core/db';
 import { runDeltaSync } from '../../utils/deltaSync';
 import { usePopup } from '../common/PopUp/PopupProvider';
-import EditProductModal from './EditOrderModal/EditProductModal';
 import { useBranchStore } from '../../store/branchStore';
 import { createOfflineProduct, deleteOfflineProduct, updateOfflineProduct } from '../../utils/offlineProducts';
 import { syncAllInventory } from '../../utils/inventorySync';
 import { syncAllImports } from '../../utils/importSync';
+import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 
 const ProductsPage = ({ navigate }) => {
-const IMPORT_CHUNK_SIZE = 100;
 //Modal data
  const [productUpdateFlag, setProductUpdateFlag] = useState(false);
  const userDetails = useSelector((state) => state.user.userDetails);
  const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
+ const selectedBranchName = useBranchStore((state) => state.selectedBranchName);
+ const branches = useBranchStore((state) => state.branches);
  const effectiveBranchId = selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null;
+ const effectiveBranchName = useMemo(() => {
+  if (!effectiveBranchId) return '';
+  const byStore = String(selectedBranchName || '').trim();
+  if (byStore) return byStore;
+  const branch = (Array.isArray(branches) ? branches : []).find(
+    (item) => String(item?.id || '') === String(effectiveBranchId)
+  );
+  return String(branch?.branch_name || branch?.name || branch?.title || effectiveBranchId);
+ }, [branches, effectiveBranchId, selectedBranchName]);
  const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
- const features = tenantConfig?.features || tenantConfig?.plan_features || tenantConfig || {};
+ const features = getTenantFeatures(tenantConfig);
  const weightBasedEnabled =
   features.enable_weight_based !== false &&
   tenantConfig?.enable_weight_based !== false;
  const pieceBasedEnabled =
   features.enable_piece_based !== false &&
   tenantConfig?.enable_piece_based !== false;
- const barcodeEnabled = features.enable_barcode === true;
+ const barcodeEnabled = hasFeature(tenantConfig, 'enable_barcode');
  const defaultWeightValue = weightBasedEnabled && !pieceBasedEnabled ? '1' : '0';
  const { showPopup } = usePopup();
   const [formData, setFormData] = useState({
@@ -165,7 +176,6 @@ const IMPORT_CHUNK_SIZE = 100;
 
  const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [showModal, setShowModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
  const [errorMessage, setErrorMessage] = useState('');
  const [pagination, setPagination] = useState({
@@ -179,21 +189,12 @@ const IMPORT_CHUNK_SIZE = 100;
  const [selectedCategory, setSelectedCategory] = useState('');
  const [sortBy, setSortBy] = useState('created_at');
  const [sortOrder, setSortOrder] = useState('desc');
- const [editTarget, setEditTarget] = useState(null);
  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
  const [deleteTarget, setDeleteTarget] = useState(null);
  const [deletingId, setDeletingId] = useState(null);
  const [isAddingProduct, setIsAddingProduct] = useState(false);
- const [isEditingProduct, setIsEditingProduct] = useState(false);
  const [forceApiFetch, setForceApiFetch] = useState(false);
  const [extraDetailsByBarcode, setExtraDetailsByBarcode] = useState({});
- const [dataSource, setDataSource] = useState('server');
- const [cacheMeta, setCacheMeta] = useState({ total: 0, shown: 0 });
- const [editDetailsStatus, setEditDetailsStatus] = useState({
-  state: 'idle',
-  message: '',
-  source: 'indexeddb',
- });
  const [activeEdit, setActiveEdit] = useState(null);
  const [editedMap, setEditedMap] = useState({});
  const [savingBulk, setSavingBulk] = useState(false);
@@ -201,6 +202,9 @@ const IMPORT_CHUNK_SIZE = 100;
  const [stockLoading, setStockLoading] = useState(false);
  const [stockRows, setStockRows] = useState([]);
  const [stockTarget, setStockTarget] = useState(null);
+ const [expandedProductKey, setExpandedProductKey] = useState(null);
+ const [batchRowsByProductKey, setBatchRowsByProductKey] = useState({});
+ const [batchLoadingByProductKey, setBatchLoadingByProductKey] = useState({});
  const [importModalOpen, setImportModalOpen] = useState(false);
  const [importFile, setImportFile] = useState(null);
  const [importResult, setImportResult] = useState(null);
@@ -332,6 +336,20 @@ const IMPORT_CHUNK_SIZE = 100;
 
   const getProductKey = (product) =>
     product?.id ?? product?.product_id ?? product?.productId ?? product?.barcode;
+
+  const getProductId = (product) =>
+    product?.id ?? product?.product_id ?? product?.productId ?? null;
+
+  const getProductStockValue = (product) => {
+    const raw =
+      product?.stock_quantity ??
+      product?.stockQuantity ??
+      product?.quantity ??
+      product?.stock ??
+      null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
 
   const getDisplayBarcode = (barcodeValue) => {
     if (!barcodeValue) return '';
@@ -492,8 +510,6 @@ const IMPORT_CHUNK_SIZE = 100;
       const localFiltered = applyLocalFilters(localList);
       const { paged, totalRecords, totalPages, page } = paginateItems(localFiltered);
       setProducts(paged);
-      setDataSource('indexeddb');
-      setCacheMeta({ total: localList.length, shown: paged.length });
       setPagination((prev) => ({
         ...prev,
         page,
@@ -571,6 +587,90 @@ const IMPORT_CHUNK_SIZE = 100;
     const amount = Number(value);
     if (Number.isNaN(amount)) return '-';
     return `${amount}%`;
+  };
+
+  const formatBatchDate = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const loadProductBatches = useCallback(async (product) => {
+    const productId = getProductId(product);
+    if (!productId) return [];
+    const productStock = getProductStockValue(product);
+    const allBatches = await getAllBatches();
+    const scoped = (Array.isArray(allBatches) ? allBatches : []).filter((batch) => {
+      if (!batch || batch.is_deleted) return false;
+      if (String(batch.product_id) !== String(productId)) return false;
+      if (effectiveBranchId && batch?.branch_id && String(batch.branch_id) !== String(effectiveBranchId)) return false;
+      return true;
+    });
+    const mergedMap = new Map();
+    scoped.forEach((batch) => {
+      const signature = [
+        String(batch.batch_number || '').trim().toLowerCase(),
+        String(batch.expiry_date || ''),
+        String(batch.purchase_price ?? ''),
+        String(batch.selling_price ?? ''),
+        String(batch.mrp ?? ''),
+      ].join('|');
+      const available = Number(batch.quantity_remaining ?? batch.quantity ?? 0);
+      const existing = mergedMap.get(signature);
+      if (!existing) {
+        mergedMap.set(signature, {
+          ...batch,
+          quantity_remaining: available,
+          quantity: Number(batch.quantity ?? available),
+        });
+        return;
+      }
+      mergedMap.set(signature, {
+        ...existing,
+        quantity_remaining: Number(existing.quantity_remaining || 0) + available,
+        quantity: Number(existing.quantity || 0) + Number(batch.quantity ?? available),
+      });
+    });
+    const merged = Array.from(mergedMap.values()).sort(
+      (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
+    );
+    if (!Number.isFinite(productStock) || productStock < 0) {
+      return merged;
+    }
+    let remainingCap = productStock;
+    return merged
+      .map((batch) => {
+        const available = Number(batch.quantity_remaining ?? batch.quantity ?? 0);
+        if (remainingCap <= 0) {
+          return { ...batch, quantity_remaining: 0 };
+        }
+        const allowed = Math.min(available, remainingCap);
+        remainingCap -= allowed;
+        return { ...batch, quantity_remaining: allowed };
+      })
+      .filter((batch) => Number(batch.quantity_remaining ?? 0) > 0);
+  }, [effectiveBranchId]);
+
+  const toggleProductBatchRow = async (product) => {
+    const key = getProductKey(product);
+    if (!key) return;
+    if (expandedProductKey === key) {
+      setExpandedProductKey(null);
+      return;
+    }
+    setExpandedProductKey(key);
+    if (batchRowsByProductKey[key]) return;
+    setBatchLoadingByProductKey((prev) => ({ ...prev, [key]: true }));
+    try {
+      const rows = await loadProductBatches(product);
+      setBatchRowsByProductKey((prev) => ({ ...prev, [key]: rows }));
+    } catch {
+      setBatchRowsByProductKey((prev) => ({ ...prev, [key]: [] }));
+      showPopup('Failed to load batch details.', 'Error');
+    } finally {
+      setBatchLoadingByProductKey((prev) => ({ ...prev, [key]: false }));
+    }
   };
 
   const handleBulkSave = async () => {
@@ -701,90 +801,7 @@ const IMPORT_CHUNK_SIZE = 100;
     }
     const modalElement = document.getElementById('addProductModal');
     const bootstrapModal = new Modal(modalElement);
-    setShowModal(true);
     bootstrapModal.show();
-  };
-
-  const extractProductFromResponse = (response) => {
-    if (!response) return null;
-    const data = response?.data;
-    if (!data) return null;
-    if (Array.isArray(data)) return data[0] || null;
-    if (Array.isArray(data.products)) return data.products[0] || null;
-    return data.product || data.data || data;
-  };
-
-  const handleEditClick = async (product) => {
-    setEditDetailsStatus({
-      state: 'loading',
-      message: 'Getting latest details from server...',
-      source: 'server',
-    });
-
-    if (!navigator.onLine) {
-      setEditDetailsStatus({
-        state: 'offline',
-        message: 'Offline mode: cannot fetch latest details.',
-        source: 'indexeddb',
-      });
-      return;
-    }
-
-    try {
-      let response = null;
-      const productId = product?.id ?? product?.product_id ?? product?.productId;
-      if (productId) {
-        response = await api.get(`/products/${productId}`);
-      }
-      const serverItem = extractProductFromResponse(response);
-      if (serverItem) {
-        setEditTarget({ ...product, ...serverItem });
-        updateProduct(serverItem).catch(() => {});
-        setEditDetailsStatus({
-          state: 'ready',
-          message: 'Latest details loaded from server.',
-          source: 'server',
-        });
-      } else {
-        setEditDetailsStatus({
-          state: 'error',
-          message: productId ? 'No server details found.' : 'Missing product id.',
-          source: 'server',
-        });
-      }
-    } catch (error) {
-      console.warn('[Products] Failed to fetch product details', error);
-      setEditDetailsStatus({
-        state: 'error',
-        message: 'Unable to fetch latest details.',
-        source: 'server',
-      });
-    }
-  };
-
-  const handleSubmitEdit = async (updatedProduct) => {
-    if (!pieceBasedEnabled && String(updatedProduct.is_weight_based) === '0') {
-      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
-      return;
-    }
-    if (!weightBasedEnabled && String(updatedProduct.is_weight_based) === '1') {
-      showPopup('Weight-based products are disabled for this tenant.', 'Feature');
-      return;
-    }
-    try {
-      setIsEditingProduct(true);
-      const payload = barcodeEnabled ? updatedProduct : (({ barcode, ...rest }) => rest)(updatedProduct);
-      await updateOfflineProduct(payload);
-      showPopup('Product saved offline. Will sync in background.', 'Offline');
-      setEditTarget(null);
-      setForceApiFetch(true);
-      setProductUpdateFlag((prev) => !prev);
-    } catch (error) {
-      console.error('Failed to update product:', error);
-      showPopup('Error updating product', 'Error');
-    } finally {
-      setIsEditingProduct(false);
-    }
   };
 
   const openDeleteModal = (product) => {
@@ -866,7 +883,7 @@ const IMPORT_CHUNK_SIZE = 100;
     selling_price: 'selling_price',
     sellingprice: 'selling_price',
     price: 'selling_price',
-    rate: 'selling_price',
+    rate: 'purchase_price',
     'purchase price': 'purchase_price',
     purchase_price: 'purchase_price',
     purchaseprice: 'purchase_price',
@@ -958,6 +975,25 @@ const IMPORT_CHUNK_SIZE = 100;
     if (!trimmed || trimmed === '-' || trimmed === '.' || trimmed === '-.') return null;
     const num = Number(trimmed);
     return Number.isFinite(num) ? num : null;
+  };
+  const resolveImportSellingPrice = (row = {}) => {
+    const explicitSelling =
+      toNumber(row.selling_price) ??
+      toNumber(row.sellingPrice) ??
+      toNumber(row.price) ??
+      toNumber(row.rate);
+    if (Number.isFinite(explicitSelling) && explicitSelling > 0) {
+      return explicitSelling;
+    }
+    const mrp = toNumber(row.mrp);
+    if (Number.isFinite(mrp) && mrp > 0) {
+      return mrp;
+    }
+    const purchase = toNumber(row.purchase_price);
+    if (Number.isFinite(purchase) && purchase > 0) {
+      return purchase;
+    }
+    return null;
   };
   const toDateInput = (value) => {
     if (value === null || value === undefined || value === '') return '';
@@ -1106,11 +1142,7 @@ const IMPORT_CHUNK_SIZE = 100;
         const stock_quantity = toNumber(row.stock_quantity) ?? 0;
         const mrp = toNumber(row.mrp);
         const purchase_price = toNumber(row.purchase_price);
-        const selling_price =
-          toNumber(row.selling_price) ??
-          toNumber(row.sellingPrice) ??
-          toNumber(row.price) ??
-          toNumber(row.rate);
+        const selling_price = resolveImportSellingPrice(row);
         const hsn_code = row.hsn_code ? String(row.hsn_code).trim() : '';
         const gst_percentage = toNumber(row.gst_percentage);
         const batch_number = row.batch_number ? String(row.batch_number).trim() : '';
@@ -1245,6 +1277,14 @@ const IMPORT_CHUNK_SIZE = 100;
   };
   const handleImportConfirm = async () => {
     if (importing || importPreviewRows.length === 0) return;
+    if (!effectiveBranchId) {
+      showPopup('Select a branch before importing products.', 'Validation');
+      return;
+    }
+    const importConfirmed = window.confirm(
+      `Please confirm branch before importing products:\n${effectiveBranchName || effectiveBranchId}\n\nProceed with this branch?`
+    );
+    if (!importConfirmed) return;
     const payloadRows = importPreviewRows.map((row) => ({
       id: toNumber(row.id),
       name: String(row.name || '').trim(),
@@ -1258,40 +1298,11 @@ const IMPORT_CHUNK_SIZE = 100;
       gst_percentage: toNumber(row.gst_percentage),
       batch_number: row.batch_number ? String(row.batch_number).trim() : null,
       expiry_date: row.expiry_date ? String(row.expiry_date).trim() : null,
-      selling_price:
-        toNumber(row.selling_price) ??
-        toNumber(row.sellingPrice) ??
-        toNumber(row.price) ??
-        toNumber(row.rate),
-      sellingPrice:
-        toNumber(row.selling_price) ??
-        toNumber(row.sellingPrice) ??
-        toNumber(row.price) ??
-        toNumber(row.rate),
-      sale_price:
-        toNumber(row.selling_price) ??
-        toNumber(row.sellingPrice) ??
-        toNumber(row.price) ??
-        toNumber(row.rate),
-      rate:
-        toNumber(row.selling_price) ??
-        toNumber(row.sellingPrice) ??
-        toNumber(row.price) ??
-        toNumber(row.rate)
+      selling_price: resolveImportSellingPrice(row),
+      sellingPrice: resolveImportSellingPrice(row),
+      sale_price: resolveImportSellingPrice(row),
+      rate: resolveImportSellingPrice(row)
     }));
-
-    const invalid = payloadRows.some(
-      (row) =>
-        !row.name ||
-        !Number.isFinite(row.purchase_price) ||
-        row.purchase_price <= 0 ||
-        !Number.isFinite(row.selling_price) ||
-        row.selling_price <= 0
-    );
-    if (invalid) {
-      showPopup('Fill required fields (Name, Purchase Price, Selling Price).', 'Validation');
-      return;
-    }
 
     const makeUuid = () => {
       if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -1390,13 +1401,15 @@ const IMPORT_CHUNK_SIZE = 100;
         const batchKey = `${updated.id}::${row.batch_number || 'no-batch'}::${row.expiry_date || ''}`;
         const existingBatch = batchesMap.get(batchKey);
         const nextBatch = {
-          id: existingBatch?.id || batchKey,
+          id: existingBatch?.id || `local:import-batch:${makeUuid()}`,
           productId: updated.id,
           batchNo: row.batch_number || null,
           qty: (existingBatch?.qty || 0) + qty,
           costPrice: row.purchase_price ?? existingBatch?.costPrice ?? null,
+          sellingPrice: row.selling_price ?? existingBatch?.sellingPrice ?? null,
           mrp: row.mrp ?? existingBatch?.mrp ?? null,
           expiryDate: row.expiry_date || existingBatch?.expiryDate || null,
+          branchId: updated.branch_id ?? effectiveBranchId ?? null,
         };
         batchesMap.set(batchKey, nextBatch);
       });
@@ -1416,6 +1429,26 @@ const IMPORT_CHUNK_SIZE = 100;
 
       if (productsToUpsert.size > 0) {
         await updateProductsBulk(Array.from(productsToUpsert.values()));
+      }
+
+      if (batchesMap.size > 0) {
+        const batchesForCache = Array.from(batchesMap.values()).map((batch) => ({
+          id: batch.id,
+          product_id: batch.productId,
+          branch_id: batch.branchId ?? effectiveBranchId ?? null,
+          batch_number: batch.batchNo || null,
+          expiry_date: batch.expiryDate || null,
+          purchase_price: batch.costPrice ?? null,
+          selling_price: batch.sellingPrice ?? null,
+          quantity: Number(batch.qty || 0),
+          quantity_remaining: Number(batch.qty || 0),
+          sync_version: 1,
+          updated_at: createdAt,
+          created_at: createdAt,
+          sync_status: 'pending',
+          is_deleted: false,
+        }));
+        await updateBatchesBulk(batchesForCache);
       }
 
       await addSyncQueueItem({
@@ -1473,10 +1506,8 @@ const IMPORT_CHUNK_SIZE = 100;
       const missing = [];
       const name = String(row.name || '').trim();
       const actual = toNumber(row.purchase_price);
-      const selling = toNumber(row.selling_price);
       if (!name) missing.push('Name');
       if (!Number.isFinite(actual) || actual <= 0) missing.push('Purchase Price');
-      if (!Number.isFinite(selling) || selling <= 0) missing.push('Selling Price');
       if (missing.length === 0) return null;
       return {
         row: index + 1,
@@ -1485,6 +1516,10 @@ const IMPORT_CHUNK_SIZE = 100;
     })
     .filter(Boolean);
   const importMissingRequired = importMissingDetails.length;
+  const importMissingByRow = importMissingDetails.reduce((acc, entry) => {
+    acc[entry.row] = entry.missing;
+    return acc;
+  }, {});
   const importDisableReason =
     importMissingRequired > 0
       ? `Please fill required fields. Missing in ${importMissingRequired} row(s).`
@@ -1752,15 +1787,27 @@ const IMPORT_CHUNK_SIZE = 100;
                   const extra = extraDetailsByBarcode?.[product?.barcode] || {};
                   const displayProduct = mergeNonEmptyFields(product, extra);
                   const rowKey = getProductKey(displayProduct);
+                  const isExpanded = expandedProductKey === rowKey;
+                  const batchRows = batchRowsByProductKey[rowKey] || [];
+                  const batchLoading = Boolean(batchLoadingByProductKey[rowKey]);
+                  const rowColSpan = userDetails.role === 'admin' ? 12 : 11;
                   const stock = Number(displayProduct.stock_quantity ?? displayProduct.quantity ?? 0);
                   const minStock = Number(displayProduct.min_stock_level ?? 0);
                   const lowStock = minStock > 0 && stock <= minStock;
                   return (
+                    <React.Fragment key={displayProduct.id || displayProduct.barcode}>
                     <tr
-                      key={displayProduct.id || displayProduct.barcode}
-                      className={`products-row ${rowKey && editedMap[rowKey] ? 'dirty-row' : ''}`}
+                      className={`products-row ${rowKey && editedMap[rowKey] ? 'dirty-row' : ''} ${isExpanded ? 'expanded' : ''}`}
+                      onClick={(event) => {
+                        if (event.target.closest('button, input, select, textarea, a, .editable-cell, .editable-input')) {
+                          return;
+                        }
+                        toggleProductBatchRow(displayProduct);
+                      }}
+                      title="Click to view batch-wise details"
                     >
                       <td className="product-name-cell">
+                        <span className="batch-toggle-icon">{isExpanded ? '▾' : '▸'}</span>
                         <span className="product-name-text">{displayProduct.name || displayProduct.product_name || '-'}</span>
                         {String(displayProduct.is_weight_based ?? displayProduct.isWeightBased ?? displayProduct.weight_based ?? '0') === '1' ? (
                           <span className="product-type-tag weight">Weighted</span>
@@ -1791,9 +1838,6 @@ const IMPORT_CHUNK_SIZE = 100;
                       </td>
                       {userDetails.role === 'admin' && (
                         <td className="actions-cell">
-                          {/* <button className="btn btn-outline-primary btn-sm" onClick={() => handleEditClick(product)}>
-                            Edit
-                          </button> */}
                           <button className="btn btn-outline-info btn-sm" onClick={() => openStockModal(displayProduct)}>
                             Stock by Branch
                           </button>
@@ -1803,6 +1847,56 @@ const IMPORT_CHUNK_SIZE = 100;
                         </td>
                       )}
                     </tr>
+                    {isExpanded && (
+                      <tr className="products-batch-row">
+                        <td colSpan={rowColSpan}>
+                          <div className="products-batch-panel">
+                            <div className="products-batch-title">
+                              Batch-wise details for {displayProduct.name || displayProduct.product_name || '-'}
+                            </div>
+                            <div className="products-batch-table-wrap">
+                              <table className="products-batch-table">
+                                <thead>
+                                  <tr>
+                                    <th>Batch</th>
+                                    <th>Available</th>
+                                    <th>Total Qty</th>
+                                    <th>Purchase Price</th>
+                                    <th>Selling Price</th>
+                                    <th>MRP</th>
+                                    <th>Expiry</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {batchLoading && (
+                                    <tr>
+                                      <td colSpan={7} className="empty-state">Loading batch details...</td>
+                                    </tr>
+                                  )}
+                                  {!batchLoading && batchRows.length === 0 && (
+                                    <tr>
+                                      <td colSpan={7} className="empty-state">No batches found for this product.</td>
+                                    </tr>
+                                  )}
+                                  {!batchLoading && batchRows.map((batch, index) => (
+                                    <tr key={`${rowKey}-batch-${batch.id || batch.batch_number || index}`}>
+                                      <td>{batch.batch_number || '-'}</td>
+                                      <td>{Number(batch.quantity_remaining ?? batch.quantity ?? 0)}</td>
+                                      <td>{Number(batch.quantity ?? batch.quantity_remaining ?? 0)}</td>
+                                      <td>{formatMoney(batch.purchase_price ?? 0)}</td>
+                                      <td>{formatMoney(batch.selling_price ?? 0)}</td>
+                                      <td>{formatMoney(batch.mrp ?? 0)}</td>
+                                      <td>{formatBatchDate(batch.expiry_date)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -1917,25 +2011,9 @@ const IMPORT_CHUNK_SIZE = 100;
             onChange={handleChange}
             onSubmit={handleSubmit}
             isSubmitting={isAddingProduct}
-            onClose={() => setShowModal(false)}
             onProductAdded={fetchProducts}
           />
         )}
-        {/* {editTarget && (
-          <EditProductModal
-            item={editTarget}
-            pieceBasedEnabled={pieceBasedEnabled}
-            weightBasedEnabled={weightBasedEnabled}
-            barcodeEnabled={barcodeEnabled}
-            onClose={() => {
-              setEditTarget(null);
-              setEditDetailsStatus({ state: 'idle', message: '', source: 'indexeddb' });
-            }}
-            onSubmit={handleSubmitEdit}
-            isSubmitting={isEditingProduct}
-            detailsStatus={editDetailsStatus}
-          />
-        )} */}
         {deleteModalOpen && (
           <div className="delete-modal-overlay" onClick={closeDeleteModal}>
             <div className="delete-modal" onClick={(event) => event.stopPropagation()}>
@@ -2097,20 +2175,26 @@ const IMPORT_CHUNK_SIZE = 100;
                           <th className="text-end">GST %</th>
                           <th>Batch No.</th>
                           <th>Expiry</th>
-                          <th className="text-end">Selling Price *</th>
+                          <th className="text-end">Selling Price</th>
+                          <th>Validation</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {importPreviewRows.map((row, idx) => (
+                        {importPreviewRows.map((row, idx) => {
+                          const rowMissing = importMissingByRow[idx + 1] || [];
+                          const nameMissing = rowMissing.includes('Name');
+                          const purchaseMissing = rowMissing.includes('Purchase Price');
+                          return (
                           <tr key={`import-row-${idx}`}>
                             <td>{idx + 1}</td>
                             <td>
                               <input
-                                className="form-control form-control-sm"
+                                className={`form-control form-control-sm ${nameMissing ? 'is-invalid' : ''}`}
                                 value={row.name}
                                 title={String(row.name ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'name', event.target.value)}
                               />
+                              {nameMissing && <small className="text-danger">Name is required</small>}
                             </td>
                             <td>
                               <input
@@ -2149,7 +2233,7 @@ const IMPORT_CHUNK_SIZE = 100;
                             </td>
                             <td>
                               <input
-                                className="form-control form-control-sm text-end"
+                                className={`form-control form-control-sm text-end ${purchaseMissing ? 'is-invalid' : ''}`}
                                 type="number"
                                 step="0.01"
                                 value={row.purchase_price ?? ''}
@@ -2157,6 +2241,9 @@ const IMPORT_CHUNK_SIZE = 100;
                                 onChange={(event) => updatePreviewRow(idx, 'purchase_price', event.target.value)}
                                 onWheel={preventNumberWheel}
                               />
+                              {purchaseMissing && (
+                                <small className="text-danger">Purchase Price must be greater than 0</small>
+                              )}
                             </td>
                             <td>
                               <input
@@ -2216,8 +2303,15 @@ const IMPORT_CHUNK_SIZE = 100;
                                 onWheel={preventNumberWheel}
                               />
                             </td>
+                            <td>
+                              {rowMissing.length > 0 ? (
+                                <small className="text-danger">{rowMissing.join(', ')} missing</small>
+                              ) : (
+                                <small className="text-success">OK</small>
+                              )}
+                            </td>
                           </tr>
-                        ))}
+                        )})}
                       </tbody>
                     </table>
                   </div>

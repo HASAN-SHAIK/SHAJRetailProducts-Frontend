@@ -1,11 +1,34 @@
-import { db, saveTransactionsBulk } from '../core/db';
+import { db, saveTransactionsBulk, validateAndPrepare } from '../core/db';
 
-const normalizeOrder = (order) => ({
-  id: order?.id ?? null,
+const normalizeOrderId = (orderId) => {
+  if (orderId === null || orderId === undefined) return null;
+  const raw = String(orderId);
+  if (raw.startsWith('local:')) return raw;
+  const asNumber = Number(orderId);
+  if (Number.isFinite(asNumber)) return asNumber;
+  return raw;
+};
+
+const normalizeOrder = (order) => {
+  const normalizedId = normalizeOrderId(order?.id ?? null);
+  const isLocalId = typeof normalizedId === 'string' && normalizedId.startsWith('local:');
+  const isOffline = order?.is_offline === true || isLocalId;
+  const incomingSyncStatus = order?.sync_status ?? order?.syncStatus;
+  const syncStatus =
+    incomingSyncStatus === undefined || incomingSyncStatus === null || incomingSyncStatus === ''
+      ? isOffline
+        ? 'pending'
+        : 'synced'
+      : !isOffline && incomingSyncStatus === 'pending'
+        ? 'synced'
+        : incomingSyncStatus;
+
+  return {
+  id: normalizedId,
   local_id: order?.local_id ?? null,
   client_order_id: order?.client_order_id ?? null,
-  sync_status: order?.sync_status ?? null,
-  is_offline: order?.is_offline ?? null,
+  sync_status: syncStatus,
+  is_offline: isOffline,
   branch_id: order?.branch_id ?? null,
   products_summary: order?.products_summary ?? order?.product_summary ?? '',
   product_names: order?.product_names ?? [],
@@ -18,18 +41,32 @@ const normalizeOrder = (order) => ({
   returned_amount: order?.returned_amount ?? 0,
   balance: order?.balance ?? null,
   payment_status: order?.payment_status ?? null,
+  billing_type: order?.billing_type ?? order?.billingType ?? null,
   payment_mode: order?.payment_mode ?? order?.payment_method ?? null,
   payment_action: order?.payment_action ?? null,
   order_status: order?.order_status ?? null,
   is_gst_enabled: order?.is_gst_enabled === true || order?.gst_enabled === true,
   created_at: order?.created_at ?? null,
-});
+  };
+};
 
 export const upsertOrders = async (orders) => {
   const list = Array.isArray(orders) ? orders : [];
   const normalized = list.map(normalizeOrder).filter((item) => item.id !== null);
   if (!normalized.length) return 0;
-  await db.orders.bulkPut(normalized);
+  const prepared = [];
+  for (const entry of normalized) {
+    if (
+      entry?.client_order_id &&
+      entry?.is_offline !== true &&
+      !(typeof entry.id === 'string' && entry.id.startsWith('local:'))
+    ) {
+      // Remove local shadow row once server order is available.
+      await db.orders.delete(`local:${entry.client_order_id}`).catch(() => {});
+    }
+    prepared.push(await validateAndPrepare('order', entry));
+  }
+  await db.orders.bulkPut(prepared);
   return normalized.length;
 };
 
@@ -50,10 +87,16 @@ const normalizeOrderItem = (item, orderId) => ({
 export const replaceAllOrders = async (orders) => {
   const list = Array.isArray(orders) ? orders : [];
   const normalized = list.map(normalizeOrder).filter((item) => item.id !== null);
-  await db.orders.clear();
-  if (normalized.length) {
-    await db.orders.bulkPut(normalized);
-  }
+  await db.transaction('rw', db.orders, async () => {
+    await db.orders.clear();
+    if (normalized.length) {
+      const prepared = [];
+      for (const entry of normalized) {
+        prepared.push(await validateAndPrepare('order', entry));
+      }
+      await db.orders.bulkPut(prepared);
+    }
+  });
   return normalized.length;
 };
 
@@ -84,11 +127,19 @@ export const replaceCachedOrderItems = async (orderId, items = []) => {
   const key = normalizeOrderKey(orderId);
   if (key === null) return 0;
   const list = Array.isArray(items) ? items : [];
-  await db.order_items.where('order_id').equals(key).delete();
-  if (list.length) {
-    await db.order_items.bulkPut(list.map((item) => normalizeOrderItem(item, key)));
+  if (!list.length) {
+    throw new Error('Order items are required');
   }
-  return list.length;
+  const prepared = [];
+  for (const item of list) {
+    const normalized = normalizeOrderItem(item, key);
+    prepared.push(await validateAndPrepare('order_item', normalized));
+  }
+  await db.transaction('rw', db.order_items, async () => {
+    await db.order_items.where('order_id').equals(key).delete();
+    await db.order_items.bulkPut(prepared);
+  });
+  return prepared.length;
 };
 
 export const getCachedOrderTransactions = async (orderId) => {
@@ -103,19 +154,20 @@ export const getCachedOrderTransactions = async (orderId) => {
 };
 
 export const upsertOrderDetailsCache = async ({ order, items, payments } = {}) => {
-  if (order) {
+  if (!order) return;
+  await db.transaction('rw', db.orders, db.order_items, db.transactions, async () => {
     await upsertOrders([order]);
-  }
-  if (order?.id && items) {
-    await replaceCachedOrderItems(order.id, items);
-  }
-  if (order?.id && Array.isArray(payments) && payments.length) {
-    const normalized = payments.map((payment) => ({
-      ...payment,
-      order_id: payment?.order_id ?? payment?.orderId ?? order.id,
-    }));
-    await saveTransactionsBulk(normalized);
-  }
+    if (order?.id && items) {
+      await replaceCachedOrderItems(order.id, items);
+    }
+    if (order?.id && Array.isArray(payments) && payments.length) {
+      const normalized = payments.map((payment) => ({
+        ...payment,
+        order_id: payment?.order_id ?? payment?.orderId ?? order.id,
+      }));
+      await saveTransactionsBulk(normalized);
+    }
+  });
 };
 
 export const getCachedOrderDetails = async (orderId) => {
@@ -145,7 +197,35 @@ export const getCachedOrdersPage = async ({ page = 1, limit = 20 } = {}) => {
 };
 
 export const getAllCachedOrders = async () => {
-  return await db.orders.toArray();
+  const list = await db.orders.toArray();
+  if (!Array.isArray(list) || list.length <= 1) return list;
+  const repaired = list.map((order) => {
+    const normalizedId = normalizeOrderId(order?.id ?? null);
+    const isLocalId = typeof normalizedId === 'string' && normalizedId.startsWith('local:');
+    if (!isLocalId && order?.is_offline === true) {
+      return {
+        ...order,
+        is_offline: false,
+        sync_status: 'synced',
+      };
+    }
+    return order;
+  });
+  const deduped = new Map();
+  for (const order of repaired) {
+    const key = String(normalizeOrderId(order?.id ?? null));
+    const existing = deduped.get(key);
+    if (!existing) {
+      deduped.set(key, order);
+      continue;
+    }
+    const prevTime = new Date(existing?.updated_at || existing?.created_at || 0).getTime();
+    const nextTime = new Date(order?.updated_at || order?.created_at || 0).getTime();
+    if (nextTime >= prevTime) {
+      deduped.set(key, order);
+    }
+  }
+  return Array.from(deduped.values());
 };
 
 export const getCachedOrdersByCustomer = async (customer = {}) => {

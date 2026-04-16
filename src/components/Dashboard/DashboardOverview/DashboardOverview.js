@@ -8,6 +8,7 @@ import { Line, Pie } from "react-chartjs-2";
 import { useSelector } from "react-redux";
 import { useLocation } from "react-router-dom";
 import { useBranchStore } from "../../../store/branchStore";
+import { hasFeature, isPlanAtLeast } from "../../../utils/entitlements";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -68,9 +69,12 @@ const DashboardOverview = ({ navigate }) => {
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const effectiveBranchId =
     selectedBranchId && selectedBranchId !== "all" ? selectedBranchId : "";
-  const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
-  const advancedEnabled = planFeatures.advanced_reports === true;
-  const analyticalEnabled = planFeatures.analytical_reports === true;
+  const advancedEnabled =
+    hasFeature(tenantConfig, "advanced_reports") ||
+    isPlanAtLeast(tenantConfig, "pro");
+  const analyticalEnabled =
+    hasFeature(tenantConfig, "analytical_reports") ||
+    isPlanAtLeast(tenantConfig, "premium");
   const isStaff = userDetails?.role === "staff";
   const [range, setRange] = useState("this_month");
   const [locations, setLocations] = useState([]);

@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import ProtectedRoute from './components/common/protectedRoute';
@@ -6,12 +6,10 @@ import { ThemeProvider } from './ThemeContext';
 import Orders from './pages/Orders';
 import Navbar from './components/common/Navbar/Navbar';
 import { useEffect, useRef, useState } from 'react';
-import Transactions from './pages/Transactions';
 import CreateOrderPage from './pages/CreateOrderPage';
 import './App.css';
 import { useDispatch, useSelector } from 'react-redux';
 import Logout from './pages/Logout';
-import Footer from './components/Footer/Footer';
 import { setUserDetails } from './store/userSlice';
 import api from './utils/axios';
 import { preloadAllCaches } from './utils/indexedDb';
@@ -77,6 +75,9 @@ import Outstanding from './pages/accounts/Outstanding';
 // import BillingModule from './modules/billing';
 import BranchDevices from './pages/BranchDevices';
 import SetupScreen from './pages/SetupScreen';
+import { startDefaultOfflineSync, stopDefaultOfflineSync } from './offline-sync';
+import SyncCenter from './pages/SyncCenter';
+import { hasFeature, isFeatureEnabled } from './utils/entitlements';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
@@ -92,7 +93,6 @@ function App() {
   const userDetails = useSelector((state) => state.user.userDetails);
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const tenantConfigStatus = useSelector((state) => state.tenant.configStatus);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [serverOffline, setServerOffline] = useState(
     typeof window !== 'undefined' && window.__serverOffline === true
@@ -113,16 +113,12 @@ function App() {
   const setBranches = useBranchStore((state) => state.setBranches);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const setSelectedBranchId = useBranchStore((state) => state.setSelectedBranchId);
-  const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
   const isMobileRoute = location.pathname.startsWith('/m');
   const isMobileDevice =
     typeof window !== 'undefined' &&
     (window.matchMedia('(max-width: 768px)').matches ||
       /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
-  const reportsEnabled =
-    planFeatures.advanced_reports === true ||
-    planFeatures.analytical_reports === true ||
-    tenantConfig?.enable_reports !== false;
+  const reportsEnabled = isFeatureEnabled(tenantConfig, 'reports_enabled', true);
   useEffect(() => {
     const runSetup = async () => {
       if (!userDetails) {
@@ -166,12 +162,7 @@ function App() {
         if (navigator.onLine) {
           try {
             const payload = await getSettings();
-            const features = payload?.plan_features || payload?.features || payload || {};
-            setWhatsappEnabled(
-              payload?.whatsapp_bill_module === true ||
-              features?.whatsapp_bill_module === true ||
-              features?.WHATSAPP_BILL === true
-            );
+            setWhatsappEnabled(hasFeature(payload, 'whatsapp_bill_enabled'));
           } catch {
             setWhatsappEnabled(false);
           }
@@ -373,12 +364,7 @@ useEffect(() => {
     if (!navigator.onLine) return;
     try {
       const payload = await getSettings();
-      const features = payload?.plan_features || payload?.features || payload || {};
-      setWhatsappEnabled(
-        payload?.whatsapp_bill_module === true ||
-        features?.whatsapp_bill_module === true ||
-        features?.WHATSAPP_BILL === true
-      );
+      setWhatsappEnabled(hasFeature(payload, 'whatsapp_bill_enabled'));
     } catch (err) {
       setWhatsappEnabled(false);
     }
@@ -431,8 +417,7 @@ useEffect(() => {
 useEffect(() => {
   if (!tenantConfig) return;
   if (setupInProgress) return;
-  const features = tenantConfig?.plan_features || tenantConfig?.features || tenantConfig || {};
-  if (features?.WHATSAPP_BILL === true || features?.whatsapp_bill_module === true) {
+  if (hasFeature(tenantConfig, 'whatsapp_bill_enabled')) {
     setWhatsappEnabled(true);
   }
 }, [tenantConfig, setWhatsappEnabled]);
@@ -466,8 +451,11 @@ useEffect(() => {
 }, [userDetails?.id]);
 
 useEffect(() => {
+  let orderSyncInFlight = false;
   const syncOfflineOrders = async () => {
     if (!navigator.onLine) return;
+    if (orderSyncInFlight) return;
+    orderSyncInFlight = true;
     try {
       await syncAllCustomers();
       await processOfflineQueue(api);
@@ -478,18 +466,30 @@ useEffect(() => {
       await runDeltaSync({ branchId: selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null });
     } catch (err) {
       console.log('Offline order sync failed', err);
+    } finally {
+      orderSyncInFlight = false;
     }
   };
+  let syncInterval = null;
   if (!setupReady) return undefined;
   if (!initialSyncDoneRef.current) {
     syncOfflineOrders();
   }
+  const handleQueueEnqueued = () => {
+    syncOfflineOrders();
+  };
   window.addEventListener('online', syncOfflineOrders);
+  window.addEventListener('offline-order-enqueued', handleQueueEnqueued);
+  syncInterval = setInterval(syncOfflineOrders, 15000);
   startInventorySyncWorker();
   startImportSyncWorker();
   startCustomerSyncWorker();
   return () => {
     window.removeEventListener('online', syncOfflineOrders);
+    window.removeEventListener('offline-order-enqueued', handleQueueEnqueued);
+    if (syncInterval) {
+      clearInterval(syncInterval);
+    }
     stopInventorySyncWorker();
     stopImportSyncWorker();
     stopCustomerSyncWorker();
@@ -507,8 +507,8 @@ useEffect(() => {
   };
 }, []);
 
-  useEffect(() => {
-    const handleLoginSuccess = () => {
+useEffect(() => {
+  const handleLoginSuccess = () => {
     if (setupInProgress || setupDidRunRef.current) return;
     preloadAllCaches().catch((err) => {
       console.error('IndexedDB preload failed', err);
@@ -517,6 +517,14 @@ useEffect(() => {
     window.addEventListener('login-success', handleLoginSuccess);
     return () => window.removeEventListener('login-success', handleLoginSuccess);
   }, []);
+
+useEffect(() => {
+  if (!setupReady) return;
+  startDefaultOfflineSync();
+  return () => {
+    stopDefaultOfflineSync();
+  };
+}, [setupReady]);
 
 useEffect(() => {
   const handleServerStatus = (event) => {
@@ -581,12 +589,11 @@ const tenantBannerColor = (() => {
             : undefined
         }
       >
-        {showServerDownBanner && (
-          <div className="server-offline-indicator" title="Server is offline. You can still place orders at the same speed.">
-            <span className="server-offline-dot" />
-            <span className="server-offline-text">Offline Mode</span>
-          </div>
-        )}
+          {showServerDownBanner && (
+            <div className="server-offline-indicator" title="Server is offline. You can still place orders at the same speed.">
+              <span className="server-offline-dot" />
+            </div>
+          )}
         {showTenantBanner && (
           <div
             className="tenant-status-banner"
@@ -759,6 +766,7 @@ const tenantBannerColor = (() => {
             <Route path="/customers/new" element={<CustomerForm />} />
             <Route path="/customers/:id" element={<CustomerDetail />} />
             <Route path="/customers/:id/edit" element={<CustomerForm />} />
+            <Route path="/sync-center" element={<SyncCenter />} />
           </Route>
           {/* <Route
             path="/billing-new"

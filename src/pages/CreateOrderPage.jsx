@@ -5,10 +5,11 @@ import { searchLocalProducts, normalizeDisplayProduct } from '../utils/localProd
 import { useNavigate } from 'react-router-dom';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
 import { useDispatch, useSelector } from 'react-redux';
-import { clearOrderDetails, setOrderDetails } from '../store/orderSlice';
+import { clearOrderDetails } from '../store/orderSlice';
 import { enqueueOfflineOrder } from '../utils/offlineOrders';
 import { loadCategoriesCache, saveCategoriesCache } from '../utils/offlineCategories';
 import { useBranchStore } from '../store/branchStore';
+import { hasFeature, isFeatureEnabled, isPlanAtLeast } from '../utils/entitlements';
 import './CreateOrderPage.css';
 
 const DRAFT_STORAGE_KEY = 'create_order_drafts_v1';
@@ -86,7 +87,6 @@ const CreateOrderPage = () => {
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const effectiveBranchId = selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null;
-  const features = tenantConfig?.features || tenantConfig?.plan_features || tenantConfig || {};
   const [transactionType, setTransactionType] = useState('sale');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [products, setProducts] = useState([]);
@@ -124,16 +124,7 @@ const CreateOrderPage = () => {
   const hasPlanSyncRef = useRef(false);
   const orderDetails = useSelector((state) => state.order.orderDetails);
   const isEditing = Boolean(orderDetails);
-  const planType = String(
-    tenantConfig?.plan_type ||
-      tenantConfig?.planType ||
-      userDetails?.tenant_plan ||
-      userDetails?.plan ||
-      ''
-  )
-    .toLowerCase()
-    .trim();
-  const isPremiumPlan = planType.includes('premium');
+  const isPremiumPlan = isPlanAtLeast(tenantConfig || { plan_type: userDetails?.tenant_plan || userDetails?.plan }, 'premium');
   const multiDraftEnabled = !isEditing && isPremiumPlan;
 
   const computeProfitPerUnit = (purchasePrice, sellingPrice) => {
@@ -437,18 +428,11 @@ useEffect(() => {
     return Number(draft.totalAmount || 0);
   };
 
-  const requireCustomerDetails =
-    features.CUSTOMER_MODULE === true ||
-    tenantConfig?.CUSTOMER_MODULE === true ||
-    tenantConfig?.require_customer_details === true;
-  const weightBasedEnabled =
-    features.enable_weight_based !== false &&
-    tenantConfig?.enable_weight_based !== false;
-  const pieceBasedEnabled =
-    features.enable_piece_based !== false &&
-    tenantConfig?.enable_piece_based !== false;
+  const requireCustomerDetails = isFeatureEnabled(tenantConfig, 'customer_details_enabled');
+  const weightBasedEnabled = isFeatureEnabled(tenantConfig, 'enable_weight_based', true);
+  const pieceBasedEnabled = isFeatureEnabled(tenantConfig, 'enable_piece_based', true);
   const creditEnabled = tenantConfig?.enable_credit_sales === true;
-  const barcodeEnabled = features.enable_barcode === true;
+  const barcodeEnabled = hasFeature(tenantConfig, 'enable_barcode');
 
   const buildSearchUrl = (text, mode) => {
     if (mode === 'purchase') {
@@ -631,6 +615,10 @@ useEffect(() => {
 
   const handleInvoiceSave = async (withPriceUpdate) => {
     if (invoiceSaving || invoiceItems.length === 0) return;
+    if (!invoiceMeta?.supplier_id) {
+      showPopup('Supplier details are required before saving purchase.', 'Validation');
+      return;
+    }
     const missingSelling = invoiceItems.filter((row) => !Number(row.selling_price || 0)).length;
     if (missingSelling > 0) {
       const ok = window.confirm(`Selling price missing for ${missingSelling} items. Continue?`);

@@ -3,6 +3,7 @@ import './SupportPage.css';
 import api from '../../utils/axios';
 import { useSelector } from 'react-redux';
 import { usePopup } from '../common/PopUp/PopupProvider';
+import { hasFeature, isPlanAtLeast } from '../../utils/entitlements';
 
 const STATUS_OPTIONS = [
   { label: 'All Statuses', value: '' },
@@ -21,11 +22,8 @@ const PRIORITY_OPTIONS = [
 
 const SupportPage = ({ navigate }) => {
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
-  const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
-  const prioritySupportEnabled = planFeatures.priority_support === true;
-  const proOrPremiumEnabled =
-    planFeatures.advanced_reports === true ||
-    planFeatures.analytical_reports === true;
+  const prioritySupportEnabled = hasFeature(tenantConfig, 'priority_support');
+  const proOrPremiumEnabled = isPlanAtLeast(tenantConfig, 'pro');
   const { showPopup } = usePopup();
 
   const [cases, setCases] = useState([]);

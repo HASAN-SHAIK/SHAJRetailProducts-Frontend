@@ -1,9 +1,12 @@
 import {
   addLocalBatchCache,
   addLocalPurchaseItems,
+  getSupplierCacheById,
   getLocalPurchases,
+  upsertSupplierLedgerEntry,
   updateProductsCacheStock,
   updateProductsCacheBulk,
+  updateSuppliersCacheBulk,
   upsertLocalPurchase,
 } from '../core/db';
 import { enqueueInventorySync, processInventorySyncQueue } from './inventorySync';
@@ -45,9 +48,10 @@ export const enqueueOfflinePurchase = async (payload) => {
     const needsLocalId = !providedId && item.name;
     const localProductId = needsLocalId ? createLocalProductId() : null;
     return {
-      id: `item_${local_id}_${index + 1}`,
+      id: `temp_item_${local_id}_${index + 1}`,
       purchaseId: local_id,
       productId: providedId || localProductId,
+      batch_number: item.batch_number ?? null,
       name: item.name ?? null,
       barcode: item.barcode ?? null,
       category: item.category ?? null,
@@ -67,6 +71,28 @@ export const enqueueOfflinePurchase = async (payload) => {
   await addLocalPurchaseItems(items);
   await enqueueInventorySync({ type: 'purchase', entityId: local_id, action: 'create' });
 
+  if (payload.supplier_id) {
+    const supplierId = String(payload.supplier_id);
+    const supplier = await getSupplierCacheById(payload.supplier_id);
+    const amount = Number(payload.total_price || 0);
+    const currentBalance = Number(supplier?.current_balance || 0);
+    const nextBalance = supplier ? currentBalance + amount : null;
+    const ledgerEntry = {
+      id: local_id,
+      supplier_id: supplierId,
+      type: 'purchase',
+      amount,
+      payment_mode: payload.payment_mode || null,
+      running_balance: nextBalance,
+      created_at,
+      sync_status: STATUS_PENDING,
+    };
+    await upsertSupplierLedgerEntry(ledgerEntry).catch(() => {});
+    if (supplier) {
+      await updateSuppliersCacheBulk([{ ...supplier, current_balance: nextBalance }]).catch(() => {});
+    }
+  }
+
   for (const item of items) {
     if (item.productId) {
       await updateProductsCacheStock(
@@ -79,10 +105,11 @@ export const enqueueOfflinePurchase = async (payload) => {
       id: `local_batch_${local_id}_${item.__batch_index}`,
       product_id: item.productId || null,
       branch_id: payload.branch_id ?? null,
-      batch_number: `LOCAL-${local_id}-${item.__batch_index}`,
+      batch_number: item.batch_number || `LOCAL-${local_id}-${item.__batch_index}`,
       expiry_date: item.expiry_date ?? null,
       purchase_price: item.purchase_price ?? null,
       selling_price: item.selling_price ?? null,
+      mrp: item.mrp ?? null,
       quantity: item.quantity ?? 0,
       quantity_remaining: item.quantity ?? 0,
       created_at,
@@ -95,7 +122,7 @@ export const enqueueOfflinePurchase = async (payload) => {
       .map((item) => ({
         id: item.productId,
         name: item.name,
-        barcode: item.barcode || `local:${item.productId}`,
+        barcode: item.barcode ?? null,
         category: item.category,
         company: item.company,
         selling_price: item.selling_price ?? item.purchase_price,

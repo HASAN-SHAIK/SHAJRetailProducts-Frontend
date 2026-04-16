@@ -14,16 +14,21 @@ const ProductSearch = ({ value, suggestions, loading, onChange, onSelect }) => (
     {loading && <div className="billing-search-status">Searching...</div>}
     {suggestions.length > 0 && (
       <div className="billing-search-list">
-        {suggestions.map((item) => (
+        {suggestions.map((item, idx) => (
           <button
-            key={`${item.barcode || item.id}-${item.name}`}
+            key={`${item.key || item.id || item.product_id || item.barcode || item.name}-${item.batch_id || 'no-batch'}-${idx}`}
             type="button"
             className="billing-search-item"
-            onClick={() => onSelect(item)}
+            onPointerDown={() => onSelect(item)}
+            onClick={(event) => {
+              event.preventDefault();
+              onSelect(item);
+            }}
           >
             <div>
               <strong>{item.name || item.product_name || '-'}</strong>
               {item.company && <span>Company: {item.company}</span>}
+              {item.batch_number && <span>Batch: {item.batch_number}</span>}
               <span>{item.barcode ? `Barcode: ${item.barcode}` : ''}</span>
               {Number.isFinite(item.__stock) && (
                 <span className="billing-search-stock">Stock: {item.__stock}</span>

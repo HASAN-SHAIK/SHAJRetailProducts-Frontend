@@ -45,11 +45,44 @@ const getProductStock = (product) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const toKey = (product) => product?.id ?? product?.product_id ?? product?.productId ?? product?.barcode;
+const toKey = (product) => {
+  const batchId = product?.batch_id ?? product?.batchId ?? null;
+  if (batchId !== null && batchId !== undefined && String(batchId).trim() !== '') {
+    const productId =
+      product?.id ??
+      product?.product_id ??
+      product?.productId ??
+      product?.barcode ??
+      'unknown';
+    return `p:${String(productId)}|b:${String(batchId)}`;
+  }
+  const base =
+    product?.key ??
+    product?.__key ??
+    product?.id ??
+    product?.product_id ??
+    product?.productId ??
+    product?.barcode ??
+    null;
+  if (base !== null && base !== undefined && String(base).trim() !== '') {
+    return base;
+  }
+  const name =
+    product?.name ??
+    product?.product_name ??
+    product?.product ??
+    null;
+  if (name !== null && name !== undefined && String(name).trim() !== '') {
+    return `name:${String(name).trim().toLowerCase()}`;
+  }
+  return null;
+};
 
 const normalizeItem = (product, qty = 1, gstMode = 'INCLUSIVE') => ({
   key: toKey(product),
   id: product?.id ?? product?.product_id ?? product?.productId ?? null,
+  batch_id: product?.batch_id ?? product?.batchId ?? null,
+  batch_number: product?.batch_number ?? product?.batchNumber ?? null,
   barcode: product?.barcode ?? null,
   name: product?.name ?? product?.product_name ?? '-',
   mrp: Number(product?.mrp ?? product?.mrp_price ?? 0) || 0,

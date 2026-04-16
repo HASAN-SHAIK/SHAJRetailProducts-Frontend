@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/axios';
-import { getAllSuppliersCache, updateSuppliersCacheBulk } from '../../core/db';
+import { dedupeSuppliersCache, updateSuppliersCacheBulk } from '../../core/db';
 import { syncAllInventory } from '../../utils/inventorySync';
 import './Suppliers.css';
 
@@ -16,7 +16,7 @@ const Suppliers = () => {
   const fetchSuppliers = async (term = '') => {
     setLoading(true);
     try {
-      const cached = await getAllSuppliersCache();
+      const cached = await dedupeSuppliersCache();
       let localList = Array.isArray(cached) ? cached : [];
       if (term) {
         const needle = term.toLowerCase();
@@ -27,8 +27,28 @@ const Suppliers = () => {
           return name.includes(needle) || mobile.includes(needle) || gst.includes(needle);
         });
       }
-      setSuppliers(localList);
-      if (!navigator.onLine) return;
+      if (localList.length) {
+        const seen = new Set();
+        const deduped = localList.filter((supplier) => {
+          const idKey = supplier.id ? `id:${supplier.id}` : '';
+          const nameKey = String(supplier.name || '').trim().toLowerCase();
+          const mobileKey = String(supplier.mobile || supplier.phone || '').trim().toLowerCase();
+          const fallbackKey = nameKey ? `name:${nameKey}|mobile:${mobileKey}` : '';
+          const key = idKey || fallbackKey;
+          if (!key) return false;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setSuppliers(deduped);
+        if (!navigator.onLine) return;
+        // Offline-first: keep cached list unless user syncs explicitly.
+        return;
+      }
+      if (!navigator.onLine) {
+        setSuppliers([]);
+        return;
+      }
       const res = await api.get('/suppliers', {
         params: term ? { search: term } : { limit: 500 },
       });

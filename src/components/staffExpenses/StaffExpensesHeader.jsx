@@ -20,12 +20,31 @@ const StaffExpensesHeader = ({ title }) => {
 
   const handleSync = async () => {
     if (syncing) return;
+    if (!navigator.onLine) {
+      showPopup('You are offline. Connect to internet and retry sync.', 'Error');
+      return;
+    }
     setSyncing(true);
     try {
-      await syncAllStaffExpenses();
-      showPopup('Synced Successfully', 'Success');
-    } catch {
-      showPopup('Sync failed. Try again.', 'Error');
+      const result = await syncAllStaffExpenses();
+      const syncedCount = Array.isArray(result?.synced) ? result.synced.length : 0;
+      const failedCount = Array.isArray(result?.failed) ? result.failed.length : 0;
+      const remoteErrorCount = Array.isArray(result?.remoteErrors) ? result.remoteErrors.length : 0;
+      if (failedCount > 0 || remoteErrorCount > 0) {
+        const firstError =
+          result?.failed?.[0]?.message ||
+          result?.remoteErrors?.[0] ||
+          'Some records failed to sync.';
+        showPopup(
+          `Synced ${syncedCount}. Failed ${failedCount}${remoteErrorCount ? `, refresh errors ${remoteErrorCount}` : ''}. ${firstError}`,
+          'Error'
+        );
+      } else {
+        showPopup(`Synced Successfully (${syncedCount})`, 'Success');
+      }
+    } catch (error) {
+      const message = error?.message || 'Sync failed. Try again.';
+      showPopup(message, 'Error');
     } finally {
       setSyncing(false);
     }

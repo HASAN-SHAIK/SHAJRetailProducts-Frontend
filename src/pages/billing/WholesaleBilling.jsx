@@ -35,8 +35,6 @@ const WholesaleBilling = () => {
   const setGSTEnabled = useBillingStore((state) => state.setGSTEnabled);
   const gstMode = useBillingStore((state) => state.gstMode);
   const setGstMode = useBillingStore((state) => state.setGstMode);
-  const setItems = useBillingStore((state) => state.setItems);
-  const setSelectedKey = useBillingStore((state) => state.setSelectedKey);
   const addItem = useBillingStore((state) => state.addItem);
   const updateQty = useBillingStore((state) => state.updateQty);
   const updatePrice = useBillingStore((state) => state.updatePrice);
@@ -127,13 +125,13 @@ const WholesaleBilling = () => {
   };
 
   const ensureBranchMatch = (product) => {
-    if (!effectiveBranchId || !branchConfirmed) {
-      showPopup('Select a branch before billing.', 'Validation');
-      return false;
+    if (!effectiveBranchId) {
+      showPopup('Select a branch before billing. Added anyway.', 'Validation');
+      return true;
     }
     const productBranchId =
       product?.branch_id || product?.branchId || product?.branch || null;
-    if (productBranchId && productBranchId !== effectiveBranchId) {
+    if (productBranchId && String(productBranchId) !== String(effectiveBranchId)) {
       showPopup('Product belongs to another branch.', 'Branch');
       return false;
     }

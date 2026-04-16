@@ -114,6 +114,21 @@
   text-align: left;
 }
 
+.purchase-entry-table {
+  min-width: 760px;
+  table-layout: auto;
+}
+
+.purchase-entry-table th,
+.purchase-entry-table td {
+  padding: 6px 8px;
+}
+
+.purchase-entry-table td .billing-input {
+  width: 100%;
+  min-width: 0;
+}
+
 .billing-table th {
   background: rgba(15, 23, 42, 0.92);
   position: sticky;
@@ -312,6 +327,49 @@
 .billing-stock {
   font-size: 0.7rem;
   color: #94a3b8;
+}
+
+.billing-batch-details-panel {
+  margin-top: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.billing-batch-details-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.billing-batch-details-header strong {
+  display: block;
+}
+
+.billing-batch-details-table-wrap {
+  overflow-x: auto;
+}
+
+.billing-batch-details-table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+}
+
+.billing-batch-details-table th,
+.billing-batch-details-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 0.82rem;
+}
+
+.billing-batch-details-table th {
+  color: #7dd3fc;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.72rem;
 }
 
 .billing-label {
@@ -526,6 +584,18 @@
   justify-content: flex-end;
   gap: 10px;
   margin-top: 16px;
+}
+
+.billing-field-error {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 0.15rem rgba(239, 68, 68, 0.2) !important;
+}
+
+.billing-field-error-text {
+  color: #fca5a5;
+  font-size: 0.78rem;
+  margin-top: 4px;
+  display: block;
 }
 
 .purchase-total {

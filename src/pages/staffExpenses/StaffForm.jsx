@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import StaffExpensesHeader from '../../components/staffExpenses/StaffExpensesHeader';
 import { getLocalStaff, getLocalStaffById, upsertLocalStaff } from '../../core/db';
+import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './StaffExpenses.css';
 
 const StaffForm = () => {
@@ -19,6 +20,7 @@ const StaffForm = () => {
     joinDate: '',
     status: 'active',
   });
+  const [errors, setErrors] = useState({});
 
   const loadStaff = useCallback(async () => {
     if (!staffId) return;
@@ -46,8 +48,12 @@ const StaffForm = () => {
   const handleSubmit = async (event) => {
     event.preventDefault();
     const name = form.name.trim();
-    if (!name) {
-      showPopup('Name is required', 'Validation');
+    const nextErrors = collectValidationErrors([
+      { key: 'name', validate: () => Boolean(name), message: 'Name is required.' }
+    ]);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      showPopup(firstValidationMessage(nextErrors), 'Validation');
       return;
     }
     const existing = await getLocalStaff({ search: name });
@@ -77,6 +83,7 @@ const StaffForm = () => {
     };
     await upsertLocalStaff(payload);
     showPopup('Saved Offline', 'Offline');
+    setErrors({});
     navigate('/staff-expenses/staff/list');
   };
 
@@ -88,7 +95,8 @@ const StaffForm = () => {
           <div className="row g-2">
             <div className="col-md-4">
               <label className="form-label">Name *</label>
-              <input className="form-control" name="name" value={form.name} onChange={handleChange} />
+              <input className={`form-control ${errors.name ? 'is-invalid' : ''}`} name="name" value={form.name} onChange={handleChange} />
+              {errors.name && <small className="text-danger">{errors.name}</small>}
             </div>
             <div className="col-md-4">
               <label className="form-label">Phone</label>

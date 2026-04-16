@@ -1,10 +1,33 @@
 .staff-expenses-page {
   display: grid;
   gap: 20px;
+  color: #e2e8f0;
 }
 
 .staff-expenses-page .form-label {
   color: #ffffff;
+}
+
+.staff-expenses-page p,
+.staff-expenses-page td,
+.staff-expenses-page small,
+.staff-expenses-page .text-muted {
+  color: #e2e8f0;
+}
+
+.staff-expenses-page .text-secondary {
+  color: #cbd5f5 !important;
+}
+
+.staff-expenses-page .form-control,
+.staff-expenses-page .form-select {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #e2e8f0;
+}
+
+.staff-expenses-page .form-control::placeholder {
+  color: #94a3b8;
 }
 
 .staff-expenses-header {
@@ -66,7 +89,7 @@
   text-transform: uppercase;
   font-size: 0.7rem;
   letter-spacing: 0.06em;
-  color: #7dd3fc;
+  color: #bae6fd;
 }
 
 .sync-dot {

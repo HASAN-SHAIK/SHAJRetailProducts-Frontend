@@ -20,7 +20,7 @@ const isBranchMatch = (product, branchId) => {
   return productBranch === branchId;
 };
 
-export const searchProducts = async (query, branchId = null) => {
+export const searchProducts = async (query, branchId = null, { allowRemote = false } = {}) => {
   const term = normalizeText(query);
   if (!term) return [];
 
@@ -59,7 +59,7 @@ export const searchProducts = async (query, branchId = null) => {
     return [...startsWith, ...contains].slice(0, 15);
   }
 
-  if (!navigator.onLine) return [];
+  if (!allowRemote || !navigator.onLine) return [];
 
   try {
     const headers = branchId ? { 'x-branch-id': branchId } : undefined;
@@ -84,6 +84,18 @@ export const findProductByBarcode = async (barcode, branchId = null) => {
   if (!term) return null;
   const exact = await getProductCacheByBarcode(term);
   if (exact && isBranchMatch(exact, branchId)) return normalizeProduct(exact);
-  const results = await searchProducts(term, branchId);
+  const results = await searchProducts(term, branchId, { allowRemote: true });
+  return results.find((product) => normalizeText(product.barcode) === term) || results[0] || null;
+};
+
+export const searchProductsLocal = async (query, branchId = null) =>
+  searchProducts(query, branchId, { allowRemote: false });
+
+export const findProductByBarcodeLocal = async (barcode, branchId = null) => {
+  const term = normalizeText(barcode);
+  if (!term) return null;
+  const exact = await getProductCacheByBarcode(term);
+  if (exact && isBranchMatch(exact, branchId)) return normalizeProduct(exact);
+  const results = await searchProducts(term, branchId, { allowRemote: false });
   return results.find((product) => normalizeText(product.barcode) === term) || results[0] || null;
 };

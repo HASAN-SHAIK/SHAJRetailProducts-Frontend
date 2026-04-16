@@ -46,7 +46,24 @@ const readQueue = async () => {
   await migrateLegacyQueue();
   try {
     const list = await getOfflineOrders();
-    return Array.isArray(list) ? list : [];
+    const dbQueue = Array.isArray(list) ? list : [];
+    const legacyQueue = readLegacyQueue();
+    if (legacyQueue.length > 0) {
+      const merged = [...dbQueue];
+      const existingIds = new Set(merged.map((entry) => entry?.id).filter(Boolean));
+      legacyQueue.forEach((entry) => {
+        if (!entry?.id || existingIds.has(entry.id)) return;
+        merged.push(entry);
+      });
+      try {
+        await saveOfflineOrdersBulk(merged);
+        clearLegacyQueue();
+        return merged;
+      } catch {
+        return merged;
+      }
+    }
+    return dbQueue;
   } catch {
     return readLegacyQueue();
   }
@@ -120,7 +137,7 @@ export const enqueueOfflineOrder = async (entry) => {
     payload.client_order_id = generateUuidV4();
   }
   const withMeta = {
-    id: entry.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: entry.id || `local:offline-order:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: new Date().toISOString(),
     ...entry,
     payload,
@@ -138,6 +155,13 @@ export const enqueueOfflineOrder = async (entry) => {
       emitOrdersCacheUpdated();
     } catch {
       // ignore cache failures
+    }
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent('offline-order-enqueued'));
+    } catch {
+      // ignore
     }
   }
   return withMeta;
@@ -282,6 +306,7 @@ const buildLocalOrderFromEntry = (entry) => {
     returned_amount: 0,
     balance: null,
     payment_status: paymentStatus,
+    billing_type: payload.billing_type || payload.billingType || 'retail',
     payment_mode: payload.payment_mode || payload.payment_method || payload.payment || null,
     order_status: payload.order_status || 'pending',
     is_gst_enabled: payload.is_gst_enabled === true,
@@ -351,8 +376,53 @@ export const processOfflineQueue = async (api) => {
         }
       }
     } catch (err) {
-      failed += createEntries.length;
-      remaining.push(...createEntries);
+      // Fallback to per-order sync so one bad payload does not block the whole batch.
+      for (const entry of createEntries) {
+        try {
+          ensureClientOrderId(entry);
+          const normalized = await normalizeTempProductIds(entry);
+          const singleOrder = [buildOfflineSyncOrder({ ...entry, payload: normalized.payload })];
+          const singleSyncId = generateUuidV4();
+          const singleRes = await api.post('/orders/offline-sync', {
+            sync_id: singleSyncId,
+            orders: singleOrder,
+          });
+          const singleResult = Array.isArray(singleRes?.data?.results)
+            ? singleRes.data.results[0]
+            : null;
+          if (singleResult && (singleResult.status === 'created' || singleResult.status === 'duplicate')) {
+            processed += 1;
+            if (entry.id) processedIds.push(entry.id);
+            const payload = entry.payload || {};
+            const clientOrderId = payload.client_order_id || entry.client_order_id;
+            const localId = clientOrderId ? `local:${clientOrderId}` : `local:${entry.id}`;
+            try {
+              await deleteOrdersByIds([localId]);
+            } catch {
+              // ignore cache delete failures
+            }
+            if (singleResult.order_id) {
+              try {
+                const orderRes = await api.get(`/orders/${singleResult.order_id}`);
+                const orderPayload = orderRes?.data?.order || orderRes?.data || null;
+                if (orderPayload) {
+                  await upsertOrders([orderPayload]);
+                  emitOrdersCacheUpdated();
+                }
+              } catch {
+                // ignore order fetch failures
+              }
+            }
+            synced.push(singleResult);
+          } else {
+            failed += 1;
+            remaining.push(entry);
+          }
+        } catch {
+          failed += 1;
+          remaining.push(entry);
+        }
+      }
     }
   }
 

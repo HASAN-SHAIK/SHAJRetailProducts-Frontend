@@ -2,7 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import api from '../../utils/axios';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import { useBranchStore } from '../../store/branchStore';
-import { getLocalPurchaseById, getLocalPurchaseItems, getLocalPurchaseReturns, getLocalPurchases, upsertLocalPurchasesBulk } from '../../core/db';
+import {
+  addLocalPurchaseItems,
+  dedupeSuppliersCache,
+  getLocalPurchaseById,
+  getLocalPurchaseItems,
+  getLocalPurchaseReturns,
+  getLocalPurchases,
+  upsertLocalPurchasesBulk
+} from '../../core/db';
 import { enqueueOfflinePurchaseReturn } from '../../utils/offlinePurchaseReturns';
 import { processInventorySyncQueue } from '../../utils/inventorySync';
 import './Suppliers.css';
@@ -21,12 +29,34 @@ const PurchaseReturn = () => {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
 
+  const resolveServerPurchaseId = (value) => {
+    if (value === null || value === undefined) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+    if (text.startsWith('temp_') || text.startsWith('temp:') || text.startsWith('local:')) return null;
+    const numeric = Number(text);
+    return Number.isFinite(numeric) ? String(numeric) : null;
+  };
+
   const fetchPurchases = async () => {
     try {
+      const supplierCache = await dedupeSuppliersCache();
+      const supplierMap = new Map(
+        (Array.isArray(supplierCache) ? supplierCache : []).map((item) => [String(item.id), item.name])
+      );
       const local = await getLocalPurchases();
       const localList = Array.isArray(local) ? local : [];
-      if (!navigator.onLine) {
-        setPurchases(localList);
+      if (localList.length) {
+        const enrichedLocal = localList.map((purchase) => {
+          if (purchase.supplierName || purchase.supplier_name) return purchase;
+          const resolved = supplierMap.get(String(purchase.supplierId));
+          if (!resolved) return purchase;
+          return { ...purchase, supplierName: resolved };
+        });
+        setPurchases(enrichedLocal);
+        if (!navigator.onLine) return;
+      } else if (!navigator.onLine) {
+        setPurchases([]);
         return;
       }
       const res = await api.get('/purchases', { params: { branch_id: effectiveBranchId, limit: 200 } });
@@ -68,7 +98,14 @@ const PurchaseReturn = () => {
           });
         }
       });
-      setPurchases(Array.from(localMap.values()));
+      const merged = Array.from(localMap.values());
+      const enriched = merged.map((purchase) => {
+        if (purchase.supplierName || purchase.supplier_name) return purchase;
+        const resolved = supplierMap.get(String(purchase.supplierId));
+        if (!resolved) return purchase;
+        return { ...purchase, supplierName: resolved };
+      });
+      setPurchases(enriched);
     } catch {
       setPurchases([]);
     }
@@ -81,10 +118,92 @@ const PurchaseReturn = () => {
       return;
     }
     try {
-      if (!navigator.onLine) throw new Error('offline');
+      const local = await getLocalPurchaseById(purchaseId);
+      const items = await getLocalPurchaseItems(purchaseId);
+      if (local) {
+        const resolvedId = local.serverId || local.id;
+        setDetail({
+          order: {
+            id: resolvedId,
+            supplier_id: local.supplierId ?? null,
+            supplier_name: local.supplierName ?? null,
+            branch_id: local.branchId ?? null,
+            invoice_number: local.invoiceNumber ?? null,
+            total_price: local.totalPrice ?? null,
+          },
+          items: items.map((item) => ({
+            id: item.id,
+            product_id: item.productId,
+            product_name: item.name ?? item.product_name ?? null,
+          })),
+          batches: [],
+        });
+        const rows = items.map((item) => ({
+          batch_id: item.id,
+          product_id: item.productId,
+          batch_number: item.batch_number ?? 'LOCAL',
+          expiry_date: item.expiry_date ?? null,
+          available: item.quantity ?? 0,
+          return_qty: '',
+        }));
+        setReturnRows(rows);
+        const serverPurchaseId = resolveServerPurchaseId(local.serverId || purchaseId);
+        if (!navigator.onLine || !serverPurchaseId) return;
+        purchaseId = serverPurchaseId;
+      } else if (!navigator.onLine) {
+        setDetail(null);
+        setReturnRows([]);
+        return;
+      } else {
+        const serverPurchaseId = resolveServerPurchaseId(purchaseId);
+        if (!serverPurchaseId) {
+          setDetail(null);
+          setReturnRows([]);
+          return;
+        }
+        purchaseId = serverPurchaseId;
+      }
+
       const res = await api.get(`/purchases/${purchaseId}`);
       const data = res?.data?.data || null;
       setDetail(data);
+      if (data?.order) {
+        const order = data.order;
+        const localPurchase = {
+          id: String(order.id),
+          supplierId: order.supplier_id ?? null,
+          supplierName: order.supplier_name ?? null,
+          invoiceNumber: order.invoice_number ?? null,
+          paymentMode: order.payment_mode ?? null,
+          totalPrice: order.total_price ?? null,
+          branchId: order.branch_id ?? null,
+          createdAt: order.created_at ?? null,
+          date: order.created_at ?? null,
+          syncStatus: 'synced',
+          sync_status: 'synced',
+          serverId: order.id ?? null,
+        };
+        await upsertLocalPurchasesBulk([localPurchase]).catch(() => {});
+      }
+      if (Array.isArray(data?.items) && data.items.length > 0 && data?.order?.id) {
+        const purchaseIdValue = String(data.order.id);
+        const mappedItems = data.items.map((item, idx) => ({
+          id: item.id ?? `item_${purchaseIdValue}_${idx + 1}`,
+          purchaseId: purchaseIdValue,
+          productId: item.product_id ?? item.productId ?? null,
+          name: item.product_name ?? item.name ?? null,
+          barcode: item.barcode ?? null,
+          category: item.category ?? null,
+          company: item.company ?? null,
+          mrp: item.mrp ?? null,
+          quantity: item.quantity ?? 0,
+          purchase_price: item.purchase_price_snapshot ?? item.purchase_price ?? null,
+          selling_price: item.selling_price ?? null,
+          gst_percent: item.gst_percent ?? null,
+          expiry_date: item.expiry_date ?? null,
+        }));
+        await addLocalPurchaseItems(mappedItems).catch(() => {});
+      }
       const rows = (data?.batches || []).map((batch) => ({
         batch_id: batch.id,
         product_id: batch.product_id,
@@ -95,38 +214,7 @@ const PurchaseReturn = () => {
       }));
       setReturnRows(rows);
     } catch {
-      const local = await getLocalPurchaseById(purchaseId);
-      const items = await getLocalPurchaseItems(purchaseId);
-      if (!local) {
-        setDetail(null);
-        setReturnRows([]);
-        return;
-      }
-      setDetail({
-        order: {
-          id: local.serverId || local.id,
-          supplier_id: local.supplierId ?? null,
-          supplier_name: local.supplierName ?? null,
-          branch_id: local.branchId ?? null,
-          invoice_number: local.invoiceNumber ?? null,
-          total_price: local.totalPrice ?? null,
-        },
-        items: items.map((item) => ({
-          id: item.id,
-          product_id: item.productId,
-          product_name: item.name ?? item.product_name ?? null,
-        })),
-        batches: [],
-      });
-      const rows = items.map((item) => ({
-        batch_id: item.id,
-        product_id: item.productId,
-        batch_number: item.batch_number ?? 'LOCAL',
-        expiry_date: item.expiry_date ?? null,
-        available: item.quantity ?? 0,
-        return_qty: '',
-      }));
-      setReturnRows(rows);
+      // ignore fetch errors; local data already handled above
     }
   };
 

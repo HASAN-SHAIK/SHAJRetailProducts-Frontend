@@ -1,4 +1,4 @@
-import { db } from '../../../core/db';
+import { db, validateAndPrepare } from '../../../core/db';
 
 const normalizeNumber = (value) => {
   const parsed = Number(value);
@@ -39,8 +39,12 @@ export const upsertProducts = async (products) => {
   const list = Array.isArray(products) ? products : [];
   const normalized = list.map(normalizeProduct).filter(Boolean);
   if (!normalized.length) return 0;
-  await db.products_cache.bulkPut(normalized);
-  return normalized.length;
+  const prepared = [];
+  for (const entry of normalized) {
+    prepared.push(await validateAndPrepare('product_cache', entry));
+  }
+  await db.products_cache.bulkPut(prepared);
+  return prepared.length;
 };
 
 export const searchProducts = async (term) => {
@@ -69,9 +73,10 @@ export const getProductByBarcode = async (barcode) => {
 };
 
 export const saveOrder = async (order) => {
-  if (!order || !order.id) return null;
-  await db.orders.put(order);
-  return order;
+  if (!order) return null;
+  const prepared = await validateAndPrepare('order', order);
+  await db.orders.put(prepared);
+  return prepared;
 };
 
 export const getOrderById = async (orderId) => {
@@ -88,18 +93,30 @@ export const getOrdersByStatus = async (status) => {
 export const updateOrdersBulk = async (orders) => {
   const list = Array.isArray(orders) ? orders.filter(Boolean) : [];
   if (!list.length) return 0;
-  await db.orders.bulkPut(list);
-  return list.length;
+  const prepared = [];
+  for (const entry of list) {
+    prepared.push(await validateAndPrepare('order', entry));
+  }
+  await db.orders.bulkPut(prepared);
+  return prepared.length;
 };
 
 export const replaceOrderItems = async (orderId, items) => {
   if (!orderId) return 0;
   const list = Array.isArray(items) ? items : [];
-  await db.order_items.where('order_id').equals(orderId).delete();
-  if (list.length) {
-    await db.order_items.bulkPut(list);
+  if (!list.length) {
+    throw new Error('Order items are required');
   }
-  return list.length;
+  const prepared = [];
+  for (const item of list) {
+    const normalized = { ...item, order_id: item?.order_id ?? item?.orderId ?? orderId };
+    prepared.push(await validateAndPrepare('order_item', normalized));
+  }
+  await db.transaction('rw', db.order_items, async () => {
+    await db.order_items.where('order_id').equals(orderId).delete();
+    await db.order_items.bulkPut(prepared);
+  });
+  return prepared.length;
 };
 
 export const getOrderItems = async (orderId) => {
@@ -109,14 +126,20 @@ export const getOrderItems = async (orderId) => {
 
 export const addSyncQueueEntry = async (entry) => {
   if (!entry) return null;
-  const id = await db.sync_queue.add(entry);
-  return { ...entry, id };
+  const prepared = await validateAndPrepare('sync_queue', entry);
+  const existing = (await db.sync_queue.toArray()).find(
+    (item) => item?.payload_hash && item.payload_hash === prepared.payload_hash
+  );
+  if (existing) return existing;
+  const id = await db.sync_queue.add(prepared);
+  return { ...prepared, id };
 };
 
 export const updateSyncQueueEntry = async (entry) => {
   if (!entry || !entry.id) return null;
-  await db.sync_queue.put(entry);
-  return entry;
+  const prepared = await validateAndPrepare('sync_queue', entry);
+  await db.sync_queue.put(prepared);
+  return prepared;
 };
 
 export const getPendingSyncEntries = async () => {

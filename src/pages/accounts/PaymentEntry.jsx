@@ -4,6 +4,7 @@ import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import { getAllSuppliersCache, updateSuppliersCacheBulk } from '../../core/db';
 import { createPayment } from '../../services/accountingService';
 import { enqueuePayment } from '../../utils/accountingOffline';
+import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './Accounts.css';
 
 const PaymentEntry = () => {
@@ -14,6 +15,7 @@ const PaymentEntry = () => {
   const [amount, setAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('cash');
   const [notes, setNotes] = useState('');
+  const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -62,16 +64,14 @@ const PaymentEntry = () => {
   const handleSubmit = async (event) => {
     event.preventDefault();
     const numericAmount = Number(amount);
-    if (!supplierId) {
-      showPopup('Select a supplier.', 'Validation');
-      return;
-    }
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      showPopup('Amount must be > 0.', 'Validation');
-      return;
-    }
-    if (!paymentMode) {
-      showPopup('Select a payment mode.', 'Validation');
+    const nextErrors = collectValidationErrors([
+      { key: 'supplierId', validate: () => Boolean(supplierId), message: 'Select a supplier.' },
+      { key: 'amount', validate: () => Number.isFinite(numericAmount) && numericAmount > 0, message: 'Amount must be greater than 0.' },
+      { key: 'paymentMode', validate: () => Boolean(paymentMode), message: 'Select a payment mode.' }
+    ]);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      showPopup(firstValidationMessage(nextErrors), 'Validation');
       return;
     }
     setSaving(true);
@@ -92,6 +92,7 @@ const PaymentEntry = () => {
       setSupplierId('');
       setAmount('');
       setNotes('');
+      setErrors({});
     } catch (error) {
       showPopup(error?.response?.data?.message || 'Failed to save payment.', 'Error');
     } finally {
@@ -117,7 +118,7 @@ const PaymentEntry = () => {
         <label>
           Select Supplier *
           <select
-            className="form-control billing-input"
+            className={`form-control billing-input ${errors.supplierId ? 'is-invalid' : ''}`}
             value={supplierId}
             onChange={(event) => setSupplierId(event.target.value)}
           >
@@ -128,23 +129,25 @@ const PaymentEntry = () => {
               </option>
             ))}
           </select>
+          {errors.supplierId && <small className="text-danger">{errors.supplierId}</small>}
           {loading && <small className="text-secondary">Loading suppliers...</small>}
         </label>
         <label>
           Amount *
           <input
-            className="form-control billing-input"
+            className={`form-control billing-input ${errors.amount ? 'is-invalid' : ''}`}
             type="number"
             min="0"
             step="0.01"
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
           />
+          {errors.amount && <small className="text-danger">{errors.amount}</small>}
         </label>
         <label>
           Payment Mode *
           <select
-            className="form-control billing-input"
+            className={`form-control billing-input ${errors.paymentMode ? 'is-invalid' : ''}`}
             value={paymentMode}
             onChange={(event) => setPaymentMode(event.target.value)}
           >
@@ -153,6 +156,7 @@ const PaymentEntry = () => {
             <option value="upi">UPI</option>
             <option value="online">Online</option>
           </select>
+          {errors.paymentMode && <small className="text-danger">{errors.paymentMode}</small>}
         </label>
         <label>
           Notes

@@ -4,6 +4,7 @@ import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import { getAllCustomers, upsertCustomersBulk } from '../../core/db';
 import { createReceipt } from '../../services/accountingService';
 import { enqueueReceipt } from '../../utils/accountingOffline';
+import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './Accounts.css';
 
 const ReceiptEntry = () => {
@@ -14,6 +15,7 @@ const ReceiptEntry = () => {
   const [amount, setAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('cash');
   const [notes, setNotes] = useState('');
+  const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -61,16 +63,14 @@ const ReceiptEntry = () => {
   const handleSubmit = async (event) => {
     event.preventDefault();
     const numericAmount = Number(amount);
-    if (!customerId) {
-      showPopup('Select a customer.', 'Validation');
-      return;
-    }
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      showPopup('Amount must be > 0.', 'Validation');
-      return;
-    }
-    if (!paymentMode) {
-      showPopup('Select a payment mode.', 'Validation');
+    const nextErrors = collectValidationErrors([
+      { key: 'customerId', validate: () => Boolean(customerId), message: 'Select a customer.' },
+      { key: 'amount', validate: () => Number.isFinite(numericAmount) && numericAmount > 0, message: 'Amount must be greater than 0.' },
+      { key: 'paymentMode', validate: () => Boolean(paymentMode), message: 'Select a payment mode.' }
+    ]);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      showPopup(firstValidationMessage(nextErrors), 'Validation');
       return;
     }
     setSaving(true);
@@ -91,6 +91,7 @@ const ReceiptEntry = () => {
       setCustomerId('');
       setAmount('');
       setNotes('');
+      setErrors({});
     } catch (error) {
       showPopup(error?.response?.data?.message || 'Failed to save receipt.', 'Error');
     } finally {
@@ -116,7 +117,7 @@ const ReceiptEntry = () => {
         <label>
           Select Customer *
           <select
-            className="form-control billing-input"
+            className={`form-control billing-input ${errors.customerId ? 'is-invalid' : ''}`}
             value={customerId}
             onChange={(event) => setCustomerId(event.target.value)}
           >
@@ -127,23 +128,25 @@ const ReceiptEntry = () => {
               </option>
             ))}
           </select>
+          {errors.customerId && <small className="text-danger">{errors.customerId}</small>}
           {loading && <small className="text-secondary">Loading customers...</small>}
         </label>
         <label>
           Amount *
           <input
-            className="form-control billing-input"
+            className={`form-control billing-input ${errors.amount ? 'is-invalid' : ''}`}
             type="number"
             min="0"
             step="0.01"
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
           />
+          {errors.amount && <small className="text-danger">{errors.amount}</small>}
         </label>
         <label>
           Payment Mode *
           <select
-            className="form-control billing-input"
+            className={`form-control billing-input ${errors.paymentMode ? 'is-invalid' : ''}`}
             value={paymentMode}
             onChange={(event) => setPaymentMode(event.target.value)}
           >
@@ -152,6 +155,7 @@ const ReceiptEntry = () => {
             <option value="upi">UPI</option>
             <option value="online">Online</option>
           </select>
+          {errors.paymentMode && <small className="text-danger">{errors.paymentMode}</small>}
         </label>
         <label>
           Notes

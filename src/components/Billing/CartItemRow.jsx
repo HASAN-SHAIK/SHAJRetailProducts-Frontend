@@ -40,6 +40,7 @@ const CartItemRow = ({
       <td>
         <div className="billing-name">
           <span>{item.name}</span>
+          {item.batch_number && <small className="billing-stock">Batch: {item.batch_number}</small>}
           {Number.isFinite(item.__stock) && (
             <small className="billing-stock">Stock: {item.__stock}</small>
           )}

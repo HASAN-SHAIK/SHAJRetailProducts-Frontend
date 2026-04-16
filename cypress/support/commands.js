@@ -12,5 +12,23 @@ Cypress.Commands.add('login', (email, password) => {
   cy.get('input[name="email"]').clear().type(userEmail);
   cy.get('input[name="password"]').clear().type(userPassword, { log: false });
   cy.contains('button', /let's go/i).click();
-  cy.url().should('include', '/dashboard');
+  cy.location('pathname', { timeout: 60000 }).should((pathname) => {
+    expect(
+      ['/dashboard', '/setup', '/m/dashboard'].some((route) => pathname.includes(route))
+    ).to.eq(true);
+  });
+  cy.location('pathname', { timeout: 90000 }).should('not.include', '/setup');
+});
+
+Cypress.Commands.add('loginAndOpen', (path = '/dashboard', email, password) => {
+  const userEmail = email || Cypress.env('email');
+  const userPassword = password || Cypress.env('password');
+
+  cy.viewport(1440, 900);
+  cy.session([userEmail, userPassword], () => {
+    cy.login(userEmail, userPassword);
+  });
+
+  cy.visit(path);
+  cy.location('pathname', { timeout: 30000 }).should('include', path);
 });

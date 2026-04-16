@@ -6,10 +6,22 @@
 }
 
 .accounts-page .accounts-form label {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto 18px;
   gap: 6px;
   font-weight: 500;
+}
+
+.accounts-page .accounts-form label .form-control,
+.accounts-page .accounts-form label .form-select,
+.accounts-page .accounts-form label .billing-input {
+  grid-row: 2;
+}
+
+.accounts-page .accounts-form label small {
+  grid-row: 3;
+  line-height: 1;
+  margin: 0;
 }
 
 .accounts-page .accounts-form button {

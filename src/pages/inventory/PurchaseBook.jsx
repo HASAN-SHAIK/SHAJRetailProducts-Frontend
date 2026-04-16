@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/axios';
 import { useBranchStore } from '../../store/branchStore';
-import { getAllSuppliersCache, getLocalPurchases, upsertLocalPurchasesBulk } from '../../core/db';
+import { dedupeSuppliersCache, getLocalPurchases, upsertLocalPurchasesBulk, updateSuppliersCacheBulk } from '../../core/db';
 import { syncAllInventory } from '../../utils/inventorySync';
 import './Suppliers.css';
 
@@ -19,13 +19,18 @@ const PurchaseBook = () => {
 
   const fetchSuppliers = async () => {
     try {
-      if (!navigator.onLine) {
-        const cached = await getAllSuppliersCache();
-        setSuppliers(Array.isArray(cached) ? cached : []);
-        return;
+      const cached = await dedupeSuppliersCache();
+      const cachedList = Array.isArray(cached) ? cached : [];
+      if (cachedList.length) {
+        setSuppliers(cachedList);
       }
+      if (!navigator.onLine || cachedList.length) return;
       const res = await api.get('/suppliers', { params: { limit: 500, branch_id: effectiveBranchId } });
-      setSuppliers(res?.data?.data?.suppliers || res?.data?.suppliers || []);
+      const list = res?.data?.data?.suppliers || res?.data?.suppliers || [];
+      if (Array.isArray(list) && list.length) {
+        updateSuppliersCacheBulk(list).catch(() => {});
+      }
+      setSuppliers(Array.isArray(list) ? list : []);
     } catch {
       setSuppliers([]);
     }
@@ -34,71 +39,122 @@ const PurchaseBook = () => {
   const fetchPurchases = async () => {
     setLoading(true);
     try {
-      const local = await getLocalPurchases();
-      let merged = Array.isArray(local) ? local : [];
+      const supplierCache = await dedupeSuppliersCache();
+      const supplierMap = new Map(
+        (Array.isArray(supplierCache) ? supplierCache : []).map((item) => [String(item.id), item.name])
+      );
+      let merged = [];
+      const normalizeDateKey = (value) => {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toISOString().slice(0, 10);
+      };
+      const normalizeTextKey = (value) => String(value || '').trim().toLowerCase();
+      const buildFingerprint = (purchase) => {
+        const supplierId = String(purchase.supplierId ?? purchase.supplier_id ?? '');
+        const invoice = normalizeTextKey(purchase.invoiceNumber ?? purchase.invoice_number ?? '');
+        const total = Number(purchase.totalPrice ?? purchase.total_price ?? 0).toFixed(2);
+        const dateKey = normalizeDateKey(purchase.date ?? purchase.createdAt ?? purchase.created_at ?? '');
+        if (!supplierId || !dateKey) return '';
+        if (invoice) return `${supplierId}|${invoice}|${dateKey}`;
+        return `${supplierId}|${total}|${dateKey}`;
+      };
       const params = {
         branch_id: effectiveBranchId,
         supplier_id: filters.supplier_id || undefined,
         start_date: filters.start_date || undefined,
         end_date: filters.end_date || undefined,
       };
-      if (navigator.onLine) {
-        const res = await api.get('/purchases', { params });
-        const list = res?.data?.data?.purchases || res?.data?.purchases || [];
-        if (Array.isArray(list) && list.length) {
-          const mapped = list.map((purchase) => ({
-            id: String(purchase.id),
-            supplierId: purchase.supplier_id ?? null,
-            supplierName: purchase.supplier_name ?? null,
-            invoiceNumber: purchase.invoice_number ?? null,
-            paymentMode: purchase.payment_mode ?? null,
-            totalPrice: purchase.total_price ?? null,
-            branchId: purchase.branch_id ?? null,
-            createdAt: purchase.created_at ?? null,
-            date: purchase.created_at ?? null,
-            syncStatus: 'synced',
-            sync_status: 'synced',
-            serverId: purchase.id ?? null,
-          }));
-          await upsertLocalPurchasesBulk(mapped).catch(() => {});
-          const localMap = new Map(
-            merged.map((item) => [item.serverId || item.id, item])
-          );
-          list.forEach((serverItem) => {
-            const key = serverItem.id;
-            if (!localMap.has(key)) {
-              localMap.set(key, {
-                id: String(serverItem.id),
-                supplierId: serverItem.supplier_id ?? null,
-                supplierName: serverItem.supplier_name ?? null,
-                invoiceNumber: serverItem.invoice_number ?? null,
-                paymentMode: serverItem.payment_mode ?? null,
-                totalPrice: serverItem.total_price ?? null,
-                branchId: serverItem.branch_id ?? null,
-                createdAt: serverItem.created_at ?? null,
-                date: serverItem.created_at ?? null,
-                syncStatus: 'synced',
-                sync_status: 'synced',
-                serverId: serverItem.id ?? null,
-              });
+
+      const deduplicatePurchases = (list) => {
+        const unique = new Map();
+        list.forEach((purchase) => {
+          const fingerprint = buildFingerprint(purchase);
+          const key = fingerprint || purchase.serverId || purchase.id;
+          if (unique.has(key)) {
+            const existing = unique.get(key);
+            if (purchase.serverId && !existing.serverId) {
+              unique.set(key, purchase);
             }
-          });
-          merged = Array.from(localMap.values());
-        }
-      }
-      const filtered = merged.filter((purchase) => {
+          } else {
+            unique.set(key, purchase);
+          }
+        });
+        return Array.from(unique.values());
+      };
+
+      const matchesFilters = (purchase) => {
         if (filters.supplier_id && String(purchase.supplierId) !== String(filters.supplier_id)) return false;
         if (filters.start_date) {
-          const createdAt = new Date(purchase.date || purchase.createdAt || 0).toISOString().slice(0, 10);
+          const createdAt = normalizeDateKey(purchase.date || purchase.createdAt || 0);
           if (createdAt < filters.start_date) return false;
         }
         if (filters.end_date) {
-          const createdAt = new Date(purchase.date || purchase.createdAt || 0).toISOString().slice(0, 10);
+          const createdAt = normalizeDateKey(purchase.date || purchase.createdAt || 0);
           if (createdAt > filters.end_date) return false;
         }
         return true;
+      };
+
+      const loadFromIndexedDb = async () => {
+        try {
+          const local = await getLocalPurchases();
+          const localList = Array.isArray(local) ? local : [];
+          if (!localList.length) return [];
+          const unique = deduplicatePurchases(localList);
+          return unique.filter(matchesFilters);
+        } catch {
+          return [];
+        }
+      };
+
+      const localFiltered = await loadFromIndexedDb();
+      if (localFiltered.length) {
+        const enriched = localFiltered.map((purchase) => {
+          if (purchase.supplierName || purchase.supplier_name) return purchase;
+          const resolved = supplierMap.get(String(purchase.supplierId));
+          if (!resolved) return purchase;
+          return { ...purchase, supplierName: resolved };
+        });
+        setPurchases(enriched);
+        return;
+      }
+
+      if (!navigator.onLine) {
+        setPurchases([]);
+        return;
+      }
+
+      const res = await api.get('/purchases', { params });
+      const list = res?.data?.data?.purchases || res?.data?.purchases || [];
+      if (Array.isArray(list) && list.length) {
+        const mapped = list.map((purchase) => ({
+          id: String(purchase.id),
+          supplierId: purchase.supplier_id ?? null,
+          supplierName: purchase.supplier_name ?? null,
+          invoiceNumber: purchase.invoice_number ?? null,
+          paymentMode: purchase.payment_mode ?? null,
+          totalPrice: purchase.total_price ?? null,
+          branchId: purchase.branch_id ?? null,
+          createdAt: purchase.created_at ?? null,
+          date: purchase.created_at ?? null,
+          syncStatus: 'synced',
+          sync_status: 'synced',
+          serverId: purchase.id ?? null,
+        }));
+        await upsertLocalPurchasesBulk(mapped).catch(() => {});
+        merged = deduplicatePurchases(mapped);
+      }
+
+      const filtered = merged.filter(matchesFilters);
+      const enriched = filtered.map((purchase) => {
+        if (purchase.supplierName || purchase.supplier_name) return purchase;
+        const resolved = supplierMap.get(String(purchase.supplierId));
+        if (!resolved) return purchase;
+        return { ...purchase, supplierName: resolved };
       });
-      setPurchases(filtered);
+      setPurchases(enriched);
     } catch {
       setPurchases([]);
     } finally {

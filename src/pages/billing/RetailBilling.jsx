@@ -8,8 +8,10 @@ import { useWhatsappStore } from '../../store/whatsappStore';
 import { useBranchStore } from '../../store/branchStore';
 import {
   addSyncQueueItem,
+  getAllBatches,
   getAllCustomers,
   getConfigValue,
+  getProductCacheById,
   getProductByBarcode,
   saveConfigValue,
   updateProductsBulk,
@@ -31,6 +33,7 @@ import WhatsAppModal from '../../components/WhatsApp/WhatsAppModal';
 import SendWhatsAppButton from '../../components/WhatsApp/SendWhatsAppButton';
 import { sendBillViaWhatsApp } from '../../services/whatsappService';
 import { GST_MODES, resolveGstModeFromConfig } from '../../services/gstService';
+import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 import '../BillingPage.css';
 
 const DRAFT_STORAGE_KEY = 'billing_drafts_v1';
@@ -93,6 +96,70 @@ const getStockCount = (product) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const isBatchExpired = (batch) => {
+  const value = batch?.expiry_date ?? batch?.expiryDate ?? null;
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const batchDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return batchDay < todayStart;
+};
+
+const isLikelyLocalBatchId = (value) => {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return false;
+  return (
+    text.startsWith('local:') ||
+    text.startsWith('local_') ||
+    text.startsWith('local-') ||
+    text.startsWith('local_batch_') ||
+    text.startsWith('temp_')
+  );
+};
+
+const toDateOnlyText = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getCartItemKey = (product) => {
+  const batchId = product?.batch_id ?? product?.batchId ?? null;
+  if (batchId !== null && batchId !== undefined && String(batchId).trim() !== '') {
+    const productId =
+      product?.id ??
+      product?.product_id ??
+      product?.productId ??
+      product?.barcode ??
+      null;
+    if (productId !== null && productId !== undefined && String(productId).trim() !== '') {
+      return `p:${String(productId)}|b:${String(batchId)}`;
+    }
+  }
+  const base =
+    product?.key ??
+    product?.__key ??
+    product?.id ??
+    product?.product_id ??
+    product?.productId ??
+    product?.barcode ??
+    null;
+  if (base !== null && base !== undefined && String(base).trim() !== '') {
+    return base;
+  }
+  const name = product?.name ?? product?.product_name ?? product?.product ?? null;
+  if (name !== null && name !== undefined && String(name).trim() !== '') {
+    return `name:${String(name).trim().toLowerCase()}`;
+  }
+  return null;
+};
+
 const extractProductFromResponse = (response) => {
   if (!response) return null;
   const data = response?.data;
@@ -107,9 +174,9 @@ const RetailBilling = () => {
   const navigate = useNavigate();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const userDetails = useSelector((state) => state.user.userDetails);
-  const planFeatures = tenantConfig?.plan_features || tenantConfig || {};
-  const features = tenantConfig?.features || tenantConfig?.plan_features || tenantConfig || {};
-  const barcodeEnabled = features.enable_barcode === true;
+  const planFeatures = getTenantFeatures(tenantConfig);
+  const features = planFeatures;
+  const barcodeEnabled = hasFeature(tenantConfig, 'enable_barcode');
   const weightBasedEnabled =
     features.enable_weight_based !== false && tenantConfig?.enable_weight_based !== false;
   const pieceBasedEnabled =
@@ -194,10 +261,13 @@ const RetailBilling = () => {
   });
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
   const [locationSuggestions, setLocationSuggestions] = useState([]);
+  const [customerFieldErrors, setCustomerFieldErrors] = useState({});
   const [paymentAmount, setPaymentAmount] = useState('');
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappSending, setWhatsappSending] = useState(false);
   const [lastOrderId, setLastOrderId] = useState(null);
+  const [selectedItemBatchDetails, setSelectedItemBatchDetails] = useState([]);
+  const [batchDetailsLoading, setBatchDetailsLoading] = useState(false);
 
   const buildCustomerPayload = (details, fallbackName, fallbackMobile) => {
     const name = String(details?.name || fallbackName || '').trim();
@@ -466,14 +536,11 @@ const RetailBilling = () => {
       setSearchLoading(true);
       const localResults = await searchLocalProducts(current);
       if (localResults.length) {
-        const deduped = localResults
-          .map((item) => ({
-            ...item,
-            name: item?.name ?? item?.product_name ?? item?.product ?? '-',
-            company: item?.company ?? item?.company_name ?? '',
-            __stock: getStockCount(item),
-          }))
-          .slice(0, 8);
+        const filteredLocal = effectiveBranchId
+          ? localResults.filter((item) => isProductInCurrentBranch(item))
+          : localResults;
+        const batchWise = await expandProductsToBatchSuggestions(filteredLocal);
+        const deduped = batchWise.slice(0, 8);
         if (latestSearchRef.current !== current) return;
         setSearchSuggestions(deduped);
         setSearchLoading(false);
@@ -506,7 +573,8 @@ const RetailBilling = () => {
       if (effectiveBranchId) {
         suggestions = suggestions.filter((item) => isProductInCurrentBranch(item));
       }
-      setSearchSuggestions(suggestions);
+      const batchWise = await expandProductsToBatchSuggestions(suggestions);
+      setSearchSuggestions(batchWise.slice(0, 8));
       setSearchLoading(false);
     }, 300);
     return () => clearTimeout(searchTimerRef.current);
@@ -539,31 +607,268 @@ const RetailBilling = () => {
   const previewCreditUsed = Math.max(totals.grandTotal - previewPaid, 0);
   const creditOverLimit =
     customerDetails.id && creditLimit > 0 && currentBalance + previewCreditUsed > creditLimit;
+  const selectedCartItem = useMemo(
+    () => items.find((item) => String(item?.key) === String(selectedKey)) || null,
+    [items, selectedKey]
+  );
 
   const getProductBranchId = (product) =>
     product?.branch_id || product?.branchId || product?.branch || null;
 
   const isProductInCurrentBranch = (product) => {
-    if (!effectiveBranchId) return false;
+    if (!effectiveBranchId) return true;
     const productBranchId = getProductBranchId(product);
-    if (!productBranchId) return true;
-    return productBranchId === effectiveBranchId;
+    if (!productBranchId) return false;
+    return String(productBranchId) === String(effectiveBranchId);
   };
 
   const ensureBranchMatch = (product) => {
-    if (!effectiveBranchId || !branchConfirmed) {
-      showPopup('Select a branch before billing.', 'Validation');
-      return false;
+    if (!effectiveBranchId) {
+      showPopup('Select a branch before billing. Added anyway.', 'Validation');
+      return true;
     }
     if (!isProductInCurrentBranch(product)) {
-      showPopup('Product belongs to another branch.', 'Branch');
+      showPopup('Product belongs to another branch or branch data is missing.', 'Branch');
       return false;
     }
     return true;
   };
 
+  const getUsableProductId = (product) =>
+    product?.id ?? product?.product_id ?? product?.productId ?? null;
+
+  const getAvailableBatchesForProduct = async (product) => {
+    const productId = getUsableProductId(product);
+    if (!productId) return [];
+    let productStock = getStockCount(product);
+    if ((!Number.isFinite(productStock) || productStock < 0) && productId) {
+      const cachedProduct = await getProductCacheById(productId);
+      productStock = getStockCount(cachedProduct);
+    }
+    const allBatches = await getAllBatches();
+    const filtered = (Array.isArray(allBatches) ? allBatches : [])
+      .filter((batch) => {
+        if (batch?.is_deleted) return false;
+        if (String(batch?.product_id) !== String(productId)) return false;
+        if (effectiveBranchId && batch?.branch_id && String(batch.branch_id) !== String(effectiveBranchId)) return false;
+        if (isBatchExpired(batch)) return false;
+        const available = Number(batch?.quantity_remaining ?? batch?.quantity ?? 0);
+        return Number.isFinite(available) && available > 0;
+      });
+
+    const mergedBySignature = new Map();
+    filtered.forEach((batch) => {
+      const available = Number(batch?.quantity_remaining ?? batch?.quantity ?? 0);
+      const signature = [
+        String(batch?.product_id ?? ''),
+        String(batch?.branch_id ?? ''),
+        String(batch?.batch_number ?? '').trim().toLowerCase(),
+        toDateOnlyText(batch?.expiry_date ?? batch?.expiryDate ?? ''),
+        String(batch?.purchase_price ?? ''),
+        String(batch?.selling_price ?? ''),
+        String(batch?.mrp ?? ''),
+      ].join('|');
+      const existing = mergedBySignature.get(signature);
+      if (!existing) {
+        mergedBySignature.set(signature, {
+          ...batch,
+          quantity_remaining: available,
+          quantity: Number(batch?.quantity ?? available),
+        });
+        return;
+      }
+      const existingAvail = Number(existing?.quantity_remaining ?? 0);
+      const mergedAvail = existingAvail + available;
+      const existingIdLocal = isLikelyLocalBatchId(existing?.id);
+      const currentIdLocal = isLikelyLocalBatchId(batch?.id);
+      mergedBySignature.set(signature, {
+        ...existing,
+        id: existingIdLocal && !currentIdLocal ? batch?.id : existing?.id,
+        created_at: new Date(batch?.created_at || 0).getTime() < new Date(existing?.created_at || 0).getTime()
+          ? batch?.created_at
+          : existing?.created_at,
+        updated_at: new Date(batch?.updated_at || 0).getTime() > new Date(existing?.updated_at || 0).getTime()
+          ? batch?.updated_at
+          : existing?.updated_at,
+        quantity_remaining: mergedAvail,
+        quantity: Math.max(Number(existing?.quantity ?? 0), mergedAvail),
+      });
+    });
+
+    const merged = Array.from(mergedBySignature.values()).sort(
+      (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
+    );
+
+    if (!Number.isFinite(productStock) || productStock < 0) {
+      return merged;
+    }
+    let remainingCap = productStock;
+    const capped = [];
+    for (const batch of merged) {
+      if (remainingCap <= 0) break;
+      const available = Number(batch?.quantity_remaining ?? batch?.quantity ?? 0);
+      const allowed = Math.min(available, remainingCap);
+      if (!Number.isFinite(allowed) || allowed <= 0) continue;
+      capped.push({
+        ...batch,
+        quantity_remaining: allowed,
+        quantity: Math.max(allowed, Number(batch?.quantity ?? allowed)),
+      });
+      remainingCap -= allowed;
+    }
+    return capped;
+  };
+
+  const getInCartQtyForKey = (key) =>
+    key
+      ? items
+          .filter((item) => String(item?.key) === String(key))
+          .reduce((sum, item) => sum + Number(item?.qty || 0), 0)
+      : 0;
+
+  const decorateProductWithBatch = (product, batch) => {
+    const available = Number(batch?.quantity_remaining ?? batch?.quantity ?? 0);
+    return {
+      ...product,
+      branch_id: batch?.branch_id ?? product?.branch_id ?? product?.branchId ?? null,
+      batch_id: batch?.id ?? null,
+      batch_number: batch?.batch_number ?? null,
+      selling_price:
+        batch?.selling_price ?? product?.selling_price ?? product?.sellingPrice ?? product?.price ?? 0,
+      purchase_price: batch?.purchase_price ?? product?.purchase_price ?? product?.purchasePrice ?? 0,
+      mrp: batch?.mrp ?? product?.mrp ?? product?.mrp_price ?? 0,
+      stock_quantity: Number.isFinite(available) ? available : getStockCount(product),
+      __stock: Number.isFinite(available) ? available : getStockCount(product),
+    };
+  };
+
+  const resolveProductForCart = async (product, explicitBatchId = null) => {
+    const batches = await getAvailableBatchesForProduct(product);
+    if (!batches.length) {
+      return { ...product, __stock: getStockCount(product) };
+    }
+    let selectedBatch = null;
+    if (explicitBatchId) {
+      selectedBatch = batches.find((batch) => String(batch.id) === String(explicitBatchId)) || null;
+    }
+    if (!selectedBatch) {
+      selectedBatch = batches.find((batch) => {
+        const candidate = decorateProductWithBatch(product, batch);
+        const key = getCartItemKey(candidate);
+        const inCartQty = getInCartQtyForKey(key);
+        const available = Number(candidate.__stock || 0);
+        return available - inCartQty > 0;
+      }) || null;
+    }
+    if (!selectedBatch) return null;
+    return decorateProductWithBatch(product, selectedBatch);
+  };
+
+  const expandProductsToBatchSuggestions = async (products = []) => {
+    const out = [];
+    for (const product of products) {
+      if (!product) continue;
+      const normalizedBase = {
+        ...product,
+        id: getUsableProductId(product),
+        name: product?.name ?? product?.product_name ?? product?.product ?? '-',
+        company: product?.company ?? product?.company_name ?? '',
+      };
+      const batches = await getAvailableBatchesForProduct(normalizedBase);
+      if (!batches.length) {
+        out.push({
+          ...normalizedBase,
+          __stock: getStockCount(normalizedBase),
+        });
+        continue;
+      }
+      batches.forEach((batch) => {
+        out.push(decorateProductWithBatch(normalizedBase, batch));
+      });
+    }
+    return out;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSelectedBatchDetails = async () => {
+      if (!selectedCartItem) {
+        setSelectedItemBatchDetails([]);
+        return;
+      }
+      const productId = getUsableProductId(selectedCartItem);
+      if (!productId) {
+        setSelectedItemBatchDetails([]);
+        return;
+      }
+      setBatchDetailsLoading(true);
+      try {
+        const batches = await getAvailableBatchesForProduct(selectedCartItem);
+        if (cancelled) return;
+        const rows = batches.map((batch) => {
+          const decorated = decorateProductWithBatch(selectedCartItem, batch);
+          const key = getCartItemKey(decorated);
+          const inCartQty = key
+            ? items
+                .filter((item) => String(item?.key) === String(key))
+                .reduce((sum, item) => sum + Number(item?.qty || 0), 0)
+            : 0;
+          return {
+            ...batch,
+            key,
+            inCartQty,
+            available: Number(batch?.quantity_remaining ?? batch?.quantity ?? 0),
+            selling_price:
+              batch?.selling_price ??
+              selectedCartItem?.price ??
+              selectedCartItem?.selling_price ??
+              0,
+            purchase_price:
+              batch?.purchase_price ??
+              selectedCartItem?.purchase_price ??
+              0,
+            mrp: batch?.mrp ?? selectedCartItem?.mrp ?? 0,
+          };
+        });
+        setSelectedItemBatchDetails(rows);
+      } finally {
+        if (!cancelled) {
+          setBatchDetailsLoading(false);
+        }
+      }
+    };
+    loadSelectedBatchDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCartItem, items, effectiveBranchId]);
+
+  const handleAddSelectedBatchToCart = async (batchId) => {
+    if (!selectedCartItem || !batchId) return;
+    const resolvedProduct = await resolveProductForCart(selectedCartItem, batchId);
+    if (!resolvedProduct) {
+      showPopup('Selected batch is not available.', 'Stock');
+      return;
+    }
+    const stock = getStockCount(resolvedProduct);
+    const key = getCartItemKey(resolvedProduct);
+    const inCartQty = key
+      ? items
+          .filter((item) => String(item?.key) === String(key))
+          .reduce((sum, item) => sum + Number(item?.qty || 0), 0)
+      : 0;
+    if (stock !== null && inCartQty >= stock) {
+      showPopup('No more stock left in this batch.', 'Stock');
+      return;
+    }
+    addItem(resolvedProduct, 1);
+    if (key) {
+      selectItem(key);
+    }
+  };
+
   const findProduct = async (barcode) => {
-    const cached = await getProductByBarcode(barcode);
+    const cached = await getProductByBarcode(barcode, effectiveBranchId);
     if (cached) return cached;
     if (!navigator.onLine) return null;
     try {
@@ -695,12 +1000,34 @@ const RetailBilling = () => {
       if (!ensureBranchMatch(product)) {
         return;
       }
-      const stock = getStockCount(product);
-      if (stock !== null && stock <= 0) {
-        showPopup('Product is out of stock', 'Stock');
+      const resolvedProduct = await resolveProductForCart(product);
+      if (!resolvedProduct) {
+        showPopup('No sellable batch stock available for selected branch.', 'Stock');
         return;
       }
-      addItem(product, Number.isFinite(qty) && qty > 0 ? qty : 1);
+      const stock = getStockCount(resolvedProduct);
+      if (stock !== null && stock <= 0) {
+        showPopup('Product is out of stock for selected branch.', 'Stock');
+        return;
+      }
+      const key = getCartItemKey(resolvedProduct);
+      const requestedQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
+      const inCartQty = key
+        ? items
+            .filter((item) => String(item?.key) === String(key))
+            .reduce((sum, item) => sum + Number(item?.qty || 0), 0)
+        : 0;
+      if (stock !== null && requestedQty + inCartQty > stock) {
+        const remaining = Math.max(stock - inCartQty, 0);
+        if (remaining <= 0) {
+          showPopup('Insufficient stock for selected branch.', 'Stock');
+          return;
+        }
+        addItem(resolvedProduct, remaining);
+        showPopup(`Only ${remaining} can be added from available branch stock.`, 'Stock');
+      } else {
+        addItem(resolvedProduct, requestedQty);
+      }
       setBarcodeValue('');
       setQuantityValue('1');
       if (barcodeRef.current) {
@@ -712,7 +1039,12 @@ const RetailBilling = () => {
   };
 
   const handleCheckout = async () => {
-    if (!items.length || isSubmitting) return;
+    if (!items.length || isSubmitting) {
+      if (!items.length) {
+        showPopup('Add at least one product before checkout.', 'Validation');
+      }
+      return;
+    }
     if (!effectiveBranchId || !branchConfirmed) {
       showPopup('Select a branch before billing.', 'Validation');
       return;
@@ -729,6 +1061,7 @@ const RetailBilling = () => {
     if (Number.isFinite(totalDue)) {
       setPaymentAmount(totalDue.toFixed(2));
     }
+    setCustomerFieldErrors({});
     setCustomerSuggestions([]);
     setLocationSuggestions([]);
     setCustomerModalOpen(true);
@@ -800,6 +1133,10 @@ const RetailBilling = () => {
     });
     setCustomerSuggestions([]);
     setLocationSuggestions([]);
+    setCustomerFieldErrors((prev) => {
+      if (!prev.name && !prev.mobile) return prev;
+      return { ...prev, name: '', mobile: '' };
+    });
   };
 
   const handlePaperWidthChange = (value) => {
@@ -851,20 +1188,96 @@ const RetailBilling = () => {
     }
   };
 
+  const validateServerStockForCheckout = async () => {
+    if (!navigator.onLine || transactionType !== 'sale' || !effectiveBranchId) {
+      return { ok: true, issues: [] };
+    }
+
+    const requestedByProduct = new Map();
+    items.forEach((item) => {
+      const productId = item?.id ?? item?.product_id ?? item?.productId ?? null;
+      const qty = Number(item?.qty ?? item?.quantity ?? 0);
+      if (!productId || !Number.isFinite(qty) || qty <= 0) return;
+      const key = String(productId);
+      requestedByProduct.set(key, (requestedByProduct.get(key) || 0) + qty);
+    });
+
+    const productEntries = Array.from(requestedByProduct.entries());
+    if (!productEntries.length) return { ok: true, issues: [] };
+
+    const checks = await Promise.all(
+      productEntries.map(async ([productId, requestedQty]) => {
+        try {
+          const response = await api.get('/stock', { params: { product_id: productId } });
+          const list = Array.isArray(response?.data?.stock) ? response.data.stock : [];
+          const branchRow = list.find((row) => String(row?.branch_id) === String(effectiveBranchId));
+          const availableQty = Number(branchRow?.quantity ?? 0);
+          if (!Number.isFinite(availableQty) || requestedQty > availableQty) {
+            return {
+              productId,
+              requestedQty,
+              availableQty: Number.isFinite(availableQty) ? availableQty : 0,
+            };
+          }
+          return null;
+        } catch {
+          return {
+            productId,
+            requestedQty,
+            availableQty: null,
+            unknown: true,
+          };
+        }
+      })
+    );
+
+    const issues = checks.filter(Boolean);
+    return { ok: issues.length === 0, issues };
+  };
+
   const handleConfirmCheckout = async () => {
     if (!items.length || isSubmitting) return;
     const name = customerDetails.name.trim();
     const mobile = customerDetails.mobile.trim();
-    const linkedCustomerId =
-      customerDetails.id || (name || mobile ? await queueCustomerSync(customerDetails, name, mobile) : null);
-    if (!name || !mobile) {
-      showPopup('Customer name and mobile are required.', 'Validation');
+    const validationErrors = {};
+    if (!name) validationErrors.name = 'Customer name is required.';
+    if (!mobile) validationErrors.mobile = 'Mobile number is required.';
+    if (paymentMethod === 'credit' && !customerDetails.id) {
+      validationErrors.name = 'Select an existing customer for credit billing.';
+    }
+    if (Object.keys(validationErrors).length > 0) {
+      setCustomerFieldErrors(validationErrors);
+      const fields = [];
+      if (validationErrors.name) fields.push('Customer Name');
+      if (validationErrors.mobile) fields.push('Mobile');
+      showPopup(`Please fill required fields: ${fields.join(', ')}.`, 'Validation');
       return;
     }
+    const linkedCustomerId =
+      customerDetails.id || (name || mobile ? await queueCustomerSync(customerDetails, name, mobile) : null);
     if (paymentMethod === 'credit' && !customerDetails.id) {
       showPopup('Select a saved customer for credit billing.', 'Validation');
       return;
     }
+
+    const stockValidation = await validateServerStockForCheckout();
+    if (!stockValidation.ok) {
+      const unknown = stockValidation.issues.find((issue) => issue?.unknown);
+      if (unknown) {
+        showPopup(
+          `Unable to verify live stock for Product ID ${unknown.productId}. Please retry sync after refreshing products.`,
+          'Stock'
+        );
+        return;
+      }
+      const first = stockValidation.issues[0];
+      showPopup(
+        `Insufficient stock for Product ID ${first.productId} in selected branch. Requested ${first.requestedQty}, available ${first.availableQty}.`,
+        'Stock'
+      );
+      return;
+    }
+
     setLastOrderId(null);
     setSelectedOrderId(null);
     setIsSubmitting(true);
@@ -1000,6 +1413,8 @@ const RetailBilling = () => {
         payments,
         products: items.map((item) => ({
           product_id: item.id,
+          batch_id: item.batch_id ?? null,
+          batch_number: item.batch_number ?? null,
           barcode: item.barcode,
           quantity: item.qty,
           price: item.price,
@@ -1050,6 +1465,7 @@ const RetailBilling = () => {
       clearCart();
       setCustomerModalOpen(false);
       setCustomerDetails({ id: null, name: '', mobile: '', location: '', address: '' });
+      setCustomerFieldErrors({});
 
       const fallbackOrderId = offlineEntry?.payload?.client_order_id || null;
       if (navigator.onLine) {
@@ -1149,17 +1565,52 @@ const RetailBilling = () => {
             suggestions={searchSuggestions}
             loading={searchLoading}
             onChange={setSearchText}
-            onSelect={(product) => {
+            onSelect={async (product) => {
+              const normalizedProduct = {
+                ...product,
+                id:
+                  product?.id ??
+                  product?.product_id ??
+                  product?.productId ??
+                  product?.barcode ??
+                  null,
+              };
               if (!ensureBranchMatch(product)) {
                 return;
               }
-              const stock = getStockCount(product);
+              const resolvedProduct = await resolveProductForCart(
+                normalizedProduct,
+                normalizedProduct?.batch_id ?? normalizedProduct?.batchId ?? null
+              );
+              if (!resolvedProduct) {
+                showPopup('No sellable batch stock available for selected branch.', 'Stock');
+                return;
+              }
+              const stock = getStockCount(resolvedProduct);
               if (stock !== null && stock <= 0) {
-                showPopup('Product is out of stock', 'Stock');
+                showPopup('Product is out of stock for selected branch.', 'Stock');
                 return;
               }
               const qty = Number(quantityValue || 1);
-              addItem(product, Number.isFinite(qty) && qty > 0 ? qty : 1);
+              const requestedQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
+              const key = getCartItemKey(resolvedProduct);
+              const inCartQty = key
+                ? items
+                    .filter((item) => String(item?.key) === String(key))
+                    .reduce((sum, item) => sum + Number(item?.qty || 0), 0)
+                : 0;
+              if (stock !== null && requestedQty + inCartQty > stock) {
+                const remaining = Math.max(stock - inCartQty, 0);
+                if (remaining <= 0) {
+                  showPopup('Insufficient stock for selected branch.', 'Stock');
+                  return;
+                }
+                addItem(resolvedProduct, remaining);
+                showPopup(`Only ${remaining} can be added from available branch stock.`, 'Stock');
+              } else {
+                addItem(resolvedProduct, requestedQty);
+              }
+              setMessage('');
               setQuantityValue('1');
               setSearchText('');
               setSearchSuggestions([]);
@@ -1216,6 +1667,67 @@ const RetailBilling = () => {
             onPriceChange={updatePrice}
             onRemove={removeItem}
           />
+
+          {selectedCartItem && (
+            <div className="billing-batch-details-panel">
+              <div className="billing-batch-details-header">
+                <div>
+                  <strong>{selectedCartItem.name}</strong>
+                  <small className="billing-stock">
+                    Product ID: {selectedCartItem.id || '-'} {selectedCartItem.batch_number ? `· Current Batch: ${selectedCartItem.batch_number}` : ''}
+                  </small>
+                </div>
+              </div>
+              {batchDetailsLoading ? (
+                <div className="billing-search-status">Loading batches...</div>
+              ) : selectedItemBatchDetails.length === 0 ? (
+                <div className="billing-search-status">No active batches found for this product.</div>
+              ) : (
+                <div className="billing-batch-details-table-wrap">
+                  <table className="billing-batch-details-table">
+                    <thead>
+                      <tr>
+                        <th>Batch</th>
+                        <th>Available</th>
+                        <th>In Cart</th>
+                        <th>Selling</th>
+                        <th>Actual</th>
+                        <th>MRP</th>
+                        <th>Expiry</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedItemBatchDetails.map((batch, idx) => {
+                        const isCurrent = String(selectedCartItem.batch_id || '') === String(batch.id || '');
+                        return (
+                          <tr key={String(batch.id || `${batch.batch_number || 'batch'}-${idx}`)}>
+                            <td>{batch.batch_number || '-'}</td>
+                            <td>{Number(batch.available || 0)}</td>
+                            <td>{Number(batch.inCartQty || 0)}</td>
+                            <td>INR {Number(batch.selling_price || 0).toFixed(2)}</td>
+                            <td>INR {Number(batch.purchase_price || 0).toFixed(2)}</td>
+                            <td>INR {Number(batch.mrp || 0).toFixed(2)}</td>
+                            <td>{batch.expiry_date ? new Date(batch.expiry_date).toLocaleDateString() : '-'}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${isCurrent ? 'btn-outline-info' : 'btn-outline-light'}`}
+                                onClick={() => handleAddSelectedBatchToCart(batch.id)}
+                                disabled={Number(batch.available || 0) - Number(batch.inCartQty || 0) <= 0}
+                              >
+                                {isCurrent ? 'Add More' : 'Add Batch'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
         </div>
 
@@ -1364,7 +1876,13 @@ const RetailBilling = () => {
         </div>
       )}
       {customerModalOpen && (
-        <div className="billing-modal-overlay" onClick={() => setCustomerModalOpen(false)}>
+        <div
+          className="billing-modal-overlay"
+          onClick={() => {
+            setCustomerModalOpen(false);
+            setCustomerFieldErrors({});
+          }}
+        >
           <div className="billing-modal" onClick={(event) => event.stopPropagation()}>
             <div className="billing-modal-header">
               <h5>Customer Details</h5>
@@ -1372,11 +1890,14 @@ const RetailBilling = () => {
             <div className="billing-modal-body">
               <label className="form-label">Customer Name *</label>
               <input
-                className="form-control"
+                className={`form-control ${customerFieldErrors.name ? 'billing-field-error' : ''}`}
                 value={customerDetails.name}
                 onChange={(event) => {
                   const value = event.target.value;
                   setCustomerDetails((prev) => ({ ...prev, name: value }));
+                  if (value.trim()) {
+                    setCustomerFieldErrors((prev) => ({ ...prev, name: '' }));
+                  }
                   if (customerSearchTimerRef.current) {
                     clearTimeout(customerSearchTimerRef.current);
                   }
@@ -1386,6 +1907,9 @@ const RetailBilling = () => {
                 }}
                 placeholder="Enter customer name"
               />
+              {customerFieldErrors.name ? (
+                <small className="billing-field-error-text">{customerFieldErrors.name}</small>
+              ) : null}
               {customerSuggestions.length > 0 && (
                 <ul className="list-group mt-1">
                   {customerSuggestions.map((customer) => (
@@ -1425,12 +1949,21 @@ const RetailBilling = () => {
               )}
               <label className="form-label mt-3">Mobile *</label>
               <input
-                className="form-control"
+                className={`form-control ${customerFieldErrors.mobile ? 'billing-field-error' : ''}`}
                 value={customerDetails.mobile}
-                onChange={(event) => setCustomerDetails((prev) => ({ ...prev, mobile: event.target.value }))}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setCustomerDetails((prev) => ({ ...prev, mobile: value }));
+                  if (value.trim()) {
+                    setCustomerFieldErrors((prev) => ({ ...prev, mobile: '' }));
+                  }
+                }}
                 placeholder="Enter mobile number"
                 inputMode="numeric"
               />
+              {customerFieldErrors.mobile ? (
+                <small className="billing-field-error-text">{customerFieldErrors.mobile}</small>
+              ) : null}
               <label className="form-label mt-3">Location (optional)</label>
               <input
                 className="form-control"
@@ -1468,7 +2001,14 @@ const RetailBilling = () => {
               />
             </div>
             <div className="billing-modal-actions">
-              <button className="btn btn-outline-light" type="button" onClick={() => setCustomerModalOpen(false)}>
+              <button
+                className="btn btn-outline-light"
+                type="button"
+                onClick={() => {
+                  setCustomerModalOpen(false);
+                  setCustomerFieldErrors({});
+                }}
+              >
                 Cancel
               </button>
               <button className="btn btn-primary" type="button" onClick={handleConfirmCheckout} disabled={isSubmitting}>

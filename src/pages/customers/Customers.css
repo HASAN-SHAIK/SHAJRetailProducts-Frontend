@@ -61,3 +61,15 @@
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
 }
+
+.purchase-suggestion-text {
+  display: block;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.purchase-suggestions {
+  width: max-content;
+  min-width: 100%;
+  max-width: 90vw;
+}

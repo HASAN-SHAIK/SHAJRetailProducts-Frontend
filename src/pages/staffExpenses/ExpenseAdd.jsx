@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import StaffExpensesHeader from '../../components/staffExpenses/StaffExpensesHeader';
 import { getLocalStaff, upsertLocalExpense } from '../../core/db';
+import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './StaffExpenses.css';
 
 const ExpenseAdd = () => {
@@ -17,6 +18,7 @@ const ExpenseAdd = () => {
     paymentMethod: 'cash',
     notes: '',
   });
+  const [errors, setErrors] = useState({});
 
   const loadStaff = useCallback(async () => {
     const list = await getLocalStaff({});
@@ -34,17 +36,15 @@ const ExpenseAdd = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!form.category.trim()) {
-      showPopup('Category is required', 'Validation');
-      return;
-    }
     const amount = Number(form.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      showPopup('Amount must be > 0', 'Validation');
-      return;
-    }
-    if (form.type === 'staff' && !form.staffId) {
-      showPopup('Select staff for staff expense', 'Validation');
+    const nextErrors = collectValidationErrors([
+      { key: 'category', validate: () => Boolean(form.category.trim()), message: 'Category is required.' },
+      { key: 'amount', validate: () => Number.isFinite(amount) && amount > 0, message: 'Amount must be greater than 0.' },
+      { key: 'staffId', validate: () => form.type !== 'staff' || Boolean(form.staffId), message: 'Select staff for staff expense.' }
+    ]);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      showPopup(firstValidationMessage(nextErrors), 'Validation');
       return;
     }
     const payload = {
@@ -62,6 +62,7 @@ const ExpenseAdd = () => {
     };
     await upsertLocalExpense(payload);
     showPopup('Saved Offline', 'Offline');
+    setErrors({});
     setForm((prev) => ({
       ...prev,
       category: '',
@@ -87,19 +88,21 @@ const ExpenseAdd = () => {
             </div>
             <div className="col-md-4">
               <label className="form-label">Category *</label>
-              <input className="form-control" name="category" value={form.category} onChange={handleChange} />
+              <input className={`form-control ${errors.category ? 'is-invalid' : ''}`} name="category" value={form.category} onChange={handleChange} />
+              {errors.category && <small className="text-danger">{errors.category}</small>}
             </div>
             <div className="col-md-4">
               <label className="form-label">Amount *</label>
               <input
                 type="number"
-                className="form-control"
+                className={`form-control ${errors.amount ? 'is-invalid' : ''}`}
                 name="amount"
                 min="0"
                 step="0.01"
                 value={form.amount}
                 onChange={handleChange}
               />
+              {errors.amount && <small className="text-danger">{errors.amount}</small>}
             </div>
           </div>
           <div className="row g-2">
@@ -117,7 +120,7 @@ const ExpenseAdd = () => {
             </div>
             <div className="col-md-4">
               <label className="form-label">Staff</label>
-              <select className="form-select" name="staffId" value={form.staffId} onChange={handleChange}>
+              <select className={`form-select ${errors.staffId ? 'is-invalid' : ''}`} name="staffId" value={form.staffId} onChange={handleChange}>
                 <option value="">Select staff</option>
                 {staff.map((item) => (
                   <option key={item.staffId} value={item.staffId}>
@@ -125,6 +128,7 @@ const ExpenseAdd = () => {
                   </option>
                 ))}
               </select>
+              {errors.staffId && <small className="text-danger">{errors.staffId}</small>}
             </div>
           </div>
           <div className="row g-2">

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { preloadProductsToIndexedDb } from '../../utils/indexedDb';
-import dayjs from 'dayjs';
 import api from '../../utils/axios';
 import MobileShell from '../components/MobileShell';
 import MetricCard from '../components/MetricCard';
