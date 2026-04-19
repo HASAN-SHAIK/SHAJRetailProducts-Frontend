@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import './EditOrderModal.css';
 
 const EditOrderModal = ({ completeOrder, onClose, onSubmit, setOrderUpdateFlag, navigate }) => {
@@ -98,7 +98,7 @@ const EditOrderModal = ({ completeOrder, onClose, onSubmit, setOrderUpdateFlag, 
         {products.map((product, index) => (
           <div key={index} className="product-group">
             <label className='form-label fs-6 fw-bold'> {product.name || product.product_name}</label>
-            <label className='form-label small text-muted'>
+            <label className='form-label small text-secondary'>
               {isWeightBasedProduct(product) ? 'Weight (kg)' : 'Quantity (pcs)'}
             </label>
             <input
@@ -111,7 +111,7 @@ const EditOrderModal = ({ completeOrder, onClose, onSubmit, setOrderUpdateFlag, 
               inputMode={isWeightBasedProduct(product) ? 'decimal' : 'numeric'}
             />
             {isWeightBasedProduct(product) && (
-              <small className="form-text text-muted">
+              <small className="form-text text-secondary">
                 Use decimal for kg, e.g., 1.25
               </small>
             )}
@@ -140,3 +140,4 @@ const EditOrderModal = ({ completeOrder, onClose, onSubmit, setOrderUpdateFlag, 
 };
 
 export default EditOrderModal;
+

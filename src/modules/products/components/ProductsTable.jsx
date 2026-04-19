@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import Table from '../../../ui/Table';
 
 const ProductsTable = ({ products }) => {
@@ -25,7 +25,7 @@ const ProductsTable = ({ products }) => {
         ))}
         {products.length === 0 && (
           <tr>
-            <td colSpan={5} className="text-muted">No products.</td>
+            <td colSpan={5} className="text-secondary">No products.</td>
           </tr>
         )}
       </tbody>
@@ -34,3 +34,4 @@ const ProductsTable = ({ products }) => {
 };
 
 export default ProductsTable;
+

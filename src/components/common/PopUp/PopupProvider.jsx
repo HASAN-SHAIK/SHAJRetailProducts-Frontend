@@ -27,6 +27,12 @@ export const PopupProvider = ({ children }) => {
               ? 'warning'
               : 'info'
     );
+    const lowerMessage = (message || '').toString().toLowerCase();
+    const isImportPopup = lowerTitle.includes('import') || lowerMessage.includes('import');
+    const isErrorPopup = inferredType === 'error' || lowerTitle.includes('error');
+    if (!isErrorPopup && !isImportPopup) {
+      return;
+    }
     setPopup({ isOpen: true, title, message, type: inferredType });
   }, []);
 

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import './HighlightedTable.css';
 
 const HighlightedTable = ({ columns, data }) => {
@@ -39,7 +39,7 @@ const HighlightedTable = ({ columns, data }) => {
               ))}
             </tr>
           )) : (
-            <tr><td colSpan={columns.length} className="text-center text-muted">No Transactions</td></tr>
+            <tr><td colSpan={columns.length} className="text-center text-secondary">No Transactions</td></tr>
           )}
         </tbody>
       </table>
@@ -48,3 +48,4 @@ const HighlightedTable = ({ columns, data }) => {
 };
 
 export default HighlightedTable;
+

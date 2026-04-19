@@ -2,9 +2,9 @@
   display: block;
   grid-template-columns: none;
   gap: 0;
-  padding: 4vh 17vw 24px;
-  margin-top: 5vh;
-  min-height: 100vh;
+  padding-left: 17vw;
+  margin-top: 0;
+  /* min-height: 100vh; */
   color: #e2e8f0;
   font-family: "Archivo", "Segoe UI", sans-serif;
   width: 100%;
@@ -13,7 +13,7 @@
 
 .dashboard-sidebar {
   position: fixed;
-  top: 110px;
+  top: var(--nav-height);
   left: 24px;
   width: 240px;
   background: rgba(15, 23, 42, 0.9);
