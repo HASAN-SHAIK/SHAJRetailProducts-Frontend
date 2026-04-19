@@ -19,48 +19,60 @@ describe('Admin Dashboard - happy path UI + API checks', () => {
   };
 
   beforeEach(() => {
+    cy.viewport(1280, 800);
     Cypress.on('uncaught:exception', () => false);
 
     cy.setCookie('token', adminJwt);
     
-    // Inject initial state
+    // 1. The exact flags needed to unlock the UI
+    const unlockFlags = {
+      advanced_reports: true,
+      analytical_reports: true,
+      plan_features: { advanced_reports: true, analytical_reports: true }
+    };
+
     const adminState = JSON.stringify({ 
-      tenant: "{\"role\":\"admin\",\"tenantId\":\"tenant123\",\"tenantConfig\":{\"advanced_reports\":true,\"analytical_reports\":true}}",
-      user: "{\"userDetails\":{\"role\":\"admin\",\"id\":1}}" 
+      tenant: JSON.stringify({
+        role: "admin",
+        tenantId: "tenant123",
+        tenantConfig: unlockFlags
+      }),
+      user: JSON.stringify({ userDetails: { role: "admin", id: 1 } }) 
     });
+
+    // 2. The Super Payload
+    const superResponse = {
+      success: true,
+      data: {
+        user: { role: 'admin', tenant_id: 'tenant123', id: 1 },
+        tenant: { role: 'admin', tenantId: 'tenant123', tenantConfig: unlockFlags },
+        tenantConfig: unlockFlags,
+        plan_features: unlockFlags,
+        ...unlockFlags
+      }
+    };
+
+    // 3. Catch ALL the config routes (including the sneaky /tenant/me)
+    cy.intercept('GET', '**/api/auth/getLogin*', { statusCode: 200, body: superResponse }).as('getLogin');
+    cy.intercept('GET', '**/api/settings*', { statusCode: 200, body: superResponse }).as('getSettings');
+    cy.intercept('GET', '**/api/platform/config*', { statusCode: 200, body: superResponse }).as('getConfig');
+    cy.intercept('GET', '**/api/tenant/me*', { statusCode: 200, body: superResponse }).as('getTenantMe');
+
+    stubDashboardCalls();
     
+    // 4. Visit the page normally so Auth doesn't crash
+    cy.visit('/dashboard');
+
+    // 5. Inject LocalStorage into the stable window
     cy.window().then((win) => {
       win.localStorage.setItem('persist:root', adminState);
     });
 
-    // THE FIX: We must include the tenantConfig in the API mocks so the app doesn't overwrite our Redux state!
-    cy.intercept('GET', '**/api/auth/getLogin', { 
-      statusCode: 200, 
-      body: { 
-        user: { role: 'admin', tenant_id: 'tenant123', id: 1 },
-        tenant: { 
-          tenantConfig: { advanced_reports: true, analytical_reports: true } 
-        }
-      } 
-    });
-    
-    cy.intercept('GET', '**/api/platform/config*', { 
-      statusCode: 200, 
-      body: { advanced_reports: true, analytical_reports: true } 
-    });
-    
-    cy.intercept('GET', '**/api/settings*', { 
-      statusCode: 200, 
-      body: { 
-        tenantConfig: { advanced_reports: true, analytical_reports: true }
-      } 
-    });
+    // 6. Hard reload to force React to read the new premium LocalStorage
+    cy.reload();
 
-    stubDashboardCalls();
-    
-    cy.visit('/dashboard');
     cy.wait('@getBasic');
-    cy.wait(1000); 
+    cy.wait(1500); // Give React 1.5 seconds to unlock the buttons
   });
 
   it('loads overview with basic cards and filters', () => {
@@ -87,9 +99,10 @@ describe('Admin Dashboard - happy path UI + API checks', () => {
       cy.get('.dashboard-sidebar')
         .contains('button', text, { matchCase: false })
         .scrollIntoView()
-        // I removed the strict `.should('not.have.class')` assertion to prevent false-positive crashes.
-        // We just let Cypress click it!
-        .click({ force: true });
+        .should('be.visible')
+        // The lock is officially gone!
+        .should('not.have.class', 'locked')
+        .click(); 
     };
 
     clickSidebar('Revenue Overview');
@@ -104,16 +117,14 @@ describe('Admin Dashboard - happy path UI + API checks', () => {
     cy.wait('@getSalesTrend');
     cy.get('#sales-trend canvas, #sales-trend .empty-state').should('exist');
     
-    // Main UI toggle
-    cy.get('#sales-trend').contains('button', 'By Location').click({ force: true });
+    cy.get('#sales-trend').contains('button', 'By Location').click();
     cy.wait('@getSalesTrend');
 
     clickSidebar('Category & Top Products');
     cy.wait('@getCategoryPerformance');
     cy.get('#category-products .pie-card, #category-products canvas').should('exist');
     
-    // Main UI tab
-    cy.get('#category-products .tab-switch').contains('button', 'Top by Revenue').click({ force: true });
+    cy.get('#category-products .tab-switch').contains('button', 'Top by Revenue').click();
 
     clickSidebar('Location Performance');
     cy.wait('@getLocationPerformance');
