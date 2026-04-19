@@ -119,6 +119,18 @@ const isLikelyLocalBatchId = (value) => {
   );
 };
 
+const isLocalPlaceholderBatch = (batch) => {
+  const idLocal = isLikelyLocalBatchId(batch?.id);
+  if (idLocal) return true;
+  const batchNumber = String(batch?.batch_number || '').trim().toLowerCase();
+  return (
+    batchNumber.startsWith('local-') ||
+    batchNumber.startsWith('local:') ||
+    batchNumber.startsWith('local-temp') ||
+    batchNumber.startsWith('temp_')
+  );
+};
+
 const toDateOnlyText = (value) => {
   if (!value) return '';
   const date = new Date(value);
@@ -169,6 +181,14 @@ const extractProductFromResponse = (response) => {
   return data.product || data.data || data;
 };
 
+const STOCK_CHECK_TIMEOUT_MS = 8000;
+const OFFLINE_SYNC_TIMEOUT_MS = 12000;
+const withTimeout = (promise, timeoutMs, fallbackValue = null) =>
+  Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallbackValue), timeoutMs)),
+  ]);
+
 const RetailBilling = () => {
   const { showPopup } = usePopup();
   const navigate = useNavigate();
@@ -216,7 +236,7 @@ const RetailBilling = () => {
   const [quantityValue, setQuantityValue] = useState('1');
   const [message, setMessage] = useState('');
   const [gstToast, setGstToast] = useState({ message: '', type: '', visible: false });
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isConfirmSubmitting, setIsConfirmSubmitting] = useState(false);
   const [transactionType, setTransactionType] = useState('sale');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [isPrintEnabled, setIsPrintEnabled] = useState(false);
@@ -655,9 +675,13 @@ const RetailBilling = () => {
         const available = Number(batch?.quantity_remaining ?? batch?.quantity ?? 0);
         return Number.isFinite(available) && available > 0;
       });
+    const hasServerBatch = filtered.some((batch) => !isLocalPlaceholderBatch(batch));
+    const cleaned = hasServerBatch
+      ? filtered.filter((batch) => !isLocalPlaceholderBatch(batch))
+      : filtered;
 
     const mergedBySignature = new Map();
-    filtered.forEach((batch) => {
+    cleaned.forEach((batch) => {
       const available = Number(batch?.quantity_remaining ?? batch?.quantity ?? 0);
       const signature = [
         String(batch?.product_id ?? ''),
@@ -1039,7 +1063,7 @@ const RetailBilling = () => {
   };
 
   const handleCheckout = async () => {
-    if (!items.length || isSubmitting) {
+    if (!items.length || isConfirmSubmitting) {
       if (!items.length) {
         showPopup('Add at least one product before checkout.', 'Validation');
       }
@@ -1189,7 +1213,12 @@ const RetailBilling = () => {
   };
 
   const validateServerStockForCheckout = async () => {
-    if (!navigator.onLine || transactionType !== 'sale' || !effectiveBranchId) {
+    if (
+      !navigator.onLine ||
+      (typeof window !== 'undefined' && window.__serverOffline === true) ||
+      transactionType !== 'sale' ||
+      !effectiveBranchId
+    ) {
       return { ok: true, issues: [] };
     }
 
@@ -1208,7 +1237,10 @@ const RetailBilling = () => {
     const checks = await Promise.all(
       productEntries.map(async ([productId, requestedQty]) => {
         try {
-          const response = await api.get('/stock', { params: { product_id: productId } });
+          const response = await api.get('/stock', {
+            params: { product_id: productId },
+            timeout: STOCK_CHECK_TIMEOUT_MS,
+          });
           const list = Array.isArray(response?.data?.stock) ? response.data.stock : [];
           const branchRow = list.find((row) => String(row?.branch_id) === String(effectiveBranchId));
           const availableQty = Number(branchRow?.quantity ?? 0);
@@ -1220,67 +1252,72 @@ const RetailBilling = () => {
             };
           }
           return null;
-        } catch {
+        } catch (err) {
+          const status = err?.response?.status;
+          const networkLikeFailure = status === 0 || !err?.response || err?.isNetworkError;
           return {
             productId,
             requestedQty,
             availableQty: null,
             unknown: true,
+            networkLikeFailure,
           };
         }
       })
     );
 
     const issues = checks.filter(Boolean);
-    return { ok: issues.length === 0, issues };
+    if (issues.length === 0) return { ok: true, issues, degraded: false };
+    const knownStockIssues = issues.filter((issue) => !issue?.unknown);
+    if (knownStockIssues.length > 0) {
+      return { ok: false, issues: knownStockIssues, degraded: false };
+    }
+    const allNetworkLike = issues.every((issue) => issue?.networkLikeFailure === true);
+    if (allNetworkLike) {
+      return { ok: true, issues: [], degraded: true };
+    }
+    return { ok: false, issues, degraded: false };
   };
 
   const handleConfirmCheckout = async () => {
-    if (!items.length || isSubmitting) return;
+    if (!items.length || isConfirmSubmitting) return;
     const name = customerDetails.name.trim();
     const mobile = customerDetails.mobile.trim();
+    const normalizedPhone = String(mobile || '').replace(/\D+/g, '');
     const validationErrors = {};
+    const missingFields = [];
+
     if (!name) validationErrors.name = 'Customer name is required.';
     if (!mobile) validationErrors.mobile = 'Mobile number is required.';
+    if (mobile && normalizedPhone.length < 10) validationErrors.mobile = 'Enter a valid mobile number.';
     if (paymentMethod === 'credit' && !customerDetails.id) {
       validationErrors.name = 'Select an existing customer for credit billing.';
     }
-    if (Object.keys(validationErrors).length > 0) {
-      setCustomerFieldErrors(validationErrors);
-      const fields = [];
-      if (validationErrors.name) fields.push('Customer Name');
-      if (validationErrors.mobile) fields.push('Mobile');
-      showPopup(`Please fill required fields: ${fields.join(', ')}.`, 'Validation');
-      return;
-    }
-    const linkedCustomerId =
-      customerDetails.id || (name || mobile ? await queueCustomerSync(customerDetails, name, mobile) : null);
-    if (paymentMethod === 'credit' && !customerDetails.id) {
-      showPopup('Select a saved customer for credit billing.', 'Validation');
-      return;
+    if (!name) missingFields.push('Customer Name');
+    if (!mobile) missingFields.push('Mobile');
+    if (mobile && normalizedPhone.length < 10) missingFields.push('Valid Mobile Number');
+    if (!paymentMethod) missingFields.push('Payment Method');
+    if (
+      paymentAmount !== '' &&
+      paymentAmount !== null &&
+      paymentAmount !== undefined &&
+      !Number.isFinite(Number(paymentAmount))
+    ) {
+      missingFields.push('Valid Amount Paid');
     }
 
-    const stockValidation = await validateServerStockForCheckout();
-    if (!stockValidation.ok) {
-      const unknown = stockValidation.issues.find((issue) => issue?.unknown);
-      if (unknown) {
-        showPopup(
-          `Unable to verify live stock for Product ID ${unknown.productId}. Please retry sync after refreshing products.`,
-          'Stock'
-        );
-        return;
-      }
-      const first = stockValidation.issues[0];
+    if (Object.keys(validationErrors).length > 0) {
+      setCustomerFieldErrors(validationErrors);
+      const uniqueMissing = Array.from(new Set(missingFields));
       showPopup(
-        `Insufficient stock for Product ID ${first.productId} in selected branch. Requested ${first.requestedQty}, available ${first.availableQty}.`,
-        'Stock'
+        `Please check required fields: ${uniqueMissing.join(', ') || 'Customer details'}.`,
+        'Validation'
       );
       return;
     }
-
+    setIsConfirmSubmitting(true);
     setLastOrderId(null);
     setSelectedOrderId(null);
-    setIsSubmitting(true);
     const now = new Date();
     const pad2 = (value) => String(value).padStart(2, '0');
     const snapshot = {
@@ -1342,7 +1379,37 @@ const RetailBilling = () => {
     };
 
     try {
-      const normalizedPhone = String(mobile || '').replace(/\D+/g, '');
+      const linkedCustomerId =
+        customerDetails.id || (name || mobile ? await queueCustomerSync(customerDetails, name, mobile) : null);
+      if (paymentMethod === 'credit' && !customerDetails.id) {
+        showPopup('Select a saved customer for credit billing.', 'Validation');
+        return;
+      }
+
+      const stockValidation = await validateServerStockForCheckout();
+      if (!stockValidation.ok) {
+        const unknown = stockValidation.issues.find((issue) => issue?.unknown);
+        if (unknown) {
+          showPopup(
+            `Unable to verify live stock for Product ID ${unknown.productId}. Please retry sync after refreshing products.`,
+            'Stock'
+          );
+          return;
+        }
+        const first = stockValidation.issues[0];
+        showPopup(
+          `Insufficient stock for Product ID ${first.productId} in selected branch. Requested ${first.requestedQty}, available ${first.availableQty}.`,
+          'Stock'
+        );
+        return;
+      }
+      if (stockValidation.degraded) {
+        showPopup(
+          'Server stock check is unavailable. Order will be saved offline and synced when server is back.',
+          'Offline Mode'
+        );
+      }
+
       if (normalizedPhone) {
         setWhatsappPhone(normalizedPhone);
       }
@@ -1354,13 +1421,11 @@ const RetailBilling = () => {
     const amountPaid = Number.isFinite(amountPaidRaw) ? amountPaidRaw : 0;
     if (amountPaid < 0) {
       showPopup('Amount paid must be >= 0.', 'Validation');
-      setIsSubmitting(false);
       return;
     }
     const creditUsed = Math.max(totalDue - amountPaid, 0);
     if (creditUsed > 0 && !linkedCustomerId) {
       showPopup('Select a saved customer for partial/credit billing.', 'Validation');
-      setIsSubmitting(false);
       return;
     }
     if (creditUsed > 0 && linkedCustomerId) {
@@ -1368,12 +1433,10 @@ const RetailBilling = () => {
       const currentBalance = Number(customerDetails.current_balance || 0);
       if (creditLimit <= 0) {
         showPopup('Credit not allowed for this customer.', 'Validation');
-        setIsSubmitting(false);
         return;
       }
       if (currentBalance + creditUsed > creditLimit) {
         showPopup('Customer credit limit exceeded.', 'Validation');
-        setIsSubmitting(false);
         return;
       }
     }
@@ -1470,7 +1533,14 @@ const RetailBilling = () => {
       const fallbackOrderId = offlineEntry?.payload?.client_order_id || null;
       if (navigator.onLine) {
         await syncAllCustomers().catch(() => {});
-        const syncResult = await processOfflineQueue(api).catch(() => null);
+        const syncResult = await withTimeout(
+          processOfflineQueue(api).catch(() => null),
+          OFFLINE_SYNC_TIMEOUT_MS,
+          null
+        );
+        if (!syncResult) {
+          showPopup('Order saved locally. Sync will continue in background.', 'Info');
+        }
         const clientOrderId = offlineEntry?.payload?.client_order_id || null;
         const matched = syncResult?.synced?.find((result) => result.client_order_id === clientOrderId);
         if (Array.isArray(matched?.transactions) && matched.transactions.length > 0) {
@@ -1478,7 +1548,9 @@ const RetailBilling = () => {
         }
         const syncedOrderId = matched?.order_id || null;
         setLastOrderId(syncedOrderId);
-        await printReceipt(syncedOrderId || fallbackOrderId);
+        // Do not block checkout completion on printer response.
+        // Printing still updates print status/error asynchronously.
+        printReceipt(syncedOrderId || fallbackOrderId).catch(() => {});
         if (whatsappEnabled) {
           if (syncedOrderId) {
             setSelectedOrderId(syncedOrderId);
@@ -1491,13 +1563,14 @@ const RetailBilling = () => {
           }
         }
       } else {
-        await printReceipt(fallbackOrderId);
+        // Do not block checkout completion on printer response.
+        printReceipt(fallbackOrderId).catch(() => {});
       }
     } catch (err) {
       const message = err?.response?.data?.message || 'Failed to place order';
       showOnlinePopup(message, 'Error');
     } finally {
-      setIsSubmitting(false);
+      setIsConfirmSubmitting(false);
     }
   };
 
@@ -1854,9 +1927,9 @@ const RetailBilling = () => {
             className="btn btn-success billing-checkout"
             type="button"
             onClick={handleCheckout}
-            disabled={isSubmitting || items.length === 0}
+            disabled={isConfirmSubmitting || items.length === 0}
           >
-            {isSubmitting ? 'Processing...' : 'Checkout'}
+            Checkout
           </button>
           {whatsappEnabled && lastOrderId && (
             <div className="mt-2">
@@ -2011,8 +2084,8 @@ const RetailBilling = () => {
               >
                 Cancel
               </button>
-              <button className="btn btn-primary" type="button" onClick={handleConfirmCheckout} disabled={isSubmitting}>
-                {isSubmitting ? 'Saving...' : 'Confirm & Checkout'}
+              <button className="btn btn-primary" type="button" onClick={handleConfirmCheckout} disabled={isConfirmSubmitting}>
+                {isConfirmSubmitting ? 'Saving...' : 'Confirm & Checkout'}
               </button>
             </div>
           </div>

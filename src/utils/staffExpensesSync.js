@@ -204,9 +204,17 @@ const mergeRemoteRecords = async (table, records, idKey) => {
   }
 };
 
-export const syncAllStaffExpenses = async () => {
+export const syncAllStaffExpenses = async (options = {}) => {
   const queueResult = await processStaffExpensesSync();
   if (!navigator.onLine) return queueResult;
+  const refreshRemote = options?.refreshRemote !== false;
+  if (!refreshRemote) {
+    return {
+      synced: queueResult?.synced || [],
+      failed: queueResult?.failed || [],
+      remoteErrors: [],
+    };
+  }
 
   const remoteFetches = await Promise.allSettled([
     api.get('/staff'),

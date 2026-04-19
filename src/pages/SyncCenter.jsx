@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSelector } from 'react-redux';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
 import { getSyncQueueItems } from '../core/db';
 import { getOfflineOrderQueue, processOfflineQueue } from '../utils/offlineOrders';
@@ -7,6 +8,8 @@ import { syncAllImports } from '../utils/importSync';
 import { processInventorySyncQueue } from '../utils/inventorySync';
 import { syncAllStaffExpenses } from '../utils/staffExpensesSync';
 import { syncAllReturnsCorrections } from '../utils/returnsCorrectionsSync';
+import { runAppSyncCycle } from '../utils/appSyncOrchestrator';
+import { useBranchStore } from '../store/branchStore';
 import api from '../utils/axios';
 import { buildFullBackup, restoreLocalFromBackup, verifyBackup } from '../utils/backupRestore';
 import './SyncCenter.css';
@@ -32,9 +35,12 @@ const formatDateTime = (value) => {
 
 const SyncCenter = () => {
   const { showPopup } = usePopup();
+  const userDetails = useSelector((state) => state.user.userDetails);
+  const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
+  const [forceFullSyncing, setForceFullSyncing] = useState(false);
   const [runningModule, setRunningModule] = useState('');
   const [offlineOrders, setOfflineOrders] = useState([]);
   const [syncQueue, setSyncQueue] = useState([]);
@@ -223,6 +229,29 @@ const SyncCenter = () => {
     showPopup('All sync modules completed successfully.', 'Sync Center');
   };
 
+  const handleForceFullSync = async () => {
+    if (forceFullSyncing || syncingAll || runningModule) return;
+    if (!navigator.onLine) {
+      showPopup('You are offline. Connect to internet and retry.', 'Sync Center');
+      return;
+    }
+    setForceFullSyncing(true);
+    try {
+      const plan = await runAppSyncCycle({
+        tenantId: userDetails?.tenant_id,
+        userId: userDetails?.id,
+        branchId: selectedBranchId,
+        forceFull: true,
+      });
+      await loadQueues(true);
+      showPopup(`Full sync completed (${plan?.reason || 'manual'}).`, 'Sync Center');
+    } catch (err) {
+      showPopup(err?.response?.data?.message || err?.message || 'Force full sync failed.', 'Sync Center');
+    } finally {
+      setForceFullSyncing(false);
+    }
+  };
+
   const handleExportBackup = async () => {
     if (backupBusy) return;
     setBackupBusy(true);
@@ -368,6 +397,14 @@ const SyncCenter = () => {
             disabled={loading || refreshing || syncingAll || Boolean(runningModule)}
           >
             {syncingAll ? 'Retrying...' : 'Retry All'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-warning btn-sm"
+            onClick={handleForceFullSync}
+            disabled={loading || refreshing || syncingAll || Boolean(runningModule) || forceFullSyncing}
+          >
+            {forceFullSyncing ? 'Full Syncing...' : 'Force Full Sync'}
           </button>
         </div>
       </div>

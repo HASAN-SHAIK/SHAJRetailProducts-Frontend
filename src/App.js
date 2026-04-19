@@ -13,13 +13,9 @@ import Logout from './pages/Logout';
 import { setUserDetails } from './store/userSlice';
 import api from './utils/axios';
 import { preloadAllCaches } from './utils/indexedDb';
-import { processOfflineQueue } from './utils/offlineOrders';
-import { syncAllStaffExpenses } from './utils/staffExpensesSync';
-import { syncAllReturnsCorrections } from './utils/returnsCorrectionsSync';
-import { startImportSyncWorker, stopImportSyncWorker, syncAllImports } from './utils/importSync';
-import { startCustomerSyncWorker, stopCustomerSyncWorker, syncAllCustomers } from './utils/customersSync';
-import { runDeltaSync } from './utils/deltaSync';
-import { processInventorySyncQueue, startInventorySyncWorker, stopInventorySyncWorker } from './utils/inventorySync';
+import { startImportSyncWorker, stopImportSyncWorker } from './utils/importSync';
+import { startCustomerSyncWorker, stopCustomerSyncWorker } from './utils/customersSync';
+import { startInventorySyncWorker, stopInventorySyncWorker } from './utils/inventorySync';
 import { setTenantConfig, setTenantConfigStatus, setSubscriptionStatus, setTenantIdentity } from './store/tenantSlice';
 import SubscriptionExpired from './pages/SubscriptionExpired';
 import { decodeJwtPayload } from './utils/jwt';
@@ -78,6 +74,7 @@ import SetupScreen from './pages/SetupScreen';
 import { startDefaultOfflineSync, stopDefaultOfflineSync } from './offline-sync';
 import SyncCenter from './pages/SyncCenter';
 import { hasFeature, isFeatureEnabled } from './utils/entitlements';
+import { runAppSyncCycle } from './utils/appSyncOrchestrator';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
@@ -219,14 +216,11 @@ function App() {
 
         if (navigator.onLine) {
           try {
-            await syncAllCustomers();
-            await processOfflineQueue(api);
-            await processInventorySyncQueue();
-            await syncAllStaffExpenses();
-            await syncAllReturnsCorrections();
-            await syncAllImports();
-            await runDeltaSync({
-              branchId: branchIdForSync && branchIdForSync !== 'all' ? branchIdForSync : null
+            await runAppSyncCycle({
+              tenantId: userDetails?.tenant_id,
+              userId: userDetails?.id,
+              branchId: branchIdForSync,
+              forceFull: false,
             });
             initialSyncDoneRef.current = true;
           } catch (err) {
@@ -450,20 +444,19 @@ useEffect(() => {
   fetchTenantBanner();
 }, [userDetails?.id]);
 
-useEffect(() => {
+  useEffect(() => {
   let orderSyncInFlight = false;
   const syncOfflineOrders = async () => {
     if (!navigator.onLine) return;
     if (orderSyncInFlight) return;
     orderSyncInFlight = true;
     try {
-      await syncAllCustomers();
-      await processOfflineQueue(api);
-      await processInventorySyncQueue();
-      await syncAllStaffExpenses();
-      await syncAllReturnsCorrections();
-      await syncAllImports();
-      await runDeltaSync({ branchId: selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null });
+      await runAppSyncCycle({
+        tenantId: userDetails?.tenant_id,
+        userId: userDetails?.id,
+        branchId: selectedBranchId,
+        forceFull: false,
+      });
     } catch (err) {
       console.log('Offline order sync failed', err);
     } finally {
@@ -494,7 +487,7 @@ useEffect(() => {
     stopImportSyncWorker();
     stopCustomerSyncWorker();
   };
-}, [selectedBranchId, setupReady]);
+}, [selectedBranchId, setupReady, userDetails?.id, userDetails?.tenant_id]);
 
 useEffect(() => {
   const handleOnline = () => setIsOnline(true);

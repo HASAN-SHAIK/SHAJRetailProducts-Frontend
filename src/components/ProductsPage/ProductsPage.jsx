@@ -205,6 +205,7 @@ const ProductsPage = ({ navigate }) => {
  const [expandedProductKey, setExpandedProductKey] = useState(null);
  const [batchRowsByProductKey, setBatchRowsByProductKey] = useState({});
  const [batchLoadingByProductKey, setBatchLoadingByProductKey] = useState({});
+ const [batchAvailableByProductKey, setBatchAvailableByProductKey] = useState({});
  const [importModalOpen, setImportModalOpen] = useState(false);
  const [importFile, setImportFile] = useState(null);
  const [importResult, setImportResult] = useState(null);
@@ -339,17 +340,6 @@ const ProductsPage = ({ navigate }) => {
 
   const getProductId = (product) =>
     product?.id ?? product?.product_id ?? product?.productId ?? null;
-
-  const getProductStockValue = (product) => {
-    const raw =
-      product?.stock_quantity ??
-      product?.stockQuantity ??
-      product?.quantity ??
-      product?.stock ??
-      null;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
-  };
 
   const getDisplayBarcode = (barcodeValue) => {
     if (!barcodeValue) return '';
@@ -596,19 +586,41 @@ const ProductsPage = ({ navigate }) => {
     return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const loadProductBatches = useCallback(async (product) => {
-    const productId = getProductId(product);
-    if (!productId) return [];
-    const productStock = getProductStockValue(product);
-    const allBatches = await getAllBatches();
+  const isLocalPlaceholderBatch = (batch) => {
+    const id = String(batch?.id || '').toLowerCase();
+    const batchNumber = String(batch?.batch_number || '').toLowerCase();
+    if (id.startsWith('local_batch_') || id.startsWith('local:') || id.startsWith('temp_')) {
+      return true;
+    }
+    return (
+      batchNumber.startsWith('local-') ||
+      batchNumber.startsWith('local:') ||
+      batchNumber.startsWith('local-temp') ||
+      batchNumber.startsWith('temp_')
+    );
+  };
+
+  const isBatchEnabledProduct = (product) =>
+    String(
+      product?.is_batch_enabled ??
+      product?.isBatchEnabled ??
+      product?.batch_enabled ??
+      0
+    ) === '1';
+
+  const buildMergedBatchesForProduct = (allBatches, productId) => {
     const scoped = (Array.isArray(allBatches) ? allBatches : []).filter((batch) => {
       if (!batch || batch.is_deleted) return false;
       if (String(batch.product_id) !== String(productId)) return false;
       if (effectiveBranchId && batch?.branch_id && String(batch.branch_id) !== String(effectiveBranchId)) return false;
       return true;
     });
+    const hasServerBatch = scoped.some((batch) => !isLocalPlaceholderBatch(batch));
+    const cleaned = hasServerBatch
+      ? scoped.filter((batch) => !isLocalPlaceholderBatch(batch))
+      : scoped;
     const mergedMap = new Map();
-    scoped.forEach((batch) => {
+    cleaned.forEach((batch) => {
       const signature = [
         String(batch.batch_number || '').trim().toLowerCase(),
         String(batch.expiry_date || ''),
@@ -632,24 +644,49 @@ const ProductsPage = ({ navigate }) => {
         quantity: Number(existing.quantity || 0) + Number(batch.quantity ?? available),
       });
     });
-    const merged = Array.from(mergedMap.values()).sort(
+    return Array.from(mergedMap.values()).sort(
       (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
     );
-    if (!Number.isFinite(productStock) || productStock < 0) {
-      return merged;
-    }
-    let remainingCap = productStock;
-    return merged
-      .map((batch) => {
-        const available = Number(batch.quantity_remaining ?? batch.quantity ?? 0);
-        if (remainingCap <= 0) {
-          return { ...batch, quantity_remaining: 0 };
-        }
-        const allowed = Math.min(available, remainingCap);
-        remainingCap -= allowed;
-        return { ...batch, quantity_remaining: allowed };
-      })
-      .filter((batch) => Number(batch.quantity_remaining ?? 0) > 0);
+  };
+
+  useEffect(() => {
+    let active = true;
+    const computeBatchAvailable = async () => {
+      try {
+        const allBatches = await getAllBatches();
+        const nextMap = {};
+        (Array.isArray(products) ? products : []).forEach((product) => {
+          const key = getProductKey(product);
+          if (!key || !isBatchEnabledProduct(product)) return;
+          const productId = getProductId(product);
+          if (!productId) return;
+          const merged = buildMergedBatchesForProduct(allBatches, productId);
+          const totalAvailable = merged.reduce(
+            (sum, batch) => sum + Number(batch?.quantity_remaining ?? batch?.quantity ?? 0),
+            0
+          );
+          nextMap[key] = Number.isFinite(totalAvailable) ? totalAvailable : 0;
+        });
+        if (!active) return;
+        setBatchAvailableByProductKey(nextMap);
+      } catch {
+        if (!active) return;
+        setBatchAvailableByProductKey({});
+      }
+    };
+    computeBatchAvailable();
+    return () => {
+      active = false;
+    };
+  }, [products, effectiveBranchId]);
+
+  const loadProductBatches = useCallback(async (product) => {
+    const productId = getProductId(product);
+    if (!productId) return [];
+    const allBatches = await getAllBatches();
+    return buildMergedBatchesForProduct(allBatches, productId).filter(
+      (batch) => Number(batch.quantity_remaining ?? 0) > 0
+    );
   }, [effectiveBranchId]);
 
   const toggleProductBatchRow = async (product) => {
@@ -1791,7 +1828,14 @@ const ProductsPage = ({ navigate }) => {
                   const batchRows = batchRowsByProductKey[rowKey] || [];
                   const batchLoading = Boolean(batchLoadingByProductKey[rowKey]);
                   const rowColSpan = userDetails.role === 'admin' ? 12 : 11;
-                  const stock = Number(displayProduct.stock_quantity ?? displayProduct.quantity ?? 0);
+                  const baseStock = Number(displayProduct.stock_quantity ?? displayProduct.quantity ?? 0);
+                  const derivedBatchStock =
+                    rowKey && Object.prototype.hasOwnProperty.call(batchAvailableByProductKey, rowKey)
+                      ? Number(batchAvailableByProductKey[rowKey] || 0)
+                      : null;
+                  const stock = isBatchEnabledProduct(displayProduct) && Number.isFinite(derivedBatchStock)
+                    ? derivedBatchStock
+                    : baseStock;
                   const minStock = Number(displayProduct.min_stock_level ?? 0);
                   const lowStock = minStock > 0 && stock <= minStock;
                   return (

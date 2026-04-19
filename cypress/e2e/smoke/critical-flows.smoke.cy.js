@@ -1,14 +1,5 @@
 const apiUrl = Cypress.env('apiUrl');
 
-const getCredentials = () => {
-  const email = Cypress.env('email');
-  const password = Cypress.env('password');
-  if (!email || !password) {
-    throw new Error('Missing credentials. Set CYPRESS_EMAIL and CYPRESS_PASSWORD.');
-  }
-  return { email, password };
-};
-
 const pickArray = (...candidates) => candidates.find((value) => Array.isArray(value)) || [];
 
 const getFirstBranchId = (headers) =>
@@ -19,11 +10,7 @@ const getFirstBranchId = (headers) =>
       headers,
     })
     .then((res) => {
-      const list = pickArray(
-        res.body?.data?.branches,
-        res.body?.branches,
-        res.body?.data
-      );
+      const list = pickArray(res.body?.data?.branches, res.body?.branches, res.body?.data);
       if (!list.length) {
         throw new Error('No branches found for smoke test.');
       }
@@ -56,7 +43,11 @@ const ensureSupplier = (headers, branchId) =>
             branch_id: branchId,
           },
         })
-        .then((createRes) => Number(createRes.body?.data?.supplier?.id));
+        .then((createRes) => {
+          const id = Number(createRes.body?.data?.supplier?.id);
+          if (id) cy.trackEntity('suppliers', id);
+          return id;
+        });
     });
 
 const createProduct = (headers, branchId) => {
@@ -79,11 +70,10 @@ const createProduct = (headers, branchId) => {
       },
     })
     .then((res) => {
-      const product =
-        res.body?.data?.product ||
-        res.body?.product ||
-        res.body?.data ||
-        {};
+      const product = res.body?.data?.product || res.body?.product || res.body?.data || {};
+      if (product?.id) {
+        cy.trackEntity('products', product.id);
+      }
       return {
         productId: Number(product.id),
         suffix,
@@ -92,23 +82,13 @@ const createProduct = (headers, branchId) => {
 };
 
 describe('Smoke - Critical E2E Flows', () => {
-  before(() => {
-    const { email, password } = getCredentials();
-    cy.request({
-      method: 'POST',
-      url: `${apiUrl}/auth/login`,
-      body: {
-        email,
-        password,
-        device_id: 'cypress-smoke-device',
-      },
-    }).then((res) => {
-      const token = res.body?.token;
-      expect(token, 'tenant token').to.be.a('string').and.not.empty;
-      cy.wrap({
-        Authorization: `Bearer ${token}`,
-      }).as('authHeaders');
-    });
+  beforeEach(() => {
+    cy.resetTrackedEntities();
+    cy.apiAuthHeaders().as('authHeaders');
+  });
+
+  afterEach(function () {
+    cy.cleanupTrackedEntities(this.authHeaders);
   });
 
   it('billing + purchase + batch FIFO flow', function () {
@@ -202,6 +182,14 @@ describe('Smoke - Critical E2E Flows', () => {
       )
       .then((saleRes) => {
         expect(saleRes.status).to.eq(201);
+        const createdOrderId =
+          saleRes.body?.data?.order?.id ||
+          saleRes.body?.data?.id ||
+          saleRes.body?.order?.id ||
+          saleRes.body?.id;
+        if (createdOrderId) {
+          cy.trackEntity('orders', createdOrderId);
+        }
         return cy.request({
           method: 'GET',
           url: `${apiUrl}/batches`,

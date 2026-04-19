@@ -25,8 +25,13 @@ const SCREEN_ROUTES = [
 ];
 
 describe('Smoke - Screen Accessibility', () => {
-  before(() => {
+  beforeEach(() => {
+    cy.resetTrackedEntities();
     cy.loginAndOpen('/dashboard');
+  });
+
+  afterEach(() => {
+    cy.cleanupTrackedEntities();
   });
 
   SCREEN_ROUTES.forEach((screen) => {

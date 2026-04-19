@@ -10,12 +10,13 @@ import logo from '../../Images/logo.png';
 import { getDeviceId } from '../../utils/device';
 import { decodeJwtPayload } from '../../utils/jwt';
 import { setTenantIdentity } from '../../store/tenantSlice';
-import { saveAuthToken, saveSessionInfo } from '../../utils/sessionStorage';
+import { getAuthToken, getSessionInfo, saveAuthToken, saveSessionInfo } from '../../utils/sessionStorage';
 
 const Login = ( ) => {
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
+  const [offlineSessionUser, setOfflineSessionUser] = useState(null);
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const handleChange = (e) => {
@@ -66,8 +67,46 @@ const Login = ( ) => {
     } catch (err) {
       setIsLoading(false);
       console.error('Login error:', err);
+      const status = err?.response?.status;
+      const networkDown = status === 0 || err?.isNetworkError;
+      if (networkDown) {
+        const session = await getSessionInfo().catch(() => null);
+        const cachedUser = session?.user || null;
+        if (cachedUser) {
+          setOfflineSessionUser(cachedUser);
+          setError('Server is offline. You can continue in offline mode using the last signed-in account on this device.');
+          return;
+        }
+        setError('Server is offline and no previous local session is available on this device.');
+        return;
+      }
       setError(err.response?.data?.message || 'Login failed');
     }
+  };
+
+  const handleContinueOffline = async () => {
+    if (!offlineSessionUser) return;
+    const enteredEmail = String(form.email || '').trim().toLowerCase();
+    const cachedEmail = String(offlineSessionUser?.email || '').trim().toLowerCase();
+    if (cachedEmail && enteredEmail && enteredEmail !== cachedEmail) {
+      setError(`Offline mode is only available for the last signed-in account (${cachedEmail}).`);
+      return;
+    }
+    dispatch(setUserDetails(offlineSessionUser));
+    let tenantId = offlineSessionUser?.tenant_id || null;
+    let role = offlineSessionUser?.role || null;
+    let userId = offlineSessionUser?.id || null;
+    if (!tenantId || !role || !userId) {
+      const token = await getAuthToken().catch(() => null);
+      const decoded = decodeJwtPayload(token);
+      tenantId = tenantId || decoded?.tenant_id || null;
+      role = role || decoded?.role || null;
+      userId = userId || decoded?.user_id || null;
+    }
+    if (tenantId || role || userId) {
+      dispatch(setTenantIdentity({ tenantId, role, userId }));
+    }
+    navigate('/setup');
   };
 
   return (
@@ -105,6 +144,16 @@ const Login = ( ) => {
           />
          <div className="floating-shape loginring orange"></div>
           <button style={{zIndex: 1000}} type="submit" className='letsgo'>{ isLoading ? <div class="spinner-border spinner-style text-light" role="status"></div> : `Let's Go`}</button>
+          {offlineSessionUser && (
+            <button
+              style={{ zIndex: 1000, marginTop: 10 }}
+              type="button"
+              className='letsgo'
+              onClick={handleContinueOffline}
+            >
+              Continue Offline
+            </button>
+          )}
         </form>
       </div>
 

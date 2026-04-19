@@ -148,9 +148,13 @@ const mergeRemote = async (table, records, idKey) => {
   }
 };
 
-export const syncAllReturnsCorrections = async () => {
+export const syncAllReturnsCorrections = async (options = {}) => {
   await processReturnsCorrectionsSync();
   if (!navigator.onLine) return;
+  const refreshRemote = options?.refreshRemote !== false;
+  if (!refreshRemote) {
+    return;
+  }
   const [returnsRes, correctionsRes, gstRes, ewayRes] = await Promise.all([
     api.get('/returns'),
     api.get('/corrections'),

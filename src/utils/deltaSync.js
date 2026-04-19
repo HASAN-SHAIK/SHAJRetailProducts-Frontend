@@ -61,9 +61,10 @@ const handleSyncResponse = async ({ moduleKey, response, upsert, drop }) => {
 export const runDeltaSync = async (options = {}) => {
   if (!navigator.onLine) return null;
   const branchId = options?.branchId || null;
+  const forceFull = options?.forceFull === true;
   const results = {};
 
-  const productsSince = await getLastSync('products');
+  const productsSince = forceFull ? null : await getLastSync('products');
   const productsRes = await api.get('/sync/products', {
     params: buildSyncParams(productsSince, branchId),
     headers: branchId ? { 'x-branch-id': branchId } : undefined,
@@ -75,7 +76,7 @@ export const runDeltaSync = async (options = {}) => {
     drop: deleteProductsCacheByIds,
   });
 
-  const batchesSince = await getLastSync('batches');
+  const batchesSince = forceFull ? null : await getLastSync('batches');
   const batchesRes = await api.get('/sync/batches', {
     params: buildSyncParams(batchesSince, branchId),
     headers: branchId ? { 'x-branch-id': branchId } : undefined,
@@ -87,7 +88,7 @@ export const runDeltaSync = async (options = {}) => {
     drop: deleteBatchesCacheByIds,
   });
 
-  const suppliersSince = await getLastSync('suppliers');
+  const suppliersSince = forceFull ? null : await getLastSync('suppliers');
   const suppliersRes = await api.get('/sync/suppliers', {
     params: buildSyncParams(suppliersSince, branchId),
     headers: branchId ? { 'x-branch-id': branchId } : undefined,
@@ -100,4 +101,8 @@ export const runDeltaSync = async (options = {}) => {
   });
 
   return results;
+};
+
+export const resetDeltaSyncState = async () => {
+  await saveConfigValue(SYNC_KEY, {});
 };

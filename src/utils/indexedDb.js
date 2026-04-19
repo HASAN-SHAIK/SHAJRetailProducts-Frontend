@@ -32,7 +32,8 @@ const normalizeProduct = (product) => {
 
 export const preloadProductsToIndexedDb = async (options = {}) => {
   const branchId = options?.branchId;
-  await runDeltaSync({ branchId }).catch(() => {});
+  const forceFull = options?.forceFull === true;
+  await runDeltaSync({ branchId, forceFull }).catch(() => {});
 };
 
 const extractCustomersPayload = (response) => {
@@ -117,11 +118,13 @@ const extractBatchesPayload = (response) => {
 
 export const preloadBatchesToIndexedDb = async (options = {}) => {
   const branchId = options?.branchId;
-  await runDeltaSync({ branchId }).catch(() => {});
+  const forceFull = options?.forceFull === true;
+  await runDeltaSync({ branchId, forceFull }).catch(() => {});
   return 0;
 };
 
 export const preloadAllCaches = async (options = {}) => {
   const branchId = options?.branchId;
-  await runDeltaSync({ branchId }).catch(() => {});
+  const forceFull = options?.forceFull === true;
+  await runDeltaSync({ branchId, forceFull }).catch(() => {});
 };

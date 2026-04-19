@@ -11,6 +11,8 @@ import {
   updateSuppliersCacheBulk,
   deleteProductsCacheByIds,
   deleteSuppliersCacheByIds,
+  deleteBatchesCacheByIds,
+  getAllBatches,
   getLocalPurchaseById,
   getLocalPurchaseItems,
   upsertLocalPurchase,
@@ -182,6 +184,28 @@ const resolveServerId = (response) =>
   response?.data?.data?.order_id ||
   null;
 
+const cleanupLocalPurchaseBatches = async (localPurchaseId) => {
+  if (!localPurchaseId) return;
+  const key = String(localPurchaseId);
+  const allBatches = await getAllBatches();
+  const toDelete = (Array.isArray(allBatches) ? allBatches : [])
+    .filter((batch) => {
+      if (!batch) return false;
+      const batchId = String(batch.id || '');
+      const batchNumber = String(batch.batch_number || '').toUpperCase();
+      const purchaseOrderId = String(batch.purchase_order_id || '');
+      return (
+        batchId.startsWith(`local_batch_${key}_`) ||
+        batchNumber.startsWith(`LOCAL-${key.toUpperCase()}-`) ||
+        purchaseOrderId === key
+      );
+    })
+    .map((batch) => batch.id)
+    .filter(Boolean);
+  if (!toDelete.length) return;
+  await deleteBatchesCacheByIds(toDelete);
+};
+
 const syncProductEntry = async (entry) => {
   const product = await getProductCacheById(entry.entityId);
   if (!product && entry.action !== 'delete') {
@@ -313,6 +337,7 @@ const syncPurchaseEntry = async (entry) => {
     serverId: serverId ?? purchase.serverId ?? null,
     syncedAt: nowIso(),
   });
+  await cleanupLocalPurchaseBatches(entry.entityId).catch(() => {});
   return { status: 'synced', serverId };
 };
 
