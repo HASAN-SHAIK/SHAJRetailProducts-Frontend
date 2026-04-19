@@ -1,11 +1,18 @@
 describe('1. LOGIN FLOW (CORE)', () => {
   
   beforeEach(() => {
-    cy.visit('/login'); 
-    cy.intercept('GET', '**/api/platform/config', {
+    cy.viewport(1280, 800);
+    cy.clearCookies();
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+    
+    // THE FIX: Set the intercept BEFORE visiting the page!
+    cy.intercept('GET', '**/api/platform/config*', {
       statusCode: 200,
       body: { data: { subscription_status: 'active' } }
     }).as('configReq');
+    
+    cy.visit('/login'); 
   });
 
   it('Valid login -> redirect to dashboard', () => {
@@ -18,7 +25,8 @@ describe('1. LOGIN FLOW (CORE)', () => {
     cy.get('input[name="password"]').type('admin');
     cy.get('button.letsgo').click();
 
-    cy.wait(['@loginReq', '@configReq']);
+    // THE FIX: Only wait for the login request here. Config already fired on load!
+    cy.wait('@loginReq');
     cy.url().should('include', '/dashboard');
   });
 
@@ -62,7 +70,6 @@ describe('1. LOGIN FLOW (CORE)', () => {
   });
 
   it('Auto-login if token exists', () => {
-    // Manually inject the token into the window before the app loads
     cy.window().then((win) => {
       win.sessionStorage.setItem('token', 'mock-jwt-token');
       win.sessionStorage.setItem('authToken', 'mock-jwt-token');
@@ -72,7 +79,7 @@ describe('1. LOGIN FLOW (CORE)', () => {
     cy.url().should('include', '/dashboard');
   });
 
-it('User session stored securely after login', () => {
+  it('User session stored securely after login', () => {
     const validFakeJwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJ0ZW5hbnRfaWQiOiJ0ZW5hbnQxMjMiLCJyb2xlIjoiYWRtaW4ifQ.dummy_signature';
 
     cy.intercept('POST', '**/api/auth/login', {
@@ -80,7 +87,6 @@ it('User session stored securely after login', () => {
       body: { token: validFakeJwt }
     }).as('loginReq');
 
-    // Prevent 401s from crashing the dashboard
     cy.intercept('GET', '**/api/**', { statusCode: 200, body: {} });
 
     cy.get('input[name="email"]').type('admin@siddu.com');
@@ -90,11 +96,10 @@ it('User session stored securely after login', () => {
     cy.wait('@loginReq');
     cy.url().should('include', '/dashboard');
 
-    // Check what is ACTUALLY saved in your app's local storage (Redux state)
     cy.window().should((win) => {
       const localData = win.localStorage.getItem('persist:root');
-      expect(localData).to.include('tenant123'); // Confirms the decoded token data was saved
-      expect(localData).to.include('admin');     // Confirms the role was saved
+      expect(localData).to.include('tenant123'); 
+      expect(localData).to.include('admin');     
     });
   });
 });
