@@ -1,0 +1,75 @@
+.customers-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.customers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.customers-search {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.customer-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.customer-balance.high {
+  color: #fca5a5;
+  font-weight: 700;
+}
+
+.customer-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.customer-tab {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.4);
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.customer-tab.active {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.6);
+}
+
+.customer-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.customer-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.purchase-suggestion-text {
+  display: block;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.purchase-suggestions {
+  width: max-content;
+  min-width: 100%;
+  max-width: 90vw;
+}

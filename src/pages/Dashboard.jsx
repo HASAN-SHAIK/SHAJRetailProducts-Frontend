@@ -1,11 +1,9 @@
-import { useContext, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import DashboardOverview from "../components/Dashboard/DashboardOverview/DashboardOverview";
 import { preloadProductsToIndexedDb } from "../utils/indexedDb";
-import { ThemeContext } from "../ThemeContext";
 
 const Dashboard = ({ navigate}) => {
   const preloadRef = useRef(false);
-  const { theme, toggleTheme } = useContext(ThemeContext);
   useEffect(() => {
     console.log('[cacheDB] Dashboard.jsx mounted');
   }, []);
@@ -33,9 +31,6 @@ const Dashboard = ({ navigate}) => {
           <span className="wow-pulse"></span>
         </div>
         <div className="wow-content container-fluid">
-          {/* <button className="theme-toggle" onClick={toggleTheme}>
-            {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
-          </button> */}
           <DashboardOverview navigate = {navigate}/>
         </div>
       </div>

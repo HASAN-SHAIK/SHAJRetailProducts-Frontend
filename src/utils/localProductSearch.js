@@ -12,6 +12,7 @@ export const searchLocalProducts = async (term) => {
   if (!query) return [];
   const products = await getAllProducts();
   return products.filter((product) => {
+    if (product?.is_deleted) return false;
     const name = normalizeName(product).toLowerCase();
     const company = String(product?.company || '').toLowerCase();
     const barcode = String(product?.barcode || '').toLowerCase();

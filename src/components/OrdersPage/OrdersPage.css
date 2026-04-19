@@ -1,7 +1,7 @@
 .orders-page {
   min-height: 100vh;
-  padding: 24px 18px 32px;
-  margin-top: 5vh;
+  /* padding: 24px 18px 32px; */
+  /* margin-top: 5vh; */
   color: #e2e8f0;
 }
 
@@ -191,6 +191,51 @@
   background: rgba(251, 191, 36, 0.18);
   color: #fbbf24;
   border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.payment-badge.pending {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.order-id-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.order-type-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.order-type-tag.wholesale {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+}
+
+.sync-icon {
+  font-size: 0.9rem;
+  color: #38bdf8;
+  animation: sync-spin 1.6s linear infinite;
+}
+
+@keyframes sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .payment-cell {
@@ -387,6 +432,20 @@
   justify-content: flex-start;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.payment-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.payment-input-group label {
+  display: grid;
+  gap: 6px;
+  color: #cbd5f5;
+  font-size: 0.8rem;
 }
 
 .drawer-section.actions .lock-tag {

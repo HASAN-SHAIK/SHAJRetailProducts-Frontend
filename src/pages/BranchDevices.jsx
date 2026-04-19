@@ -1,13 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useBranchStore } from '../store/branchStore';
 import { useSelector } from 'react-redux';
 import api from '../utils/axios';
 import './BranchDevices.css';
 
 const formatDate = (value) => {
-  if (!value) return '—';
+  if (!value) return 'â€”';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
+  if (Number.isNaN(date.getTime())) return 'â€”';
   return date.toLocaleString();
 };
 
@@ -67,7 +67,7 @@ const BranchDevices = () => {
   if (userRole !== 'admin') {
     return (
       <div className="branch-devices-page container mt-4">
-        <h3 className="mb-2">Branch Devices</h3>
+        <h3 className="mb-2 text-light">Branch Devices</h3>
         <div className="alert alert-warning">Admin access only.</div>
       </div>
     );
@@ -77,8 +77,8 @@ const BranchDevices = () => {
     <div className="branch-devices-page container mt-4">
       <div className="d-flex align-items-center justify-content-between mb-3">
         <div>
-          <h3 className="mb-1">Branch Devices</h3>
-          <p className="text-muted mb-0">Manage device access per branch.</p>
+          <h3 className="mb-1 text-light">Branch Devices</h3>
+          <p className="text-secondary mb-0">Manage device access per branch.</p>
         </div>
         <button className="btn btn-outline-primary" onClick={fetchDevices} disabled={isLoading || !effectiveBranchId}>
           {isLoading ? 'Refreshing...' : 'Refresh'}
@@ -131,7 +131,7 @@ const BranchDevices = () => {
           </div>
           <div className="card-body p-0">
             {devices.length === 0 ? (
-              <div className="p-3 text-muted">No devices registered yet.</div>
+              <div className="p-3 text-secondary">No devices registered yet.</div>
             ) : (
               <div className="table-responsive">
                 <table className="table table-striped mb-0">
@@ -149,7 +149,7 @@ const BranchDevices = () => {
                       <tr key={device.id}>
                         <td>
                           <div className="fw-semibold">{device.device_name || device.device_id}</div>
-                          <div className="text-muted small">{device.browser_info || 'Unknown device'}</div>
+                          <div className="text-secondary small">{device.browser_info || 'Unknown device'}</div>
                         </td>
                         <td>
                           {device.is_active ? (
@@ -159,7 +159,7 @@ const BranchDevices = () => {
                           )}
                         </td>
                         <td>{formatDate(device.last_login_at)}</td>
-                        <td>{device.ip_address || '—'}</td>
+                        <td>{device.ip_address || 'â€”'}</td>
                         <td className="text-end">
                           {device.is_active && (
                             <button
@@ -185,3 +185,4 @@ const BranchDevices = () => {
 };
 
 export default BranchDevices;
+
