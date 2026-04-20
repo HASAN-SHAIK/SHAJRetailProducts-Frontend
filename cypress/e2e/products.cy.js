@@ -6,6 +6,9 @@ describe('Products Page – End-to-End Tests', () => {
     cy.get('input[type="email"]').type('admin@example.com');
     cy.get('input[type="password"]').type('admin');
     cy.get('button').contains(`Let's Go`).click();
+    // Wait for dashboard to load after login
+    cy.url().should('include', '/dashboard', { timeout: 15000 });
+    cy.wait(2000); // Additional wait for sidebar/navigation to render
     cy.contains('Products').click();
     cy.url().should('include', '/products');
   });
