@@ -33,6 +33,7 @@ import OrderDetailsMobile from './mobile/pages/OrderDetailsMobile';
 import ProductsMobile from './mobile/pages/ProductsMobile';
 import ReportsMobile from './mobile/pages/ReportsMobile';
 import SettingsMobile from './mobile/pages/SettingsMobile';
+import BillingMobile from './mobile/pages/BillingMobile';
 import ContextLayout from './components/layout/ContextLayout';
 import RetailBilling from './pages/billing/RetailBilling';
 import WholesaleBilling from './pages/billing/WholesaleBilling';
@@ -116,6 +117,8 @@ function App() {
     (window.matchMedia('(max-width: 768px)').matches ||
       /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
   const reportsEnabled = isFeatureEnabled(tenantConfig, 'reports_enabled', true);
+  const mobileAccessEnabled = isFeatureEnabled(tenantConfig, 'mobile_access', false);
+  const canUseMobileRoutes = tenantConfigStatus === 'loaded' ? mobileAccessEnabled : true;
   useEffect(() => {
     const runSetup = async () => {
       if (!userDetails) {
@@ -130,6 +133,7 @@ function App() {
       setupInProgressRef.current = true;
       setupDidRunRef.current = true;
       setSetupInProgress(true);
+      let setupMobileAccessEnabled = false;
       try {
         await preloadAllCaches().catch((err) => {
           console.error('IndexedDB preload failed', err);
@@ -140,6 +144,7 @@ function App() {
         }
         try {
           const payload = await resolveTenantConfig();
+          setupMobileAccessEnabled = hasFeature(payload, 'mobile_access');
           dispatch(setTenantConfig(payload));
           if (payload.subscription_status || payload.subscriptionStatus) {
             dispatch(setSubscriptionStatus(payload.subscription_status || payload.subscriptionStatus));
@@ -231,7 +236,7 @@ function App() {
         setSetupInProgress(false);
         setSetupReady(true);
         setupInProgressRef.current = false;
-        navigate(isMobileDevice ? '/m/dashboard' : '/dashboard', { replace: true });
+        navigate(isMobileDevice && setupMobileAccessEnabled ? '/m/dashboard' : '/dashboard', { replace: true });
       }
     };
     runSetup();
@@ -293,12 +298,21 @@ function App() {
 useEffect(() => {
   if (!userDetails) return;
   if (!isMobileDevice) return;
+  if (!mobileAccessEnabled) return;
   if (isMobileRoute) return;
   if (location.pathname === '/setup') return;
   if (AUTH_PAGES.includes(location.pathname)) return;
   if (location.pathname === '/subscription-expired') return;
   navigate('/m/dashboard', { replace: true });
-}, [userDetails, isMobileDevice, isMobileRoute, location.pathname, navigate]);
+}, [userDetails, isMobileDevice, mobileAccessEnabled, isMobileRoute, location.pathname, navigate]);
+
+useEffect(() => {
+  if (!userDetails) return;
+  if (!isMobileRoute) return;
+  if (tenantConfigStatus !== 'loaded') return;
+  if (mobileAccessEnabled) return;
+  navigate('/dashboard', { replace: true });
+}, [userDetails, isMobileRoute, tenantConfigStatus, mobileAccessEnabled, navigate]);
 
 useEffect(() => {
   if (typeof window === 'undefined') return;
@@ -567,7 +581,7 @@ const tenantBannerColor = (() => {
   return tenantBanner?.color || null;
 })();
   return (
-    <>
+    <ThemeProvider>
       <ScrollToTop />
       {userDetails && !AUTH_PAGES.includes(location.pathname) && 
       !isMobileRoute && !setupInProgress && location.pathname !== '/setup' && (
@@ -621,7 +635,7 @@ const tenantBannerColor = (() => {
             path="/m/dashboard"
             element={
               <ProtectedRoute>
-                <DashboardMobile />
+                {canUseMobileRoutes ? <DashboardMobile /> : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -629,7 +643,7 @@ const tenantBannerColor = (() => {
             path="/m/orders"
             element={
               <ProtectedRoute>
-                <OrdersMobile />
+                {canUseMobileRoutes ? <OrdersMobile /> : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -637,7 +651,23 @@ const tenantBannerColor = (() => {
             path="/m/orders/:id"
             element={
               <ProtectedRoute>
-                <OrderDetailsMobile />
+                {canUseMobileRoutes ? <OrderDetailsMobile /> : <Navigate to="/dashboard" replace />}
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/m/billing"
+            element={
+              <ProtectedRoute>
+                {canUseMobileRoutes ? <Navigate to="/m/neworder" replace /> : <Navigate to="/dashboard" replace />}
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/m/neworder"
+            element={
+              <ProtectedRoute>
+                {canUseMobileRoutes ? <BillingMobile /> : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -645,7 +675,7 @@ const tenantBannerColor = (() => {
             path="/m/products"
             element={
               <ProtectedRoute>
-                <ProductsMobile />
+                {canUseMobileRoutes ? <ProductsMobile /> : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -653,7 +683,7 @@ const tenantBannerColor = (() => {
             path="/m/reports"
             element={
               <ProtectedRoute>
-                <ReportsMobile />
+                {canUseMobileRoutes ? <ReportsMobile /> : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -661,7 +691,7 @@ const tenantBannerColor = (() => {
             path="/m/settings"
             element={
               <ProtectedRoute>
-                <SettingsMobile />
+                {canUseMobileRoutes ? <SettingsMobile /> : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -669,9 +699,7 @@ const tenantBannerColor = (() => {
             path="/dashboard"
             element={
               <ProtectedRoute>
-                <ThemeProvider>
-                  {reportsEnabled ? <Dashboard navigate={navigate} /> : <Navigate to="/neworder" replace />}
-                </ThemeProvider>
+                {reportsEnabled ? <Dashboard navigate={navigate} /> : <Navigate to="/neworder" replace />}
               </ProtectedRoute>
             }
           />
@@ -794,7 +822,7 @@ const tenantBannerColor = (() => {
           <Route path="*" element={userDetails ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />
         </Routes>
       </div>
-    </>
+    </ThemeProvider>
   );
 }
 

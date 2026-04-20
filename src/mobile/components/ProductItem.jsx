@@ -1,20 +1,32 @@
-const formatCurrency = (value) =>
-  Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+const formatCurrency = (value) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
 const ProductItem = ({ product }) => {
+  const stock = Number(product?.stock ?? product?.stock_quantity ?? 0);
+  const stockTone = stock > 20 ? 'success' : stock > 0 ? 'warn' : 'danger';
+
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 px-2.5 py-1.5">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold text-white">{product.name}</p>
-        <p className="text-[11px] font-semibold text-white">
-          â‚¹{formatCurrency(product.price)}
+    <article className="mobile-item">
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>{product?.name || 'Unnamed Product'}</p>
+          <p className="mobile-muted" style={{ margin: '3px 0 0', fontSize: 10 }}>
+            SKU: {product?.sku || product?.code || 'NA'}
+          </p>
+        </div>
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>
+          Rs {formatCurrency(product?.price ?? product?.selling_price ?? product?.purchase_price ?? 0)}
         </p>
       </div>
-      <div className="mt-1 flex items-center justify-between text-[9px] text-white/60">
-        <span>Stock: {product.stock}</span>
-        {product.barcode ? <span>Barcode: {product.barcode}</span> : <span>No barcode</span>}
+
+      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <p className="mobile-muted" style={{ margin: 0, fontSize: 10 }}>
+          {product?.category || product?.category_name || 'General'}
+          {' • '}
+          {product?.barcode || 'No barcode'}
+        </p>
+        <span className={`mobile-badge ${stockTone}`}>Stock {stock}</span>
       </div>
-    </div>
+    </article>
   );
 };
 

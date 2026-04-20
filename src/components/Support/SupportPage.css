@@ -270,3 +270,31 @@
   text-align: center;
   padding: 16px 0;
 }
+
+body.app-theme-light .support-page {
+  color: #0f172a;
+}
+
+body.app-theme-light .support-header p,
+body.app-theme-light .drawer-eyebrow,
+body.app-theme-light .drawer-grid .label,
+body.app-theme-light .message-meta,
+body.app-theme-light .support-page .empty-state {
+  color: #64748b;
+}
+
+body.app-theme-light .support-table th {
+  color: #1e3a8a;
+}
+
+body.app-theme-light .support-table td {
+  color: #0f172a;
+  border-bottom-color: rgba(148, 163, 184, 0.24);
+}
+
+body.app-theme-light .support-modal,
+body.app-theme-light .support-drawer,
+body.app-theme-light .message-card {
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.3);
+}

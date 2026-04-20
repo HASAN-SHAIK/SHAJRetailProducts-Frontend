@@ -1,11 +1,27 @@
 const SearchBar = ({ value, onChange, placeholder }) => {
   return (
-    <input
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      className="w-full rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] text-white placeholder:text-white/40 focus:border-[#38BDF8] focus:outline-none"
-    />
+    <div style={{ position: 'relative' }}>
+      <input
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="mobile-field"
+        style={{ paddingLeft: 34 }}
+      />
+      <span
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          left: 11,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          fontSize: 13,
+          opacity: 0.7,
+        }}
+      >
+        ?
+      </span>
+    </div>
   );
 };
 

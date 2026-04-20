@@ -73,3 +73,17 @@
   min-width: 100%;
   max-width: 90vw;
 }
+
+body.app-theme-light .customers-page {
+  color: #0f172a;
+}
+
+body.app-theme-light .customer-tab {
+  color: #0f172a;
+}
+
+body.app-theme-light .customer-tab.active {
+  background: rgba(191, 219, 254, 0.95);
+  color: #1e3a8a;
+  border-color: rgba(37, 99, 235, 0.35);
+}

@@ -460,3 +460,73 @@
     min-width: 720px;
   }
 }
+
+body.app-theme-light .products-page {
+  color: #0f172a;
+}
+
+body.app-theme-light .products-subtitle,
+body.app-theme-light .import-history-subtitle,
+body.app-theme-light .sort-indicator,
+body.app-theme-light .empty-state {
+  color: #64748b;
+}
+
+body.app-theme-light .cache-banner,
+body.app-theme-light .products-card,
+body.app-theme-light .products-batch-panel,
+body.app-theme-light .delete-modal {
+  background: rgba(248, 250, 252, 0.96);
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.32);
+  box-shadow: 0 10px 24px rgba(148, 163, 184, 0.28);
+}
+
+body.app-theme-light .products-table th {
+  background: rgba(241, 245, 249, 0.98);
+  color: #1e3a8a;
+}
+
+body.app-theme-light .products-table td,
+body.app-theme-light .products-batch-table td {
+  color: #0f172a;
+}
+
+body.app-theme-light .products-table thead tr,
+body.app-theme-light .products-table tbody tr,
+body.app-theme-light .products-batch-table th,
+body.app-theme-light .products-batch-table td,
+body.app-theme-light .products-batch-row td {
+  border-bottom-color: rgba(148, 163, 184, 0.24);
+}
+
+body.app-theme-light .products-row:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+body.app-theme-light .products-row.expanded {
+  background: rgba(147, 197, 253, 0.2);
+}
+
+body.app-theme-light .dirty-row {
+  background: rgba(251, 191, 36, 0.15);
+}
+
+body.app-theme-light .editable-cell:hover {
+  color: #0f172a;
+}
+
+body.app-theme-light .editable-input,
+body.app-theme-light .page-btn {
+  background: rgba(255, 255, 255, 0.95);
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+body.app-theme-light .delete-modal-overlay {
+  background: rgba(15, 23, 42, 0.28);
+}
+
+body.app-theme-light .delete-modal p {
+  color: #475569;
+}

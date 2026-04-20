@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 // import { Modal } from 'bootstrap'
 import { useLocation, useNavigate } from "react-router-dom";
 import './Navbar.css'
 import { useSelector } from 'react-redux';
 import { useBranchStore } from '../../../store/branchStore';
 import { isFeatureEnabled } from '../../../utils/entitlements';
+import { ThemeContext } from '../../../ThemeContext';
 
 
 const Navbar = () => {
@@ -17,6 +18,7 @@ const Navbar = () => {
   const selectedBranchName = useBranchStore((state) => state.selectedBranchName);
   const setSelectedBranchId = useBranchStore((state) => state.setSelectedBranchId);
   const reportsEnabled = isFeatureEnabled(tenantConfig, 'reports_enabled', true);
+  const { theme, toggleTheme } = useContext(ThemeContext);
   const [menuOpen, setMenuOpen] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -27,13 +29,34 @@ const Navbar = () => {
   const moreDropdownRef = useRef(null);
   const settingsDropdownRef = useRef(null);
   const navActionsRef = useRef(null);
+  const navActionsRightRef = useRef(null);
   const rafRef = useRef(null);
+  const normalizeBranchLabel = useCallback((value) => {
+    // Remove invisible zero-width characters and normalize whitespace.
+    const cleaned = String(value ?? '')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return cleaned;
+  }, []);
+
+  const getBranchDisplayName = useCallback((branch, fallback = '') => {
+    const name =
+      branch?.name ??
+      branch?.branch_name ??
+      branch?.title ??
+      branch?.branch ??
+      fallback;
+    return normalizeBranchLabel(name);
+  }, [normalizeBranchLabel]);
 
   const currentBranchLabel = (() => {
     if (selectedBranchId === 'all') return 'All';
-    if (selectedBranchName) return selectedBranchName;
+    const selectedLabel = normalizeBranchLabel(selectedBranchName);
+    if (selectedLabel) return selectedLabel;
     const match = branches.find((branch) => String(branch.id) === String(selectedBranchId));
-    return match?.name || 'Select Branch';
+    const matchName = getBranchDisplayName(match);
+    return matchName || 'Select Branch';
   })();
 
   useEffect(() => {
@@ -92,7 +115,7 @@ const Navbar = () => {
     isActive('/sync-center');
 
   const detectWrapOrOverflow = useCallback(() => {
-    const element = navActionsRef.current;
+    const element = navActionsRightRef.current || navActionsRef.current;
     if (!element) return false;
     const widthOverflow = element.scrollWidth - element.clientWidth > 1;
     const heightOverflow = element.scrollHeight - element.clientHeight > 1;
@@ -145,6 +168,9 @@ const Navbar = () => {
     const handleResize = () => evaluateMoreVisibility();
     window.addEventListener('resize', handleResize);
     const observer = new ResizeObserver(() => evaluateMoreVisibility());
+    if (navActionsRightRef.current) {
+      observer.observe(navActionsRightRef.current);
+    }
     if (navActionsRef.current) {
       observer.observe(navActionsRef.current);
     }
@@ -188,8 +214,9 @@ const Navbar = () => {
                   type="button"
                   aria-expanded={branchOpen}
                   onClick={() => setBranchOpen((prev) => !prev)}
+                  title={currentBranchLabel || 'Select Branch'}
                 >
-                  {currentBranchLabel}
+                  <span className="nav-branch-pill-label">{currentBranchLabel || 'Select Branch'}</span>
                 </button>
                 <ul className={`dropdown-menu nav-branch-menu${branchOpen ? ' show' : ''}`}>
                   <li>
@@ -231,22 +258,29 @@ const Navbar = () => {
                         </button>
                       </li>
                     )}
-                  {branches.map((branch) => (
-                    <li key={branch.id}>
+                  {branches.map((branch, index) => {
+                    const branchLabel = getBranchDisplayName(
+                      branch,
+                      `Branch ${index + 1}`
+                    );
+                    return (
+                    <li key={branch.id || `branch-${index}`}>
                       <button
                         type="button"
                         className="dropdown-item"
                         onClick={() =>
-                          handleBranchSelect(String(branch.id), branch.name || '', true)
+                          handleBranchSelect(String(branch.id), branchLabel, true)
                         }
                       >
-                        {branch.name}
+                        {branchLabel}
                       </button>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </div>
             </div>
+            <div className="nav-actions-right" ref={navActionsRightRef}>
             <div className="nav-main-links">
               {reportsEnabled && (
                 <button className={`btn btn-outline-primary nav-pill${isActive('/dashboard') ? ' active' : ''}`} onClick={() => navigateTo('/dashboard')}>
@@ -309,54 +343,6 @@ const Navbar = () => {
                 </button>
               </div>
             )}
-            <div className="dropdown nav-settings-dropdown" ref={settingsDropdownRef}>
-              <button
-                className={`btn btn-outline-primary nav-pill nav-settings-pill dropdown-toggle${settingsOpen ? ' show' : ''}`}
-                type="button"
-                aria-expanded={settingsOpen}
-                onClick={() => {
-                  setMoreOpen(false);
-                  setSettingsOpen((prev) => !prev);
-                }}
-              >
-                <span className="nav-pill-content">
-                  <i className="bi bi-gear fs-6" aria-hidden="true" />
-                  <span className="nav-pill-label">Settings</span>
-                </span>
-              </button>
-              <ul className={`dropdown-menu nav-settings-menu${settingsOpen ? ' show' : ''}`}>
-                {userRole === 'admin' && (
-                  <li>
-                    <button
-                      type="button"
-                      className="dropdown-item"
-                      onClick={() => navigateTo('/branch-devices')}
-                    >
-                      <span className="nav-pill-content">
-                        <i className="bi bi-shield-lock fs-6" aria-hidden="true" />
-                        <span className="nav-pill-label">Devices</span>
-                      </span>
-                    </button>
-                  </li>
-                )}
-                <li>
-                  <button
-                    type="button"
-                    className="dropdown-item text-danger"
-                    onClick={async() => {
-                      setMenuOpen(false);
-                      setSettingsOpen(false);
-                      navigate('/logout');
-                    }}
-                  >
-                    <span className="nav-pill-content">
-                      <i className="bi bi-box-arrow-right fs-6" aria-hidden="true" />
-                      <span className="nav-pill-label">Logout</span>
-                    </span>
-                  </button>
-                </li>
-              </ul>
-            </div>
             {showMore && !isProbingExpand && (
               <div className="dropdown nav-more-dropdown" ref={moreDropdownRef}>
                 <button
@@ -417,6 +403,70 @@ const Navbar = () => {
                 </ul>
               </div>
             )}
+            <div className="dropdown nav-settings-dropdown" ref={settingsDropdownRef}>
+              <button
+                className={`btn btn-outline-primary nav-pill nav-settings-pill dropdown-toggle${settingsOpen ? ' show' : ''}`}
+                type="button"
+                aria-expanded={settingsOpen}
+                onClick={() => {
+                  setMoreOpen(false);
+                  setSettingsOpen((prev) => !prev);
+                }}
+              >
+                <span className="nav-pill-content">
+                  <i className="bi bi-gear fs-6" aria-hidden="true" />
+                  <span className="nav-pill-label">Settings</span>
+                </span>
+              </button>
+              <ul className={`dropdown-menu nav-settings-menu${settingsOpen ? ' show' : ''}`}>
+                <li>
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    onClick={() => {
+                      toggleTheme();
+                      setSettingsOpen(false);
+                    }}
+                  >
+                    <span className="nav-pill-content">
+                      <i className={`bi ${theme === 'dark' ? 'bi-sun' : 'bi-moon-stars'} fs-6`} aria-hidden="true" />
+                      <span className="nav-pill-label">{theme === 'dark' ? 'Light' : 'Dark'} Mode</span>
+                    </span>
+                  </button>
+                </li>
+                {userRole === 'admin' && (
+                  <li>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => navigateTo('/branch-devices')}
+                    >
+                      <span className="nav-pill-content">
+                        <i className="bi bi-shield-lock fs-6" aria-hidden="true" />
+                        <span className="nav-pill-label">Devices</span>
+                      </span>
+                    </button>
+                  </li>
+                )}
+                <li>
+                  <button
+                    type="button"
+                    className="dropdown-item text-danger"
+                    onClick={async() => {
+                      setMenuOpen(false);
+                      setSettingsOpen(false);
+                      navigate('/logout');
+                    }}
+                  >
+                    <span className="nav-pill-content">
+                      <i className="bi bi-box-arrow-right fs-6" aria-hidden="true" />
+                      <span className="nav-pill-label">Logout</span>
+                    </span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+            </div>
             </div>
         </div>
     </div>

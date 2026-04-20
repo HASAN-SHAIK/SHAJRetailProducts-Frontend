@@ -625,3 +625,134 @@
   }
 }
 
+body.app-theme-light .billing-page,
+body.app-theme-light .billing-page-shell,
+body.app-theme-light .billing-center,
+body.app-theme-light .billing-inputs,
+body.app-theme-light .billing-options,
+body.app-theme-light .billing-checkout-panel,
+body.app-theme-light .billing-search,
+body.app-theme-light .billing-numpad,
+body.app-theme-light .billing-totals,
+body.app-theme-light .billing-modal,
+body.app-theme-light .gst-popup {
+  color: #0f172a;
+}
+
+body.app-theme-light .billing-search-list,
+body.app-theme-light .billing-search-item,
+body.app-theme-light .numpad-btn,
+body.app-theme-light .numpad-display,
+body.app-theme-light .billing-actions-panel {
+  background: rgba(248, 250, 252, 0.98);
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+body.app-theme-light .billing-option-group,
+body.app-theme-light .billing-option-row label,
+body.app-theme-light .billing-label,
+body.app-theme-light .billing-static,
+body.app-theme-light .purchase-total,
+body.app-theme-light .section-title {
+  color: #0f172a;
+}
+
+body.app-theme-light .billing-page-shell,
+body.app-theme-light .billing-center,
+body.app-theme-light .billing-inputs,
+body.app-theme-light .billing-options,
+body.app-theme-light .billing-checkout-panel,
+body.app-theme-light .billing-search,
+body.app-theme-light .billing-numpad,
+body.app-theme-light .billing-totals,
+body.app-theme-light .billing-actions-panel,
+body.app-theme-light .billing-modal,
+body.app-theme-light .gst-popup {
+  background: rgba(248, 250, 252, 0.96) !important;
+  border-color: rgba(148, 163, 184, 0.32) !important;
+  color: #0f172a !important;
+  box-shadow: 0 12px 28px rgba(148, 163, 184, 0.25);
+}
+
+body.app-theme-light .billing-table-wrapper {
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+body.app-theme-light .billing-table th,
+body.app-theme-light .billing-batch-details-table th {
+  background: rgba(241, 245, 249, 0.98) !important;
+  color: #1e3a8a !important;
+}
+
+body.app-theme-light .billing-table td,
+body.app-theme-light .billing-batch-details-table td {
+  color: #0f172a;
+  border-bottom-color: rgba(148, 163, 184, 0.24);
+}
+
+body.app-theme-light .billing-row:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+body.app-theme-light .billing-row.selected {
+  background: rgba(34, 197, 94, 0.16);
+}
+
+body.app-theme-light .billing-qty-input,
+body.app-theme-light .billing-price-input,
+body.app-theme-light .billing-gst-input,
+body.app-theme-light .billing-input,
+body.app-theme-light .billing-search-input,
+body.app-theme-light .billing-options .form-select,
+body.app-theme-light .billing-options .form-control,
+body.app-theme-light .billing-checkout-panel .form-select,
+body.app-theme-light .billing-checkout-panel .form-control {
+  background: rgba(255, 255, 255, 0.96) !important;
+  color: #0f172a !important;
+  border-color: rgba(148, 163, 184, 0.35) !important;
+}
+
+body.app-theme-light .billing-option-title,
+body.app-theme-light .billing-subtitle,
+body.app-theme-light .billing-empty,
+body.app-theme-light .mrp-cell,
+body.app-theme-light .billing-stock,
+body.app-theme-light .billing-search-status {
+  color: #64748b !important;
+}
+
+body.app-theme-light .billing-totals .grand-total {
+  color: #0f172a;
+}
+
+body.app-theme-light .billing-message {
+  color: #991b1b;
+  background: rgba(254, 226, 226, 0.9);
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+body.app-theme-light .gst-popup-header,
+body.app-theme-light .gst-toggle,
+body.app-theme-light .billing-modal {
+  color: #0f172a;
+}
+
+body.app-theme-light .gst-popup-overlay,
+body.app-theme-light .billing-modal-overlay {
+  background: rgba(15, 23, 42, 0.3);
+}
+
+body.app-theme-light .billing-page .btn-outline-light {
+  color: #0f172a !important;
+  border-color: rgba(148, 163, 184, 0.55) !important;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+body.app-theme-light .billing-page .btn-outline-light:hover,
+body.app-theme-light .billing-page .btn-outline-light:focus {
+  color: #0f172a !important;
+  border-color: rgba(59, 130, 246, 0.6) !important;
+  background: rgba(186, 230, 253, 0.45);
+}
+

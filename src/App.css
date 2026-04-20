@@ -24,6 +24,17 @@ html, body{
   height: auto;
 }
 
+body.app-theme-light {
+  background:
+    radial-gradient(1000px 500px at 90% 0%, rgba(59, 130, 246, 0.14), transparent 60%),
+    linear-gradient(135deg, #f8fbff 0%, #edf3ff 52%, #e5eeff 100%);
+  color: #0f172a;
+}
+
+body.app-theme-light * {
+  scrollbar-color: rgba(148, 163, 184, 0.95) rgba(226, 232, 240, 0.95);
+}
+
 
 * {
   scrollbar-width: thin;
@@ -45,6 +56,15 @@ html, body{
   border-radius: 999px;
   border: 2px solid rgba(15, 23, 42, 0.9);
 }
+
+body.app-theme-light *::-webkit-scrollbar-track {
+  background: rgba(226, 232, 240, 0.95);
+}
+
+body.app-theme-light *::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.95);
+  border-color: rgba(226, 232, 240, 0.95);
+}
 .container-fluid {
   background: linear-gradient(to right top, #6ba0f6, #0c52bb);
 }
@@ -59,6 +79,13 @@ html, body{
   color: #e2e8f0;
   font-family: "Archivo", "Segoe UI", sans-serif;
   overflow-x: hidden;
+}
+
+body.app-theme-light .wow-page {
+  background:
+    radial-gradient(1000px 500px at 90% 0%, rgba(59, 130, 246, 0.14), transparent 60%),
+    linear-gradient(135deg, #f8fbff 0%, #edf3ff 52%, #e5eeff 100%);
+  color: #0f172a;
 }
 
 .login-page {
@@ -175,6 +202,10 @@ html, body{
   color: #e2e8f0;
 }
 
+body.app-theme-light .wow-page .table {
+  color: #1e293b;
+}
+
 .wow-page .btn {
   border-radius: 999px;
   padding: 8px 18px;
@@ -208,6 +239,17 @@ html, body{
 .wow-page .btn-outline-primary:hover {
   background: rgba(56, 189, 248, 0.18);
   box-shadow: 0 0 18px rgba(56, 189, 248, 0.4);
+}
+
+body.app-theme-light .wow-page .btn-outline-primary {
+  border-color: rgba(37, 99, 235, 0.35);
+  color: #1d4ed8;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+body.app-theme-light .wow-page .btn-outline-primary:hover {
+  background: rgba(59, 130, 246, 0.12);
+  box-shadow: 0 0 12px rgba(37, 99, 235, 0.2);
 }
 
 .wow-page .btn-outline-success {
@@ -262,12 +304,23 @@ html, body{
   color: #e2e8f0;
 }
 
+body.app-theme-light .wow-page .form-control,
+body.app-theme-light .wow-page .form-select {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(148, 163, 184, 0.45);
+  color: #0f172a;
+}
+
 .wow-page .form-label {
   color: var(--bs-secondary-color, #94a3b8);
 }
 
 .wow-page .form-control::placeholder {
   color: #94a3b8;
+}
+
+body.app-theme-light .wow-page .form-control::placeholder {
+  color: #64748b;
 }
 
 .wow-page .form-control:focus,
@@ -311,6 +364,106 @@ html, body{
   color: #e2e8f0;
   border: 1px solid rgba(148, 163, 184, 0.25);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+body.app-theme-light .wow-page .modal-content {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 255, 0.96));
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.35);
+  box-shadow: 0 18px 32px rgba(15, 23, 42, 0.15);
+}
+
+/* Global Light-Mode Surface System (shared across all desktop modules) */
+body.app-theme-light .wow-page {
+  --lt-surface: rgba(255, 255, 255, 0.96);
+  --lt-surface-soft: rgba(248, 250, 252, 0.96);
+  --lt-border: rgba(148, 163, 184, 0.34);
+  --lt-text: #0f172a;
+  --lt-muted: #64748b;
+  --lt-head: #1e3a8a;
+}
+
+body.app-theme-light .wow-page .text-light {
+  color: var(--lt-text) !important;
+}
+
+body.app-theme-light .wow-page .text-secondary,
+body.app-theme-light .wow-page .text-muted {
+  color: var(--lt-muted) !important;
+}
+
+body.app-theme-light .wow-page .wow-orb,
+body.app-theme-light .wow-page .wow-ring,
+body.app-theme-light .wow-page .wow-pulse {
+  opacity: 0.22;
+}
+
+body.app-theme-light .wow-page .orders-card,
+body.app-theme-light .wow-page .billing-page-shell,
+body.app-theme-light .wow-page .billing-center,
+body.app-theme-light .wow-page .billing-inputs,
+body.app-theme-light .wow-page .billing-options,
+body.app-theme-light .wow-page .billing-checkout-panel,
+body.app-theme-light .wow-page .billing-search,
+body.app-theme-light .wow-page .billing-numpad,
+body.app-theme-light .wow-page .billing-totals,
+body.app-theme-light .wow-page .customer-card,
+body.app-theme-light .wow-page .staff-expenses-card,
+body.app-theme-light .wow-page .support-card,
+body.app-theme-light .wow-page .sync-stat-card,
+body.app-theme-light .wow-page .sync-module-card,
+body.app-theme-light .wow-page .sync-table-wrap,
+body.app-theme-light .wow-page .info-card,
+body.app-theme-light .wow-page .table-responsive {
+  background: var(--lt-surface) !important;
+  color: var(--lt-text);
+  border-color: var(--lt-border) !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+body.app-theme-light .wow-page .orders-table th,
+body.app-theme-light .wow-page .billing-table th,
+body.app-theme-light .wow-page .staff-expenses-table th,
+body.app-theme-light .wow-page .support-table th,
+body.app-theme-light .wow-page .transactions-page .table th,
+body.app-theme-light .wow-page .invoice-table th {
+  background: rgba(241, 245, 249, 0.98) !important;
+  color: var(--lt-head) !important;
+  border-bottom-color: var(--lt-border) !important;
+}
+
+body.app-theme-light .wow-page .orders-table td,
+body.app-theme-light .wow-page .billing-table td,
+body.app-theme-light .wow-page .staff-expenses-table td,
+body.app-theme-light .wow-page .support-table td,
+body.app-theme-light .wow-page .transactions-page .table td,
+body.app-theme-light .wow-page .invoice-table td {
+  color: var(--lt-text) !important;
+  border-bottom-color: rgba(148, 163, 184, 0.24) !important;
+}
+
+body.app-theme-light .wow-page .orders-page input[type="date"],
+body.app-theme-light .wow-page .orders-page select.form-select,
+body.app-theme-light .wow-page .billing-input,
+body.app-theme-light .wow-page .billing-qty-input,
+body.app-theme-light .wow-page .billing-price-input,
+body.app-theme-light .wow-page .billing-gst-input,
+body.app-theme-light .wow-page .staff-expenses-page .form-control,
+body.app-theme-light .wow-page .staff-expenses-page .form-select,
+body.app-theme-light .wow-page .customer-tab {
+  background: var(--lt-surface-soft) !important;
+  color: var(--lt-text) !important;
+  border-color: var(--lt-border) !important;
+}
+
+body.app-theme-light .wow-page .orders-subtitle,
+body.app-theme-light .wow-page .billing-subtitle,
+body.app-theme-light .wow-page .section-title,
+body.app-theme-light .wow-page .billing-search-status,
+body.app-theme-light .wow-page .billing-stock,
+body.app-theme-light .wow-page .billing-name span,
+body.app-theme-light .wow-page .empty-state {
+  color: var(--lt-muted) !important;
 }
 
 .wow-page .modal-header,

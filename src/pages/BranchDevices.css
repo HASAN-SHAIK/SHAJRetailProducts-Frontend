@@ -2,6 +2,7 @@
   border-radius: 16px;
   background-color: #1e293b;
   color: aliceblue;
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .branch-devices-page .table th,
@@ -9,4 +10,51 @@
   vertical-align: middle;
   background-color: #1e293b;
   color: aliceblue;
+}
+
+.branch-devices-page .card-header {
+  background-color: rgba(15, 23, 42, 0.9);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+body.app-theme-light .branch-devices-page {
+  color: #0f172a;
+}
+
+body.app-theme-light .branch-devices-page .text-light {
+  color: #0f172a !important;
+}
+
+body.app-theme-light .branch-devices-page .text-secondary {
+  color: #64748b !important;
+}
+
+body.app-theme-light .branch-devices-page .card {
+  background: rgba(248, 250, 252, 0.96);
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.32);
+  box-shadow: 0 12px 28px rgba(148, 163, 184, 0.24);
+}
+
+body.app-theme-light .branch-devices-page .card-header {
+  background: rgba(241, 245, 249, 0.98);
+  color: #0f172a !important;
+  border-bottom-color: rgba(148, 163, 184, 0.28);
+}
+
+body.app-theme-light .branch-devices-page .table th {
+  background: rgba(241, 245, 249, 0.98);
+  color: #1e3a8a;
+  border-bottom-color: rgba(148, 163, 184, 0.26);
+}
+
+body.app-theme-light .branch-devices-page .table td {
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  border-bottom-color: rgba(148, 163, 184, 0.24);
+}
+
+body.app-theme-light .branch-devices-page .table-striped > tbody > tr:nth-of-type(odd) > * {
+  background: rgba(248, 250, 252, 0.98);
+  color: #0f172a;
 }

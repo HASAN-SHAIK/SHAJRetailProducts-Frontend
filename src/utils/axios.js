@@ -11,6 +11,32 @@ const api = axios.create({
   withCredentials: true,
 });
 
+let serverReachabilityProbe = null;
+const probeServerReachability = async () => {
+  if (serverReachabilityProbe) return serverReachabilityProbe;
+
+  const baseURL = String(api.defaults.baseURL || '').replace(/\/$/, '');
+  const pingUrl = `${baseURL}/auth/getLogin`;
+
+  serverReachabilityProbe = axios
+    .get(pingUrl, {
+      timeout: 5000,
+      withCredentials: true,
+      validateStatus: () => true,
+      headers: {
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+    })
+    .then(() => true)
+    .catch(() => false)
+    .finally(() => {
+      serverReachabilityProbe = null;
+    });
+
+  return serverReachabilityProbe;
+};
+
 // 🔐 REGISTER INTERCEPTOR HERE (ONCE)
 api.interceptors.request.use(
   async (config) => {
@@ -80,7 +106,7 @@ api.interceptors.response.use(
     }
     return response;
   },
-  (error) => {
+  async (error) => {
     const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const startTime = error?.config?.metadata?.startTime ?? endTime;
     const durationMs = Math.round(endTime - startTime);
@@ -90,14 +116,24 @@ api.interceptors.response.use(
       console.log(`[API] Error response time - ${durationMs}ms`);
     }
     if (!error?.response) {
+      if (error?.code === 'ERR_CANCELED') {
+        return Promise.reject(error);
+      }
       error.isNetworkError = true;
       error.response = {
         status: 0,
         data: { message: 'Network Error' },
       };
       if (typeof window !== 'undefined') {
-        window.__serverOffline = true;
-        window.dispatchEvent(new CustomEvent('server-status', { detail: { offline: true } }));
+        const browserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+        if (browserOffline) {
+          window.__serverOffline = true;
+          window.dispatchEvent(new CustomEvent('server-status', { detail: { offline: true } }));
+        } else {
+          const reachable = await probeServerReachability();
+          window.__serverOffline = !reachable;
+          window.dispatchEvent(new CustomEvent('server-status', { detail: { offline: !reachable } }));
+        }
       }
     }
     const status = error?.response?.status;

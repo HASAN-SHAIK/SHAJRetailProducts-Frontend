@@ -141,3 +141,71 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+
+body.app-theme-light .staff-expenses-page {
+  color: #0f172a;
+}
+
+body.app-theme-light .staff-expenses-page .form-label,
+body.app-theme-light .staff-expenses-page p,
+body.app-theme-light .staff-expenses-page td,
+body.app-theme-light .staff-expenses-page small {
+  color: #0f172a;
+}
+
+body.app-theme-light .staff-expenses-page .text-secondary,
+body.app-theme-light .staff-expenses-page .text-muted {
+  color: #64748b !important;
+}
+
+body.app-theme-light .staff-expenses-card h4 {
+  color: #1e293b;
+}
+
+body.app-theme-light .staff-expenses-table th {
+  color: #1e3a8a;
+}
+
+body.app-theme-light .staff-expenses-header,
+body.app-theme-light .staff-expenses-card {
+  background: rgba(248, 250, 252, 0.96);
+  border-color: rgba(148, 163, 184, 0.32);
+  box-shadow: 0 12px 28px rgba(148, 163, 184, 0.25);
+}
+
+body.app-theme-light .staff-expenses-header h2,
+body.app-theme-light .staff-expenses-page .form-label,
+body.app-theme-light .staff-expenses-page p,
+body.app-theme-light .staff-expenses-page td,
+body.app-theme-light .staff-expenses-page small,
+body.app-theme-light .staff-expenses-page .btn-outline-light {
+  color: #0f172a;
+}
+
+body.app-theme-light .staff-expenses-page .form-control,
+body.app-theme-light .staff-expenses-page .form-select {
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+body.app-theme-light .staff-expenses-page .text-secondary,
+body.app-theme-light .staff-expenses-page .text-muted,
+body.app-theme-light .staff-expenses-form label {
+  color: #64748b !important;
+}
+
+body.app-theme-light .staff-expenses-table th,
+body.app-theme-light .staff-expenses-table td {
+  border-bottom-color: rgba(148, 163, 184, 0.24);
+}
+
+body.app-theme-light .staff-expenses-page .btn-outline-light {
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+body.app-theme-light .staff-expenses-page .btn-outline-light:hover {
+  background: rgba(186, 230, 253, 0.4);
+  border-color: rgba(56, 189, 248, 0.55);
+}

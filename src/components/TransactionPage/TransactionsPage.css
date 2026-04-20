@@ -94,3 +94,32 @@
       align-items: flex-start;
     }
   }
+
+  body.app-theme-light .transactions-title {
+    color: #0f172a;
+  }
+
+  body.app-theme-light .transactions-subtitle,
+  body.app-theme-light .transactions-page .range-separator {
+    color: #64748b;
+  }
+
+  body.app-theme-light .transactions-page input[type="text"],
+  body.app-theme-light .transactions-page input[type="date"],
+  body.app-theme-light .transactions-page select.form-select {
+    background: rgba(248, 250, 252, 0.98);
+    border-color: rgba(148, 163, 184, 0.35);
+    color: #0f172a;
+  }
+
+  body.app-theme-light .transactions-page .table th {
+    background: rgba(241, 245, 249, 0.98);
+    color: #1e3a8a;
+    border-bottom-color: rgba(148, 163, 184, 0.35);
+  }
+
+  body.app-theme-light .transactions-page .table td {
+    background: rgba(255, 255, 255, 0.96);
+    color: #0f172a;
+    border-color: rgba(148, 163, 184, 0.22);
+  }
