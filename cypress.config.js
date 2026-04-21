@@ -29,16 +29,24 @@ const envFromFile = parseEnvFile(path.resolve(__dirname, '.env'));
 const readEnv = (key, fallback) => process.env[key] || envFromFile[key] || fallback;
 
 module.exports = defineConfig({
+  reporter: 'junit',
+  reporterOptions: {
+    mochaFile: 'cypress/results/results-[hash].xml',
+    toConsole: true,
+  },
+
   e2e: {
     baseUrl: readEnv('CYPRESS_BASE_URL', 'http://localhost:3000'),
     video: false,
     screenshotOnRunFailure: true,
     defaultCommandTimeout: 10000,
+
     env: {
       email: readEnv('CYPRESS_EMAIL', ''),
       password: readEnv('CYPRESS_PASSWORD', ''),
       apiUrl: readEnv('CYPRESS_API_URL', 'http://localhost:5000/api'),
     },
+
     setupNodeEvents(on, config) {
       return config;
     },

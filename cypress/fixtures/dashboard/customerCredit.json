@@ -1,0 +1,15 @@
+{
+  "top_customers": [
+    { "customer_id": "c1", "customer_name": "Rahul", "total_orders": 25, "total_revenue": 125000 }
+  ],
+  "credit_summary": {
+    "total_outstanding": 45000,
+    "overdue_amount": 5000,
+    "customers_with_credit": 12
+  },
+  "customer_metrics": {
+    "new_customers": 18,
+    "repeat_customer_rate": 42
+  }
+}
+

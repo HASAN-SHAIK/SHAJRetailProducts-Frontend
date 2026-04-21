@@ -1,0 +1,9 @@
+{
+  "data": [
+    { "label": "Week 1", "revenue": 120000 },
+    { "label": "Week 2", "revenue": 150000 },
+    { "label": "Week 3", "revenue": 110000 },
+    { "label": "Week 4", "revenue": 175000 }
+  ]
+}
+

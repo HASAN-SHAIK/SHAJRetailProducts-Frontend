@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="6" failures="0" errors="0" time="3.148">
+  <testsuite name="📦 Product APIs" errors="0" failures="0" skipped="0" timestamp="2026-04-01T17:43:21" time="1.196" tests="2">
+    <testcase classname="📦 Product APIs Fetch products" name="📦 Product APIs Fetch products" time="0.014">
+    </testcase>
+    <testcase classname="📦 Product APIs API failure handled" name="📦 Product APIs API failure handled" time="0.003">
+    </testcase>
+  </testsuite>
+  <testsuite name="API Tests" errors="0" failures="0" skipped="0" timestamp="2026-04-01T17:43:21" time="1.321" tests="2">
+    <testcase classname="API Tests ✅ GET /products API works" name="API Tests ✅ GET /products API works" time="0.021">
+    </testcase>
+    <testcase classname="API Tests ❌ API failure case" name="API Tests ❌ API failure case" time="0.099">
+    </testcase>
+  </testsuite>
+  <testsuite name="UI Tests" errors="0" failures="0" skipped="0" timestamp="2026-04-01T17:43:21" time="1.494" tests="2">
+    <testcase classname="UI Tests 🟢 Button click test" name="UI Tests 🟢 Button click test" time="0.061">
+    </testcase>
+    <testcase classname="UI Tests 🟢 Input field test" name="UI Tests 🟢 Input field test" time="0.011">
+    </testcase>
+  </testsuite>
+</testsuites>

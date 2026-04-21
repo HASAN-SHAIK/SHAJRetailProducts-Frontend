@@ -1,0 +1,21 @@
+{
+  "inventory_summary": {
+    "total_stock_value": 987654.32,
+    "dead_stock_value": 12345.67,
+    "total_stock_quantity": 24567
+  },
+  "low_stock": [
+    { "product_id": "l1", "product_name": "Salt", "current_stock": 3, "min_stock_level": 10 }
+  ],
+  "dead_stock": [
+    { "product_id": "d1", "product_name": "Old Cleaner", "current_stock": 50, "last_sold_date": "2025-10-02" }
+  ],
+  "fast_moving": [
+    { "product_id": "f1", "product_name": "Milk", "quantity_sold": 1500 }
+  ],
+  "expiry_summary": { "expiring_30_days": 3, "expiring_7_days": 1, "expired": 0 },
+  "expiry_details": [
+    { "product_id": "e1", "product_name": "Yogurt", "expiry_date": "2026-04-15", "current_stock": 8, "status": "expiring_30_days" }
+  ]
+}
+
