@@ -11,6 +11,8 @@ const Header = () => {
   const setSelectedBranchId = useBranchStore((state) => state.setSelectedBranchId);
   const shopName = tenantConfig?.shop_name || tenantConfig?.shopName || 'SHAJRetail';
   const userName = userDetails?.user_name || userDetails?.name || 'Owner';
+  const canSelectAllBranches =
+    String(userRole || '').toLowerCase() === 'admin' || userDetails?.all_branch_access !== false;
 
   const getBranchLabel = (branch, fallback = '') =>
     String(
@@ -51,7 +53,7 @@ const Header = () => {
             onChange={handleBranchChange}
           >
             <option value="">Select</option>
-            {userRole === 'admin' && <option value="all">All</option>}
+            {canSelectAllBranches && <option value="all">All</option>}
             {selectedBranchId &&
               selectedBranchId !== 'all' &&
               !branches.some((branch) => String(branch?.id) === String(selectedBranchId)) && (

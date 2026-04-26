@@ -6,7 +6,6 @@ import { ThemeProvider } from './ThemeContext';
 import Orders from './pages/Orders';
 import Navbar from './components/common/Navbar/Navbar';
 import { useEffect, useRef, useState } from 'react';
-import CreateOrderPage from './pages/CreateOrderPage';
 import './App.css';
 import { useDispatch, useSelector } from 'react-redux';
 import Logout from './pages/Logout';
@@ -112,6 +111,13 @@ function App() {
   const setBranches = useBranchStore((state) => state.setBranches);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const setSelectedBranchId = useBranchStore((state) => state.setSelectedBranchId);
+  const hasAllBranchAccess =
+    String(userDetails?.role || '').toLowerCase() === 'admin' ||
+    userDetails?.all_branch_access !== false;
+  const restrictedBranchId =
+    userDetails?.all_branch_access === false && userDetails?.branch_id
+      ? String(userDetails.branch_id)
+      : null;
   const isMobileRoute = location.pathname.startsWith('/m');
   const isMobileDevice =
     typeof window !== 'undefined' &&
@@ -178,8 +184,19 @@ function App() {
             const list = payload?.branches || payload?.data?.branches || payload?.data || [];
             const branches = Array.isArray(list) ? list : [];
             setBranches(branches);
-            if (!selectedBranchId && branches.length > 0) {
-              if (userDetails?.role === 'admin') {
+            const restrictedBranch = restrictedBranchId
+              ? branches.find((branch) => String(branch?.id) === restrictedBranchId)
+              : null;
+            if (restrictedBranch) {
+              if (String(selectedBranchId || '') !== restrictedBranchId) {
+                setSelectedBranchId(restrictedBranchId, {
+                  confirmed: false,
+                  name: restrictedBranch?.name || ''
+                });
+              }
+              branchIdForSync = restrictedBranchId;
+            } else if (!selectedBranchId && branches.length > 0) {
+              if (hasAllBranchAccess) {
                 setSelectedBranchId('all', { confirmed: false, name: 'All' });
                 branchIdForSync = 'all';
               } else {
@@ -250,6 +267,8 @@ function App() {
     setBranches,
     setSelectedBranchId,
     selectedBranchId,
+    hasAllBranchAccess,
+    restrictedBranchId,
     isMobileDevice,
     navigate,
   ]);
@@ -391,8 +410,18 @@ useEffect(() => {
       const list = payload?.branches || payload?.data?.branches || payload?.data || [];
       const branches = Array.isArray(list) ? list : [];
       setBranches(branches);
-      if (!selectedBranchId && branches.length > 0) {
-        if (userDetails?.role === 'admin') {
+      const restrictedBranch = restrictedBranchId
+        ? branches.find((branch) => String(branch?.id) === restrictedBranchId)
+        : null;
+      if (restrictedBranch) {
+        if (String(selectedBranchId || '') !== restrictedBranchId) {
+          setSelectedBranchId(restrictedBranchId, {
+            confirmed: false,
+            name: restrictedBranch?.name || ''
+          });
+        }
+      } else if (!selectedBranchId && branches.length > 0) {
+        if (hasAllBranchAccess) {
           setSelectedBranchId('all', { confirmed: false, name: 'All' });
         } else {
           setSelectedBranchId(branches[0].id, {
@@ -406,7 +435,7 @@ useEffect(() => {
     }
   };
   fetchBranches();
-}, [userDetails, selectedBranchId, setBranches, setSelectedBranchId]);
+}, [userDetails, selectedBranchId, setBranches, setSelectedBranchId, hasAllBranchAccess, restrictedBranchId]);
 
 useEffect(() => {
   const registerDeviceForBranch = async () => {
@@ -700,7 +729,7 @@ const tenantBannerColor = (() => {
             path="/dashboard"
             element={
               <ProtectedRoute>
-                {reportsEnabled ? <Dashboard navigate={navigate} /> : <Navigate to="/neworder" replace />}
+                {reportsEnabled ? <Dashboard navigate={navigate} /> : <Navigate to="/billing/retail" replace />}
               </ProtectedRoute>
             }
           />
@@ -728,14 +757,6 @@ const tenantBannerColor = (() => {
               </ProtectedRoute>
             }
           /> */}
-          <Route
-            path="/neworder"
-            element={
-              <ProtectedRoute>
-                <CreateOrderPage  />
-              </ProtectedRoute>
-            }
-          />
           <Route
             element={
               <ProtectedRoute>

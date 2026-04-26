@@ -13,6 +13,7 @@ const Navbar = () => {
   const location = useLocation();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const userRole = useSelector((state) => state.tenant.role);
+  const userDetails = useSelector((state) => state.user.userDetails);
   const branches = useBranchStore((state) => state.branches);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const selectedBranchName = useBranchStore((state) => state.selectedBranchName);
@@ -58,6 +59,8 @@ const Navbar = () => {
     const matchName = getBranchDisplayName(match);
     return matchName || 'Select Branch';
   })();
+  const canSelectAllBranches =
+    String(userRole || '').toLowerCase() === 'admin' || userDetails?.all_branch_access !== false;
 
   useEffect(() => {
     if (!branchOpen) return;
@@ -203,9 +206,6 @@ const Navbar = () => {
               <span />
               <span />
             </button>
-             {/* <button className="btn newOrderBtn fw-bold nav-cta" onClick={() => navigateTo('/neworder')}>
-              <span className='fs-3'>New Order</span>
-           </button> */}
             <div ref={navActionsRef} className={`nav-actions${menuOpen ? ' is-open' : ''}`}>
             <div className="me-2 d-flex align-items-center nav-branch-control" ref={branchDropdownRef}>
               <div className="dropdown nav-branch-dropdown">
@@ -228,7 +228,7 @@ const Navbar = () => {
                       Select Branch
                     </button>
                   </li>
-                  {userRole === 'admin' && (
+                  {canSelectAllBranches && (
                     <li>
                       <button
                         type="button"
