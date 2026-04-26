@@ -1196,6 +1196,20 @@ const normalizeTransaction = (transaction) => {
     transaction.client_payment_id ||
     transaction.clientPaymentId;
   if (!id) return null;
+  const resolvedPaymentMode =
+    transaction.payment_mode ??
+    transaction.paymentMethod ??
+    transaction.payment_method ??
+    transaction.method ??
+    transaction.mode ??
+    null;
+  const resolvedCreatedAt =
+    transaction.created_at ??
+    transaction.createdAt ??
+    transaction.paid_at ??
+    transaction.date ??
+    transaction.transaction_date ??
+    new Date().toISOString();
   return {
     id,
     order_id: transaction.order_id ?? transaction.orderId ?? null,
@@ -1203,14 +1217,14 @@ const normalizeTransaction = (transaction) => {
     total_price: transaction.total_price ?? transaction.amount_paid ?? transaction.amount ?? null,
     amount: transaction.amount ?? transaction.total_price ?? transaction.amount_paid ?? transaction.amount ?? null,
     profit: transaction.profit ?? null,
-    payment_mode: transaction.payment_mode ?? transaction.paymentMethod ?? transaction.payment_method ?? null,
+    payment_mode: resolvedPaymentMode,
     txn_type: transaction.txn_type ?? transaction.txnType ?? null,
     direction: transaction.direction ?? null,
     party_type: transaction.party_type ?? transaction.partyType ?? null,
     party_id: transaction.party_id ?? transaction.partyId ?? null,
     notes: transaction.notes ?? null,
     sync_status: transaction.sync_status ?? transaction.syncStatus ?? null,
-    created_at: transaction.created_at ?? transaction.createdAt ?? new Date().toISOString(),
+    created_at: resolvedCreatedAt,
     status: transaction.status ?? null,
   };
 };
@@ -1246,9 +1260,17 @@ export const upsertCustomerLocal = async (customer) => {
 
 export const getCustomerById = async (customerId) => {
   if (customerId === null || customerId === undefined) return null;
-  const numeric = Number(customerId);
-  const key = Number.isFinite(numeric) ? numeric : customerId;
-  return await db.customers.get(key);
+  const raw = String(customerId).trim();
+  if (!raw) return null;
+  const numeric = Number(raw);
+
+  // Try both number and string keys because local cache IDs can be stored either way.
+  if (Number.isFinite(numeric)) {
+    const numericHit = await db.customers.get(numeric);
+    if (numericHit) return numericHit;
+  }
+
+  return await db.customers.get(raw);
 };
 
 export const saveCustomersBulk = async (customers) => {

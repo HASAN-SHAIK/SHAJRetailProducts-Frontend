@@ -12,7 +12,13 @@ const FEATURE_ALIASES = {
   mobile_access: ['mobile_access', 'MOBILE_ACCESS', 'mobile_module', 'mobile_module_enabled'],
   enable_weight_based: ['enable_weight_based', 'weight_based_enabled'],
   enable_piece_based: ['enable_piece_based', 'piece_based_enabled'],
-  priority_support: ['priority_support']
+  priority_support: ['priority_support'],
+  billing_actual_price_module: [
+    'billing_actual_price_module',
+    'actual_price_module',
+    'actual_price_visibility',
+    'enable_actual_price_view',
+  ],
 };
 
 const getRawTenantFeatures = (tenantConfig) => {

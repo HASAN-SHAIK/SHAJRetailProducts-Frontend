@@ -19,6 +19,7 @@ import CartList from '../../components/Billing/CartList';
 import BarcodeInput from '../../components/Billing/BarcodeInput';
 import ProductSearch from '../../components/Billing/ProductSearch';
 import { GST_MODES, resolveGstModeFromConfig } from '../../services/gstService';
+import { hasFeature } from '../../utils/entitlements';
 import '../BillingPage.css';
 
 const WholesaleBilling = () => {
@@ -28,6 +29,9 @@ const WholesaleBilling = () => {
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const branchConfirmed = useBranchStore((state) => state.branchConfirmed);
   const effectiveBranchId = selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null;
+  const canRevealActualPrice =
+    String(userDetails?.role || '').toLowerCase() === 'admin' &&
+    hasFeature(tenantConfig, 'billing_actual_price_module');
 
   const items = useBillingStore((state) => state.items);
   const selectedKey = useBillingStore((state) => state.selectedKey);
@@ -171,12 +175,13 @@ const WholesaleBilling = () => {
     }
   };
 
-  const handleScan = async () => {
-    if (!barcodeValue.trim() || isItemAdding) return;
+  const handleScan = async (inputCode = null) => {
+    const code = String(inputCode ?? barcodeValue).trim();
+    if (!code || isItemAdding) return;
     setIsItemAdding(true);
     try {
       const qty = Number(quantityValue || 1);
-      const product = await findProduct(barcodeValue.trim());
+      const product = await findProduct(code);
       if (!product) {
         showPopup('Product not found.', 'Not Found');
         return;
@@ -424,6 +429,7 @@ const WholesaleBilling = () => {
             onBarcodeChange={setBarcodeValue}
             onQuantityChange={setQuantityValue}
             onSubmit={handleScan}
+            onCameraDetected={handleScan}
             inputRef={barcodeRef}
             isAdding={isItemAdding}
           />
@@ -438,6 +444,7 @@ const WholesaleBilling = () => {
             onQtyChange={updateQty}
             onPriceChange={updatePrice}
             onRemove={removeItem}
+            canRevealActualPrice={canRevealActualPrice}
           />
         </div>
 

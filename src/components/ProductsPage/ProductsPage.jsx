@@ -73,6 +73,17 @@ const ProductsPage = ({ navigate }) => {
   });
   const [hsnSuggestions, setHsnSuggestions] = useState([]);
   const [gstTouched, setGstTouched] = useState(false);
+  const toFlagValue = (value, fallback = '0') => {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (value === true || String(value).toLowerCase() === 'true' || String(value) === '1') return '1';
+    return '0';
+  };
+  const toInputDateValue = (value) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -85,6 +96,44 @@ const ProductsPage = ({ navigate }) => {
     setFormData((prev) => ({
       ...prev,
       [name]: value,
+    }));
+  };
+
+  const handleProductSuggestionSelect = (product) => {
+    if (!product) return;
+    const selectedGst =
+      product?.gst_percentage ??
+      product?.gst_percent ??
+      product?.gst ??
+      '';
+    if (selectedGst !== '' && selectedGst !== null && selectedGst !== undefined) {
+      setGstTouched(true);
+    }
+    setFormData((prev) => ({
+      ...prev,
+      product_name: product?.name ?? product?.product_name ?? prev.product_name ?? '',
+      company: product?.company ?? product?.brand ?? prev.company ?? '',
+      category: product?.category ?? product?.category_name ?? prev.category ?? '',
+      hsn_code: product?.hsn_code ?? product?.hsn ?? prev.hsn_code ?? '',
+      gst_percentage: selectedGst !== '' && selectedGst !== null && selectedGst !== undefined
+        ? selectedGst
+        : prev.gst_percentage ?? '',
+      selling_price: product?.selling_price ?? product?.price ?? prev.selling_price ?? '',
+      purchase_price: product?.purchase_price ?? prev.purchase_price ?? '',
+      mrp: product?.mrp ?? product?.mrp_price ?? prev.mrp ?? '',
+      batch_number: product?.batch_number ?? prev.batch_number ?? '',
+      expiry_date: toInputDateValue(product?.expiry_date ?? product?.expiryDate) || prev.expiry_date || '',
+      stock_quantity:
+        product?.stock_quantity ??
+        product?.stockQuantity ??
+        product?.quantity ??
+        product?.stock ??
+        prev.stock_quantity ??
+        '',
+      time_for_delivery: product?.time_for_delivery ?? product?.timeForDelivery ?? prev.time_for_delivery ?? '',
+      is_batch_enabled: toFlagValue(product?.is_batch_enabled ?? product?.isBatchEnabled, prev.is_batch_enabled || '0'),
+      is_weight_based: toFlagValue(product?.is_weight_based ?? product?.isWeightBased, prev.is_weight_based || defaultWeightValue),
+      barcode: product?.barcode ?? prev.barcode ?? '',
     }));
   };
 
@@ -136,13 +185,13 @@ const ProductsPage = ({ navigate }) => {
       }
 
     } catch (err) {
-      if(err.response.data.message === 'Invalid Token' || err.response.status === 401){
-      showPopup("Token Expired Please Login Again!", "Session");
-      navigate('/logout');
-      }
-      else{
-      showPopup("Issue while adding please try later", "Error");
-      console.error('Error adding product:', err);
+      if (err?.response?.data?.message === 'Invalid Token' || err?.response?.status === 401) {
+        showPopup("Token Expired Please Login Again!", "Session");
+        navigate('/logout');
+      } else {
+        const message = err?.response?.data?.message || err?.message || "Issue while adding please try later";
+        showPopup(message, "Error");
+        console.error('Error adding product:', err);
       }
     } finally {
       setIsAddingProduct(false);
@@ -925,7 +974,6 @@ const ProductsPage = ({ navigate }) => {
     purchase_price: 'purchase_price',
     purchaseprice: 'purchase_price',
     'Purchase Price': 'purchase_price',
-    purchase_price: 'purchase_price',
     quantity: 'stock_quantity',
     qty: 'stock_quantity',
     stock: 'stock_quantity',
@@ -1675,7 +1723,7 @@ const ProductsPage = ({ navigate }) => {
               </button>
             )}
             <button
-              className="btn btn-outline-light"
+              className="btn btn-outline-light products-refresh-btn"
               onClick={() => {
                 setForceApiFetch(true);
                 setProductUpdateFlag((prev) => !prev);
@@ -2053,6 +2101,7 @@ const ProductsPage = ({ navigate }) => {
             formData={formData}
             hsnOptions={hsnSuggestions}
             onChange={handleChange}
+            onProductSuggestionSelect={handleProductSuggestionSelect}
             onSubmit={handleSubmit}
             isSubmitting={isAddingProduct}
             onProductAdded={fetchProducts}

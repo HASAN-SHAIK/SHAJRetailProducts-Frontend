@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/axios';
@@ -24,6 +24,7 @@ import { searchLocalProducts } from '../../utils/localProductSearch';
 import { enqueueOfflineOrder, processOfflineQueue } from '../../utils/offlineOrders';
 import { runDeltaSync } from '../../utils/deltaSync';
 import { syncAllCustomers } from '../../utils/customersSync';
+import { createOfflineProduct } from '../../utils/offlineProducts';
 import CartList from '../../components/Billing/CartList';
 import BarcodeInput from '../../components/Billing/BarcodeInput';
 import ProductSearch from '../../components/Billing/ProductSearch';
@@ -37,6 +38,8 @@ import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 import '../BillingPage.css';
 
 const DRAFT_STORAGE_KEY = 'billing_drafts_v1';
+const DEFAULT_BILLING_UPI_ID = 'shajretail@upi';
+const DESKTOP_UPI_PROMPT_KEY = 'desktop_billing_upi_prompted_v1';
 
 const createDraftId = () => `bill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -172,15 +175,6 @@ const getCartItemKey = (product) => {
   return null;
 };
 
-const extractProductFromResponse = (response) => {
-  if (!response) return null;
-  const data = response?.data;
-  if (!data) return null;
-  if (Array.isArray(data)) return data[0] || null;
-  if (Array.isArray(data.products)) return data.products[0] || null;
-  return data.product || data.data || data;
-};
-
 const STOCK_CHECK_TIMEOUT_MS = 8000;
 const OFFLINE_SYNC_TIMEOUT_MS = 12000;
 const withTimeout = (promise, timeoutMs, fallbackValue = null) =>
@@ -260,6 +254,7 @@ const RetailBilling = () => {
     selling_price: '',
     purchase_price: '',
     mrp: '',
+    batch_number: '',
     expiry_date: '',
     stock_quantity: '',
     time_for_delivery: '',
@@ -283,6 +278,9 @@ const RetailBilling = () => {
   const [locationSuggestions, setLocationSuggestions] = useState([]);
   const [customerFieldErrors, setCustomerFieldErrors] = useState({});
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [shopUpiId, setShopUpiId] = useState('');
+  const [shopPayeeName, setShopPayeeName] = useState('');
+  const [isSavingShopUpi, setIsSavingShopUpi] = useState(false);
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappSending, setWhatsappSending] = useState(false);
   const [lastOrderId, setLastOrderId] = useState(null);
@@ -339,6 +337,7 @@ const RetailBilling = () => {
       { label: 'No', value: '0' },
       { label: 'Yes', value: '1' },
     ]},
+    { label: 'Batch Number', name: 'batch_number', required: false },
     { label: 'Expiry Date', name: 'expiry_date', type: 'date', required: false },
     { label: 'Quantity', name: 'stock_quantity', type: 'number' },
     { label: 'Time For Delivery', name: 'time_for_delivery', type: 'number' },
@@ -363,6 +362,29 @@ const RetailBilling = () => {
   const saveTimerRef = useRef(null);
   const initialDraftsRef = useRef(null);
   const draftsRef = useRef(null);
+  const isAdminUser = String(userDetails?.role || '').toLowerCase() === 'admin';
+  const canRevealActualPrice =
+    isAdminUser && hasFeature(tenantConfig, 'billing_actual_price_module');
+  const resolvedBillingUpiId = String(shopUpiId || DEFAULT_BILLING_UPI_ID).trim();
+
+  const saveShopUpiId = useCallback(async (nextValue, { silent = false } = {}) => {
+    if (!isAdminUser) return;
+    const normalized = String(nextValue || '').trim() || null;
+    setIsSavingShopUpi(true);
+    try {
+      await api.put('/shop-details/me', { upi_id: normalized });
+      setShopUpiId(normalized || '');
+      if (!silent) {
+        showPopup('UPI ID updated for billing QR.', 'Success');
+      }
+    } catch {
+      if (!silent) {
+        showPopup('Failed to update UPI ID.', 'Error');
+      }
+    } finally {
+      setIsSavingShopUpi(false);
+    }
+  }, [isAdminUser, showPopup]);
 
   if (!initialDraftsRef.current) {
     const stored = loadDraftsFromStorage();
@@ -389,6 +411,39 @@ const RetailBilling = () => {
   useEffect(() => {
     draftsRef.current = drafts;
   }, [drafts]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadShopDetails = async () => {
+      try {
+        const response = await api.get('/shop-details/me');
+        const details = response?.data?.shop_details || response?.data?.data || {};
+        if (cancelled) return;
+        setShopUpiId(String(details?.upi_id || '').trim());
+        setShopPayeeName(String(details?.shop_name || tenantConfig?.shop_name || '').trim());
+      } catch {
+        if (cancelled) return;
+        setShopPayeeName(String(tenantConfig?.shop_name || '').trim());
+      }
+    };
+    loadShopDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantConfig?.shop_name]);
+
+  useEffect(() => {
+    if (paymentMethod !== 'online' || !isAdminUser || shopUpiId) return;
+    if (sessionStorage.getItem(DESKTOP_UPI_PROMPT_KEY) === '1') return;
+    sessionStorage.setItem(DESKTOP_UPI_PROMPT_KEY, '1');
+    const entered = window.prompt(
+      'UPI ID is not set in shop details. Enter default UPI ID for billing QR:',
+      DEFAULT_BILLING_UPI_ID
+    );
+    const normalized = String(entered || '').trim();
+    if (!normalized) return;
+    saveShopUpiId(normalized, { silent: true });
+  }, [paymentMethod, isAdminUser, shopUpiId, saveShopUpiId]);
 
   useEffect(() => {
     return () => {
@@ -619,6 +674,23 @@ const RetailBilling = () => {
     const grandTotal = subtotal + gstTotal - discount;
     return { subtotal, gstTotal, discount, grandTotal };
   }, [items, isGSTEnabled, discountType, discountValue]);
+
+  const onlineUpiIntent = useMemo(() => {
+    if (paymentMethod !== 'online') return '';
+    const amount = Number(totals.grandTotal || 0);
+    if (!resolvedBillingUpiId || amount <= 0) return '';
+    const payeeName = String(shopPayeeName || tenantConfig?.shop_name || 'SHAJ Retail').trim();
+    return `upi://pay?pa=${encodeURIComponent(resolvedBillingUpiId)}&pn=${encodeURIComponent(
+      payeeName
+    )}&am=${encodeURIComponent(amount.toFixed(2))}&cu=INR`;
+  }, [paymentMethod, resolvedBillingUpiId, totals.grandTotal, shopPayeeName, tenantConfig?.shop_name]);
+
+  const onlineUpiQrUrl = useMemo(() => {
+    if (!onlineUpiIntent) return '';
+    return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
+      onlineUpiIntent
+    )}`;
+  }, [onlineUpiIntent]);
 
   const creditLimit = Number(customerDetails.credit_limit || 0);
   const currentBalance = Number(customerDetails.current_balance || 0);
@@ -929,6 +1001,54 @@ const RetailBilling = () => {
     setProductFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  const toFlagValue = (value, fallback = '0') => {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (value === true || String(value).toLowerCase() === 'true' || String(value) === '1') return '1';
+    return '0';
+  };
+
+  const toInputDateValue = (value) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
+  };
+
+  const handleProductSuggestionSelect = (product) => {
+    if (!product) return;
+    const selectedGst =
+      product?.gst_percentage ??
+      product?.gst_percent ??
+      product?.gst ??
+      '';
+    setProductFormData((prev) => ({
+      ...prev,
+      product_name: product?.name ?? product?.product_name ?? prev.product_name ?? '',
+      company: product?.company ?? product?.brand ?? prev.company ?? '',
+      category: product?.category ?? product?.category_name ?? prev.category ?? '',
+      hsn_code: product?.hsn_code ?? product?.hsn ?? prev.hsn_code ?? '',
+      gst_percentage: selectedGst !== '' && selectedGst !== null && selectedGst !== undefined
+        ? selectedGst
+        : prev.gst_percentage ?? '',
+      selling_price: product?.selling_price ?? product?.price ?? prev.selling_price ?? '',
+      purchase_price: product?.purchase_price ?? prev.purchase_price ?? '',
+      mrp: product?.mrp ?? product?.mrp_price ?? prev.mrp ?? '',
+      batch_number: product?.batch_number ?? prev.batch_number ?? '',
+      expiry_date: toInputDateValue(product?.expiry_date ?? product?.expiryDate) || prev.expiry_date || '',
+      stock_quantity:
+        product?.stock_quantity ??
+        product?.stockQuantity ??
+        product?.quantity ??
+        product?.stock ??
+        prev.stock_quantity ??
+        '',
+      time_for_delivery: product?.time_for_delivery ?? product?.timeForDelivery ?? prev.time_for_delivery ?? '',
+      is_batch_enabled: toFlagValue(product?.is_batch_enabled ?? product?.isBatchEnabled, prev.is_batch_enabled || '0'),
+      is_weight_based: toFlagValue(product?.is_weight_based ?? product?.isWeightBased, prev.is_weight_based || defaultWeightValue),
+      barcode: product?.barcode ?? prev.barcode ?? '',
+    }));
+  };
+
   const openAddProductModal = (barcode = '') => {
     if (userDetails?.role !== 'admin') {
       showOnlinePopup('Product not found. Please contact admin to add it.', 'Not Found');
@@ -942,6 +1062,7 @@ const RetailBilling = () => {
       selling_price: prev.selling_price || '',
       purchase_price: prev.purchase_price || '',
       mrp: prev.mrp || '',
+      batch_number: prev.batch_number || '',
       stock_quantity: prev.stock_quantity || '',
       is_weight_based: prev.is_weight_based || defaultWeightValue,
       barcode: barcode || prev.barcode || '',
@@ -970,12 +1091,12 @@ const RetailBilling = () => {
         delete payload.barcode;
       }
       if (payload.expiry_date === '') payload.expiry_date = null;
-      const res = await api.post('/products', payload);
-      const createdProduct = extractProductFromResponse(res);
+      if (payload.batch_number === '') payload.batch_number = null;
+      const createdProduct = await createOfflineProduct(payload);
       if (createdProduct) {
         updateProductsBulk([createdProduct]).catch(() => {});
       }
-      showPopup('Product added successfully!', 'Success');
+      showPopup('Product saved offline. Will sync in background.', 'Offline');
       setProductFormData({
         product_name: '',
         company: '',
@@ -985,6 +1106,7 @@ const RetailBilling = () => {
         selling_price: '',
         purchase_price: '',
         mrp: '',
+        batch_number: '',
         expiry_date: '',
         stock_quantity: '',
         time_for_delivery: '',
@@ -1000,15 +1122,16 @@ const RetailBilling = () => {
         showOnlinePopup('Token Expired Please Login Again!', 'Session');
         navigate('/logout');
       } else {
-        showOnlinePopup('Issue while adding product. Please try later.', 'Error');
+        const message = err?.response?.data?.message || err?.message || 'Issue while adding product. Please try later.';
+        showOnlinePopup(message, 'Error');
       }
     } finally {
       setIsAddingProduct(false);
     }
   };
 
-  const handleScan = async () => {
-    const barcode = barcodeValue.trim();
+  const handleScan = async (inputCode = null) => {
+    const barcode = String(inputCode ?? barcodeValue).trim();
     if (!barcode) return;
     if (isItemAdding) return;
     setMessage('');
@@ -1555,7 +1678,24 @@ const RetailBilling = () => {
           if (syncedOrderId) {
             setSelectedOrderId(syncedOrderId);
             const phoneReady = normalizedPhone.length === 10;
-            if (!phoneReady) {
+            if (phoneReady) {
+              try {
+                setWhatsappSending(true);
+                await sendBillViaWhatsApp({ order_id: syncedOrderId, phone: normalizedPhone });
+                showPopup('Bill sent via WhatsApp.', 'Success');
+                resetWhatsappState();
+                setLastOrderId(null);
+              } catch (err) {
+                const waMessage =
+                  err?.response?.data?.error ||
+                  err?.response?.data?.message ||
+                  err?.message ||
+                  'Failed to send WhatsApp bill';
+                showOnlinePopup(waMessage, 'Error');
+              } finally {
+                setWhatsappSending(false);
+              }
+            } else {
               setWhatsappModalOpen(true);
             }
           } else {
@@ -1697,6 +1837,7 @@ const RetailBilling = () => {
             onBarcodeChange={setBarcodeValue}
             onQuantityChange={setQuantityValue}
             onSubmit={handleScan}
+            onCameraDetected={handleScan}
             inputRef={barcodeRef}
             isAdding={isItemAdding}
           />
@@ -1739,6 +1880,7 @@ const RetailBilling = () => {
             onQtyChange={updateQty}
             onPriceChange={updatePrice}
             onRemove={removeItem}
+            canRevealActualPrice={canRevealActualPrice}
           />
 
           {selectedCartItem && (
@@ -1867,6 +2009,35 @@ const RetailBilling = () => {
                   </label>
                 ))}
               </div>
+              {paymentMethod === 'online' && (
+                <div className="billing-option-row" style={{ marginTop: 8, alignItems: 'flex-start', flexDirection: 'column' }}>
+                  <label className="billing-label w-100">
+                    UPI ID
+                    <input
+                      className="form-control form-control-sm billing-input"
+                      value={resolvedBillingUpiId}
+                      readOnly={!isAdminUser}
+                      onChange={(event) => setShopUpiId(event.target.value)}
+                      placeholder={DEFAULT_BILLING_UPI_ID}
+                    />
+                  </label>
+                  {isAdminUser && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-info btn-sm mt-2"
+                      onClick={() => saveShopUpiId(resolvedBillingUpiId)}
+                      disabled={isSavingShopUpi}
+                    >
+                      {isSavingShopUpi ? 'Saving...' : 'Save UPI ID'}
+                    </button>
+                  )}
+                  {onlineUpiQrUrl && (
+                    <div className="mt-2 p-2 rounded border" style={{ background: '#fff' }}>
+                      <img src={onlineUpiQrUrl} alt="UPI QR Code" width={170} height={170} />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="billing-option-group">
               <span className="billing-option-title">GST</span>
@@ -2105,6 +2276,7 @@ const RetailBilling = () => {
           fields={productFields}
           formData={productFormData}
           onChange={handleProductChange}
+          onProductSuggestionSelect={handleProductSuggestionSelect}
           onSubmit={handleAddProductSubmit}
           isSubmitting={isAddingProduct}
         />

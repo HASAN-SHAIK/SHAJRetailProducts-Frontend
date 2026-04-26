@@ -79,10 +79,82 @@ const normalizeOrderKey = (orderId) => {
   return raw;
 };
 
-const normalizeOrderItem = (item, orderId) => ({
-  ...item,
-  order_id: item?.order_id ?? item?.orderId ?? orderId,
-});
+const toNumberOrNull = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const normalizeOrderItem = (item, orderId) => {
+  const quantity =
+    toNumberOrNull(item?.quantity ?? item?.qty ?? item?.sold_qty ?? item?.ordered_quantity) ?? 0;
+  const price =
+    toNumberOrNull(
+      item?.price ?? item?.selling_price ?? item?.unit_price ?? item?.rate ?? item?.mrp
+    ) ?? null;
+  const total =
+    toNumberOrNull(item?.total ?? item?.line_total ?? item?.amount) ??
+    (price !== null ? Number((price * quantity).toFixed(2)) : null);
+  const productName = item?.product_name ?? item?.name ?? item?.product ?? '';
+
+  return {
+    ...item,
+    order_id: item?.order_id ?? item?.orderId ?? orderId,
+    product_id: item?.product_id ?? item?.productId ?? item?.id ?? null,
+    product_name: productName || null,
+    name: (item?.name ?? productName) || null,
+    quantity,
+    qty: item?.qty ?? quantity,
+    price,
+    selling_price: item?.selling_price ?? price,
+    total,
+    line_total: item?.line_total ?? total,
+    returned_quantity: toNumberOrNull(item?.returned_quantity ?? item?.returned_qty) ?? 0,
+    is_weight_based: item?.is_weight_based === true || item?.is_weight_based === 1,
+    updated_at: item?.updated_at ?? new Date().toISOString(),
+  };
+};
+
+const normalizePaymentRecord = (payment, order, index = 0) => {
+  const orderId = order?.id;
+  const amount = toNumberOrNull(payment?.amount ?? payment?.total_price ?? payment?.amount_paid) ?? 0;
+  const createdAt =
+    payment?.created_at ??
+    payment?.createdAt ??
+    payment?.paid_at ??
+    payment?.date ??
+    payment?.transaction_date ??
+    order?.created_at ??
+    new Date().toISOString();
+  const paymentMode =
+    payment?.payment_mode ??
+    payment?.payment_method ??
+    payment?.paymentMethod ??
+    payment?.method ??
+    payment?.mode ??
+    order?.payment_mode ??
+    order?.payment_method ??
+    'cash';
+
+  return {
+    ...payment,
+    id:
+      payment?.id ??
+      payment?.transaction_id ??
+      payment?.client_payment_id ??
+      `order-${orderId}-payment-${index}`,
+    order_id: payment?.order_id ?? payment?.orderId ?? orderId,
+    amount,
+    total_price: payment?.total_price ?? amount,
+    payment_mode: paymentMode,
+    method: payment?.method ?? paymentMode,
+    mode: payment?.mode ?? paymentMode,
+    created_at: createdAt,
+    paid_at: payment?.paid_at ?? createdAt,
+    date: payment?.date ?? createdAt,
+    txn_type: payment?.txn_type ?? payment?.txnType ?? 'payment',
+    direction: payment?.direction ?? 'in',
+  };
+};
 
 export const replaceAllOrders = async (orders) => {
   const list = Array.isArray(orders) ? orders : [];
@@ -130,11 +202,7 @@ export const replaceCachedOrderItems = async (orderId, items = []) => {
   if (!list.length) {
     throw new Error('Order items are required');
   }
-  const prepared = [];
-  for (const item of list) {
-    const normalized = normalizeOrderItem(item, key);
-    prepared.push(await validateAndPrepare('order_item', normalized));
-  }
+  const prepared = list.map((item) => normalizeOrderItem(item, key));
   await db.transaction('rw', db.order_items, async () => {
     await db.order_items.where('order_id').equals(key).delete();
     await db.order_items.bulkPut(prepared);
@@ -160,12 +228,32 @@ export const upsertOrderDetailsCache = async ({ order, items, payments } = {}) =
     if (order?.id && items) {
       await replaceCachedOrderItems(order.id, items);
     }
-    if (order?.id && Array.isArray(payments) && payments.length) {
-      const normalized = payments.map((payment) => ({
-        ...payment,
-        order_id: payment?.order_id ?? payment?.orderId ?? order.id,
-      }));
-      await saveTransactionsBulk(normalized);
+    if (order?.id) {
+      const incomingPayments = Array.isArray(payments) ? payments : [];
+      let normalizedPayments = incomingPayments
+        .map((payment, index) => normalizePaymentRecord(payment, order, index))
+        .filter((payment) => Number(payment?.amount || 0) > 0);
+
+      if (!normalizedPayments.length) {
+        const totalPaid = Number(order?.total_paid || 0);
+        if (totalPaid > 0) {
+          normalizedPayments = [
+            normalizePaymentRecord(
+              {
+                id: `order-${order.id}-paid-summary`,
+                amount: totalPaid,
+                payment_mode: order?.payment_mode ?? order?.payment_method ?? 'cash',
+              },
+              order,
+              0
+            ),
+          ];
+        }
+      }
+
+      if (normalizedPayments.length) {
+        await saveTransactionsBulk(normalizedPayments);
+      }
     }
   });
 };

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const CartItemRow = ({
   item,
@@ -9,6 +9,7 @@ const CartItemRow = ({
   onPriceChange,
   onGstChange,
   onRemove,
+  canRevealActualPrice = false,
 }) => {
   const lineTotal = Number(item.lineTotal ?? item.total ?? 0);
   const baseTotal = Number(item.basePrice ?? item.base_price ?? item.price * item.qty);
@@ -18,6 +19,8 @@ const CartItemRow = ({
   const totalWithGst = isGSTEnabled ? (Number.isFinite(lineTotal) && lineTotal > 0 ? lineTotal : baseTotal + gstAmount) : baseTotal;
   const weightBased = item?.is_weight_based === true || String(item?.is_weight_based) === '1';
   const [qtyDraft, setQtyDraft] = useState(String(item.qty ?? ''));
+  const [showActualPrice, setShowActualPrice] = useState(false);
+  const actualPrice = Number(item?.actual_price ?? item?.purchase_price ?? 0);
 
   useEffect(() => {
     setQtyDraft(String(item.qty ?? ''));
@@ -64,14 +67,35 @@ const CartItemRow = ({
         />
       </td>
       <td className="price-cell">
-        <input
-          className="form-control billing-price-input"
-          type="number"
-          min="0"
-          value={item.price}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => onPriceChange(item.key, event.target.value)}
-        />
+        <div className="billing-price-stack">
+          <input
+            className="form-control billing-price-input"
+            type="number"
+            min="0"
+            value={item.price}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => onPriceChange(item.key, event.target.value)}
+          />
+          {canRevealActualPrice && (
+            <div className="billing-actual-price-row">
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary billing-actual-toggle"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowActualPrice((prev) => !prev);
+                }}
+              >
+                AP
+              </button>
+              {showActualPrice && (
+                <small className="billing-actual-price-value">
+                  Actual: INR {actualPrice.toFixed(2)}
+                </small>
+              )}
+            </div>
+          )}
+        </div>
       </td>
       <td className="mrp-cell">{Number(item.mrp || 0).toFixed(2)}</td>
       <td className="gst-cell">{item.gstPercent || 0}%</td>

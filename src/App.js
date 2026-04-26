@@ -63,6 +63,7 @@ import SupplierDetail from './pages/inventory/SupplierDetail';
 import CustomerList from './pages/customers/CustomerList';
 import CustomerForm from './pages/customers/CustomerForm';
 import CustomerDetail from './pages/customers/CustomerDetail';
+import CustomerReorder from './pages/customers/CustomerReorder';
 import ReceiptEntry from './pages/accounts/ReceiptEntry';
 import PaymentEntry from './pages/accounts/PaymentEntry';
 import CashBook from './pages/accounts/CashBook';
@@ -784,6 +785,7 @@ const tenantBannerColor = (() => {
             <Route path="/accounts/ledger" element={<Ledger />} />
             <Route path="/accounts/outstanding" element={<Outstanding />} />
             <Route path="/customers" element={<CustomerList />} />
+            <Route path="/customers/reorder" element={<CustomerReorder />} />
             <Route path="/customers/new" element={<CustomerForm />} />
             <Route path="/customers/:id" element={<CustomerDetail />} />
             <Route path="/customers/:id/edit" element={<CustomerForm />} />

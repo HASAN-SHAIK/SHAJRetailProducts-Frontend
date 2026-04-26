@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import api from '../../utils/axios';
 import { getProductByBarcode } from '../../core/db';
 import { normalizeDisplayProduct } from '../../utils/localProductSearch';
+import { createOfflineProduct } from '../../utils/offlineProducts';
 
 const BarcodeScanner = () => {
   const inputRef = useRef(null);
@@ -15,7 +16,10 @@ const BarcodeScanner = () => {
     company: '',
     selling_price: '',
     purchase_price: '',
+    mrp: '',
     stock_quantity: '',
+    batch_number: '',
+    expiry_date: '',
     is_weight_based: '0',
     barcode: '',
   });
@@ -74,17 +78,21 @@ const BarcodeScanner = () => {
     setLoading(true);
     try {
       const payload = {
-        name: createData.product_name,
+        product_name: createData.product_name,
         category: createData.category,
         company: createData.company,
         selling_price: createData.selling_price,
         purchase_price: createData.purchase_price,
+        mrp: createData.mrp || null,
         stock_quantity: createData.stock_quantity,
+        batch_number: createData.batch_number || null,
+        expiry_date: createData.expiry_date || null,
+        is_batch_enabled: createData.batch_number || createData.expiry_date ? 1 : 0,
         is_weight_based: Number(createData.is_weight_based),
         barcode: createData.barcode,
       };
-      const res = await api.post('/products', payload);
-      setProduct(res?.data || null);
+      const created = await createOfflineProduct(payload);
+      setProduct(normalizeDisplayProduct(created));
       setShowCreate(false);
     } catch (err) {
       // keep modal open so user can fix data
@@ -188,6 +196,29 @@ const BarcodeScanner = () => {
                 type="number"
                 className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400"
                 value={createData.stock_quantity}
+                onChange={handleCreateChange}
+              />
+              <input
+                name="mrp"
+                placeholder="MRP"
+                type="number"
+                className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400"
+                value={createData.mrp}
+                onChange={handleCreateChange}
+              />
+              <input
+                name="batch_number"
+                placeholder="Batch Number"
+                className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400"
+                value={createData.batch_number}
+                onChange={handleCreateChange}
+              />
+              <input
+                name="expiry_date"
+                placeholder="Expiry Date"
+                type="date"
+                className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:ring-2 focus:ring-cyan-400"
+                value={createData.expiry_date}
                 onChange={handleCreateChange}
               />
               <select

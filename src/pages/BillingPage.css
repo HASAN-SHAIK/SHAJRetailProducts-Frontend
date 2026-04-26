@@ -172,6 +172,30 @@
   color: #e2e8f0;
 }
 
+.billing-price-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.billing-actual-price-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.billing-actual-toggle {
+  padding: 1px 6px;
+  font-size: 0.65rem;
+  line-height: 1.2;
+  border-radius: 999px;
+}
+
+.billing-actual-price-value {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
 .mrp-cell {
   color: #cbd5f5;
   font-weight: 600;
@@ -392,6 +416,20 @@
   color: #e2e8f0;
 }
 
+.billing-barcode-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.billing-barcode-input-row .billing-input {
+  flex: 1;
+}
+
+.billing-camera-btn {
+  display: none;
+  white-space: nowrap;
+}
+
 .billing-numpad {
   background: rgba(15, 23, 42, 0.75);
   border: 1px solid rgba(148, 163, 184, 0.15);
@@ -561,6 +599,69 @@
   z-index: 3500;
 }
 
+.billing-camera-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 16, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3600;
+  padding: 14px;
+}
+
+.billing-camera-modal {
+  width: min(560px, 96vw);
+  background: rgba(15, 23, 42, 0.97);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 16px;
+  padding: 14px;
+  color: #e2e8f0;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.billing-camera-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.billing-camera-header h5 {
+  margin: 0;
+}
+
+.billing-camera-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.billing-camera-video-wrap {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: #020617;
+}
+
+.billing-camera-video {
+  width: 100%;
+  display: block;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.billing-camera-status {
+  font-size: 0.85rem;
+  color: #cbd5f5;
+}
+
+.billing-camera-error {
+  font-size: 0.85rem;
+  color: #fca5a5;
+}
+
 .billing-modal {
   width: min(520px, 92vw);
   background: rgba(15, 23, 42, 0.96);
@@ -608,6 +709,12 @@
   .billing-main {
     grid-template-columns: 1fr;
   }
+
+  .billing-camera-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 @media (max-width: 768px) {
@@ -622,6 +729,10 @@
 
   .billing-table {
     min-width: 520px;
+  }
+
+  .billing-barcode-input-row {
+    flex-direction: column;
   }
 }
 
@@ -722,6 +833,10 @@ body.app-theme-light .billing-search-status {
   color: #64748b !important;
 }
 
+body.app-theme-light .billing-actual-price-value {
+  color: #475569;
+}
+
 body.app-theme-light .billing-totals .grand-total {
   color: #0f172a;
 }
@@ -741,6 +856,24 @@ body.app-theme-light .billing-modal {
 body.app-theme-light .gst-popup-overlay,
 body.app-theme-light .billing-modal-overlay {
   background: rgba(15, 23, 42, 0.3);
+}
+
+body.app-theme-light .billing-camera-modal {
+  background: rgba(248, 250, 252, 0.98);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #0f172a;
+}
+
+body.app-theme-light .billing-camera-overlay {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+body.app-theme-light .billing-camera-video-wrap {
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+body.app-theme-light .billing-camera-status {
+  color: #334155;
 }
 
 body.app-theme-light .billing-page .btn-outline-light {

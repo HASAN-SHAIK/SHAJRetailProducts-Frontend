@@ -22,6 +22,9 @@ const CustomerSidebar = ({ collapsed, onToggle }) => {
         <NavLink className="context-sidebar__link" to="/customers">
           <span className="context-sidebar__link-text">Customers List</span>
         </NavLink>
+        <NavLink className="context-sidebar__link" to="/customers/reorder">
+          <span className="context-sidebar__link-text">Customer Reorder</span>
+        </NavLink>
       </nav>
     </aside>
   );

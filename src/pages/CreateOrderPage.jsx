@@ -1,13 +1,14 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import api from '../utils/axios';
 import { getAllCustomers, saveCustomersBulk, upsertCustomersBulk, getProductByBarcode, updateProductsBulk } from '../core/db';
 import { searchLocalProducts, normalizeDisplayProduct } from '../utils/localProductSearch';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearOrderDetails } from '../store/orderSlice';
 import { enqueueOfflineOrder } from '../utils/offlineOrders';
 import { loadCategoriesCache, saveCategoriesCache } from '../utils/offlineCategories';
+import { createOfflineProduct } from '../utils/offlineProducts';
 import { useBranchStore } from '../store/branchStore';
 import { hasFeature, isFeatureEnabled, isPlanAtLeast } from '../utils/entitlements';
 import './CreateOrderPage.css';
@@ -151,10 +152,12 @@ const CreateOrderPage = () => {
   );
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const location = useLocation();
   const { showPopup } = usePopup();
   const latestSearchRef = useRef({ sale: {}, purchase: {}, customer: '' });
   const searchTimersRef = useRef({ sale: {}, purchase: {} });
   const productSearchDelayMs = 350;
+  const reorderAppliedRef = useRef(false);
 useEffect(() => {
   (async () => {
     try {
@@ -286,6 +289,57 @@ useEffect(() => {
       setActiveDraftId(stored[0].id);
     }
   }, [tenantConfig, isPremiumPlan, isEditing]);
+
+  useEffect(() => {
+    if (reorderAppliedRef.current) return;
+    if (isEditing) return;
+    const reorderPrefill = location?.state?.reorderPrefill;
+    if (!reorderPrefill || !Array.isArray(reorderPrefill.products) || !reorderPrefill.products.length) {
+      return;
+    }
+    reorderAppliedRef.current = true;
+
+    const normalizedProducts = reorderPrefill.products.map((item) => ({
+      ...item,
+      id: item.id || item.product_id || null,
+      product_id: item.product_id || item.id || null,
+      quantity: String(item.quantity ?? '1'),
+      selling_price: String(item.selling_price ?? 0),
+      purchase_price: String(item.purchase_price ?? 0),
+      suggestions: [],
+      is_weight_based: item.is_weight_based ? 1 : 0,
+    }));
+
+    const nextDraft = {
+      ...buildEmptyDraft(`Reorder #${reorderPrefill.sourceOrderId || ''}`.trim()),
+      transactionType: 'sale',
+      paymentMethod: 'cash',
+      products: normalizedProducts,
+      totalAmount: normalizedProducts.reduce(
+        (sum, p) => sum + (parseFloat(p.quantity || 0) * parseFloat(p.selling_price || 0)),
+        0
+      ),
+      customerName: reorderPrefill.customer?.name || '',
+      customerPhone: reorderPrefill.customer?.phone || '',
+      customerAddress: reorderPrefill.customer?.address || '',
+      customerLocation: reorderPrefill.customer?.location || '',
+    };
+
+    setDrafts([nextDraft]);
+    setActiveDraftId(nextDraft.id);
+    setTransactionType('sale');
+    setPaymentMethod('cash');
+    setProducts(normalizedProducts);
+    setTotalAmount(nextDraft.totalAmount);
+    setPersonalAmount('');
+    setCustomerName(nextDraft.customerName);
+    setCustomerPhone(nextDraft.customerPhone);
+    setCustomerAddress(nextDraft.customerAddress);
+    setCustomerLocation(nextDraft.customerLocation);
+    setCustomerSuggestions([]);
+    setLocationSuggestions([]);
+    setBarcodeInput('');
+  }, [location.state, isEditing]);
 
   useEffect(() => {
     if (!drafts.length) return;
@@ -462,16 +516,18 @@ useEffect(() => {
       product_id: null,
     });
 
-  const getDefaultBarcodeCreateData = (barcode = '') => ({
-    product_name: '',
-    company: '',
-    selling_price: '',
-    purchase_price: '',
-    stock_quantity: '',
-    category: '',
-    barcode,
-    is_weight_based: 0,
-    time_for_delivery: 0,
+const getDefaultBarcodeCreateData = (barcode = '') => ({
+  product_name: '',
+  company: '',
+  selling_price: '',
+  purchase_price: '',
+  stock_quantity: '',
+  category: '',
+  batch_number: '',
+  expiry_date: '',
+  barcode,
+  is_weight_based: 0,
+  time_for_delivery: 0,
   });
 
   useEffect(() => {
@@ -1454,16 +1510,15 @@ const schedulePurchaseProductSearch = (text, index) => {
         purchase_price: data.purchase_price,
         stock_quantity: data.stock_quantity,
         category: data.category,
+        batch_number: data.batch_number || null,
+        expiry_date: data.expiry_date || null,
+        is_batch_enabled: data.batch_number || data.expiry_date ? 1 : 0,
         barcode: data.barcode,
         is_weight_based: 0,
         time_for_delivery: data.time_for_delivery ?? 0,
       };
-      await api.post('/products', payload);
+      const created = await createOfflineProduct(payload);
       closeBarcodeCreateModal();
-      const mode = transactionType === 'purchase' ? 'purchase' : 'sale';
-      const res = await api.get(buildBarcodeUrl(data.barcode, mode));
-      let created = res?.data?.product || res?.data?.data || res?.data;
-      if (Array.isArray(created)) created = created[0];
       if (!created || !created.id) {
         showPopup('Product created, but could not load for billing.', 'Error');
         return;
@@ -1485,7 +1540,7 @@ const schedulePurchaseProductSearch = (text, index) => {
         addOrIncrementSaleProduct(created);
       }
       setBarcodeInput('');
-      showPopup('Product added successfully!', 'Success');
+      showPopup('Product saved offline. Will sync in background.', 'Offline');
     } catch (err) {
       if (err?.response?.status === 401) {
         showPopup("Token Expired Please Login Again!", "Session");
@@ -2699,6 +2754,24 @@ const schedulePurchaseProductSearch = (text, index) => {
                   placeholder="Purchase Price"
                   value={barcodeCreateData.purchase_price || ''}
                   onChange={(e) => handleBarcodeCreateChange('purchase_price', e.target.value)}
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Batch Number</label>
+                <input
+                  className="form-control"
+                  placeholder="Batch Number"
+                  value={barcodeCreateData.batch_number || ''}
+                  onChange={(e) => handleBarcodeCreateChange('batch_number', e.target.value)}
+                />
+              </div>
+              <div className="col-md-6">
+                <label>Expiry Date</label>
+                <input
+                  className="form-control"
+                  type="date"
+                  value={barcodeCreateData.expiry_date || ''}
+                  onChange={(e) => handleBarcodeCreateChange('expiry_date', e.target.value)}
                 />
               </div>
             </div>

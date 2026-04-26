@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import api from '../../utils/axios';
 import './OrdersPage.css';
 import { usePopup } from '../common/PopUp/PopupProvider';
@@ -60,13 +60,14 @@ const OrdersPage = ({ navigate }) => {
   const [drawerError, setDrawerError] = useState('');
   const [drawerOrder, setDrawerOrder] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentSubmittingId, setPaymentSubmittingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [customerDetailsEnabled, setCustomerDetailsEnabled] = useState(false);
-  const [shopDetails, setShopDetails] = useState(null);
-  const [shopDetailsLoading, setShopDetailsLoading] = useState(false);
+  const [shopDetails] = useState(null);
+  const [shopDetailsLoading] = useState(false);
   const [gstModalOpen, setGstModalOpen] = useState(false);
   const [gstCustomer, setGstCustomer] = useState({
     name: '',
@@ -108,6 +109,7 @@ const OrdersPage = ({ navigate }) => {
     'Other',
   ];
   const REFUND_MODES = ['cash', 'upi', 'bank', 'wallet', 'exchange'];
+  const PAYMENT_METHOD_OPTIONS = ['cash', 'upi', 'card', 'bank', 'wallet'];
 
   const formatDate = useCallback((value) => {
     if (!value) return '-';
@@ -287,6 +289,43 @@ const OrdersPage = ({ navigate }) => {
     }
   }, [ORDER_CACHE_PAGE_SIZE]);
 
+  const cacheOrderDetailsFromList = useCallback((orderList = []) => {
+    const candidates = (Array.isArray(orderList) ? orderList : []).filter((order) => {
+      const hasItems = Array.isArray(order?.items) || Array.isArray(order?.products);
+      const hasPayments = Array.isArray(order?.payment_history) || Array.isArray(order?.payments);
+      return hasItems || hasPayments;
+    });
+
+    if (!candidates.length) return;
+
+    Promise.all(
+      candidates.map((order) => {
+        const items = Array.isArray(order?.items)
+          ? order.items
+          : Array.isArray(order?.products)
+            ? order.products
+            : [];
+        const payments = Array.isArray(order?.payment_history)
+          ? order.payment_history
+          : Array.isArray(order?.payments)
+            ? order.payments
+            : [];
+
+        if (!items.length && !payments.length) {
+          return Promise.resolve();
+        }
+
+        return upsertOrderDetailsCache({
+          order,
+          items: items.length ? items : undefined,
+          payments: payments.length ? payments : undefined,
+        });
+      })
+    ).catch(() => {
+      // ignore cache write failures
+    });
+  }, []);
+
   const fetchOrdersFromServer = useCallback(async () => {
     if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
       return;
@@ -313,6 +352,50 @@ const OrdersPage = ({ navigate }) => {
       const totalRecords = Number(payload.pagination?.total_records || 0);
       const currentPage = Number(payload.pagination?.page || pagination.page);
       const pageOrders = Array.isArray(payload.orders) ? payload.orders : [];
+      cacheOrderDetailsFromList(pageOrders);
+      (async () => {
+        if (!navigator.onLine) return;
+        for (const pageOrder of pageOrders) {
+          if (!pageOrder?.id) continue;
+          try {
+            const cached = await getCachedOrderDetails(pageOrder.id);
+            const cachedItems = Array.isArray(cached?.items) ? cached.items : [];
+            const cachedPayments = Array.isArray(cached?.payment_history)
+              ? cached.payment_history
+              : [];
+            const hasItems = cachedItems.length > 0;
+            const hasPaymentRows = cachedPayments.some(
+              (payment) => Number(payment?.amount ?? payment?.total_price ?? 0) > 0
+            );
+            const requiresPayments = Number(pageOrder?.total_paid || cached?.total_paid || 0) > 0;
+            if (hasItems && (!requiresPayments || hasPaymentRows)) {
+              continue;
+            }
+            const detailRes = await api.get(`/orders/${pageOrder.id}`);
+            const payloadOrder = detailRes?.data?.order || detailRes?.data || null;
+            if (!payloadOrder) continue;
+            const detailItems = Array.isArray(payloadOrder?.items)
+              ? payloadOrder.items
+              : Array.isArray(payloadOrder?.products)
+                ? payloadOrder.products
+                : Array.isArray(payloadOrder?.order_items)
+                  ? payloadOrder.order_items
+                  : [];
+            const detailPayments = Array.isArray(payloadOrder?.payment_history)
+              ? payloadOrder.payment_history
+              : Array.isArray(payloadOrder?.payments)
+                ? payloadOrder.payments
+                : [];
+            await upsertOrderDetailsCache({
+              order: payloadOrder,
+              items: detailItems,
+              payments: detailPayments,
+            });
+          } catch {
+            // ignore warmup failures for individual orders
+          }
+        }
+      })();
       if (totalRecords > ORDER_CACHE_FULL_SYNC_LIMIT) {
         if (currentPage === 1) {
           replaceAllOrders(pageOrders).catch(() => {});
@@ -342,7 +425,7 @@ const OrdersPage = ({ navigate }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [buildRangeParams, customEndDate, customStartDate, navigate, selectedRange, showPopup, loadCachedOrders, pagination.page, ORDER_CACHE_FULL_SYNC_LIMIT, ORDER_CACHE_PAGE_SIZE, searchQuery, syncOrdersSince]);
+  }, [buildRangeParams, cacheOrderDetailsFromList, customEndDate, customStartDate, navigate, selectedRange, showPopup, loadCachedOrders, pagination.page, ORDER_CACHE_FULL_SYNC_LIMIT, ORDER_CACHE_PAGE_SIZE, searchQuery, syncOrdersSince]);
 
   const fetchOrders = useCallback(async () => {
     if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
@@ -367,8 +450,7 @@ const OrdersPage = ({ navigate }) => {
 
   useEffect(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
-    fetchOrders();
-  }, [selectedBranchId, fetchOrders]);
+  }, [selectedBranchId]);
 
   useEffect(() => {
     const handleOrdersCacheUpdated = () => {
@@ -396,6 +478,70 @@ const OrdersPage = ({ navigate }) => {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  const hasDetailItems = (order) => {
+    if (!order) return false;
+    const list = Array.isArray(order?.items)
+      ? order.items
+      : Array.isArray(order?.products)
+        ? order.products
+        : Array.isArray(order?.order_items)
+          ? order.order_items
+          : [];
+    return list.length > 0;
+  };
+
+  const hasDetailedPayments = (order) => {
+    if (!order) return false;
+    const list = Array.isArray(order?.payment_history)
+      ? order.payment_history
+      : Array.isArray(order?.payments)
+        ? order.payments
+        : [];
+    return list.some((payment) => {
+      const amount = Number(payment?.amount ?? payment?.total_price ?? payment?.amount_paid);
+      const hasDate = Boolean(
+        payment?.date || payment?.paid_at || payment?.created_at || payment?.createdAt
+      );
+      const hasMethod = Boolean(
+        payment?.method ||
+          payment?.mode ||
+          payment?.payment_mode ||
+          payment?.payment_method ||
+          payment?.paymentMethod
+      );
+      return Number.isFinite(amount) && amount > 0 && (hasDate || hasMethod);
+    });
+  };
+
+  const hydrateOrderDetailsFromServer = useCallback(async (orderId) => {
+    if (!orderId || !navigator.onLine) return null;
+    try {
+      const res = await api.get(`/orders/${orderId}`);
+      const payload = res?.data?.order || res?.data || null;
+      if (!payload) return null;
+      const detailItems = Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.products)
+          ? payload.products
+          : Array.isArray(payload?.order_items)
+            ? payload.order_items
+            : [];
+      const detailPayments = Array.isArray(payload?.payment_history)
+        ? payload.payment_history
+        : Array.isArray(payload?.payments)
+          ? payload.payments
+          : [];
+      await upsertOrderDetailsCache({
+        order: payload,
+        items: detailItems,
+        payments: detailPayments,
+      });
+      return (await getCachedOrderDetails(orderId)) || payload;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const fetchOrderDetails = useCallback(async (orderId) => {
     if (!orderId) return;
     setDrawerLoading(true);
@@ -403,75 +549,41 @@ const OrdersPage = ({ navigate }) => {
     setDrawerOrder(null);
     try {
       const cached = await getCachedOrderDetails(orderId);
-      const hasCachedItems = Array.isArray(cached?.items) && cached.items.length > 0;
-      if (cached) {
-        setDrawerOrder(cached);
-      }
+      let finalOrder = cached;
 
-      const shouldFallback = !cached || !hasCachedItems;
-      if (!shouldFallback) {
-        if (gstInvoiceEnabled && !shopDetails && !shopDetailsLoading && navigator.onLine) {
-          setShopDetailsLoading(true);
-          try {
-            const shopRes = await api.get('/shop-details/me');
-            const shopPayload = shopRes?.data?.shop_details || shopRes?.data?.data || shopRes?.data || {};
-            setShopDetails(shopPayload);
-          } catch (innerErr) {
-            console.error('Failed to load shop details', innerErr);
-          } finally {
-            setShopDetailsLoading(false);
-          }
+      if (!finalOrder) {
+        const fallbackOrder = orders.find((order) => String(order?.id) === String(orderId));
+        if (fallbackOrder) {
+          finalOrder = fallbackOrder;
         }
-        return;
       }
 
-      if (!navigator.onLine) {
-        setDrawerError('Order details not available offline.');
-        return;
-      }
-
-      const res = await api.get(`/orders/${orderId}`);
-      const payload = res?.data || {};
-      setCustomerDetailsEnabled(Boolean(payload.customer_details_enabled));
-      const serverOrder = payload.order || payload;
-      setDrawerOrder(serverOrder);
-
-      const serverItems =
-        serverOrder?.items ||
-        serverOrder?.products ||
-        payload.items ||
-        payload.products ||
-        [];
-      const serverPayments =
-        serverOrder?.payment_history ||
-        serverOrder?.payments ||
-        payload.payment_history ||
-        payload.payments ||
-        [];
-      upsertOrderDetailsCache({
-        order: serverOrder,
-        items: serverItems,
-        payments: serverPayments,
-      }).catch(() => {});
-
-      if (gstInvoiceEnabled && !shopDetails && !shopDetailsLoading) {
-        setShopDetailsLoading(true);
-        try {
-          const shopRes = await api.get('/shop-details/me');
-          const shopPayload = shopRes?.data?.shop_details || shopRes?.data?.data || shopRes?.data || {};
-          setShopDetails(shopPayload);
-        } catch (innerErr) {
-          console.error('Failed to load shop details', innerErr);
-        } finally {
-          setShopDetailsLoading(false);
+      if (!hasDetailItems(finalOrder)) {
+        const hydrated = await hydrateOrderDetailsFromServer(orderId);
+        if (hydrated) {
+          finalOrder = hydrated;
         }
+      }
+      if (!hasDetailedPayments(finalOrder) && Number(finalOrder?.total_paid || 0) > 0) {
+        const hydrated = await hydrateOrderDetailsFromServer(orderId);
+        if (hydrated) {
+          finalOrder = hydrated;
+        }
+      }
+
+      if (finalOrder) {
+        setDrawerOrder(finalOrder);
+      }
+
+      if (!finalOrder) {
+        setDrawerError('Order details are not available in IndexedDB yet.');
       }
     } catch (err) {
       setDrawerError('Unable to load order details.');
     } finally {
       setDrawerLoading(false);
     }
-  }, []);
+  }, [orders, hydrateOrderDetailsFromServer]);
 
   const openDrawer = useCallback((orderId) => {
     setDrawerOpen(true);
@@ -483,6 +595,7 @@ const OrdersPage = ({ navigate }) => {
     setDrawerOrder(null);
     setDrawerError('');
     setPaymentAmount('');
+    setPaymentMethod('cash');
   };
 
   useEffect(() => {
@@ -492,6 +605,14 @@ const OrdersPage = ({ navigate }) => {
     const returned = Number(drawerOrder.returned_amount || 0);
     const balance = Math.max(total - paid - returned, 0);
     setPaymentAmount(balance > 0 ? balance.toFixed(2) : '');
+    setPaymentMethod(
+      String(
+        drawerOrder?.payment_mode ||
+          drawerOrder?.payment_method ||
+          drawerOrder?.payment ||
+          'cash'
+      ).toLowerCase()
+    );
   }, [drawerOrder?.id]);
 
   const buildReturnItems = (order) => {
@@ -550,18 +671,27 @@ const OrdersPage = ({ navigate }) => {
       } else {
         orderData = await getCachedOrderDetails(orderId);
       }
-      if (!orderData && navigator.onLine) {
-        const res = await api.get(`/orders/${orderId}`);
-        orderData = res?.data?.order || res?.data || null;
+
+      if (!hasDetailItems(orderData)) {
+        const hydrated = await hydrateOrderDetailsFromServer(orderId);
+        if (hydrated) {
+          orderData = hydrated;
+        }
       }
-      if (!orderData && !navigator.onLine) {
-        showPopup('Return requires an internet connection.', 'Offline');
-        throw new Error('Order not available offline');
-      }
+
       if (!orderData) {
-        throw new Error('Order not found.');
+        setReturnError('Order details are not available in local cache yet.');
+        return;
       }
       const items = buildReturnItems(orderData);
+      if (items.length === 0) {
+        setReturnError(
+          navigator.onLine
+            ? 'Unable to load complete product details for return.'
+            : 'Product details are not available in local cache yet.'
+        );
+        return;
+      }
       const hasRemaining = items.some((item) => Number(item.remaining_qty || 0) > 0);
       if (!hasRemaining) {
         showPopup('All items from this order are already returned.', 'Info');
@@ -727,11 +857,11 @@ const OrdersPage = ({ navigate }) => {
     if (!order?.id) return;
     if (paymentSubmittingId === order.id) return;
 
-    const paymentMode =
-      order.payment_method ||
-      order.payment_mode ||
-      order.payment ||
-      'cash';
+    const paymentMode = String(paymentMethod || '').trim().toLowerCase();
+    if (!paymentMode) {
+      showPopup('Select payment method', 'Validation');
+      return;
+    }
 
     try {
       setPaymentSubmittingId(order.id);
@@ -764,6 +894,10 @@ const OrdersPage = ({ navigate }) => {
         order_id: currentOrder?.id ?? order.id,
         amount: parsedAmount,
         payment_mode: paymentMode,
+        payment_method: paymentMode,
+        method: paymentMode,
+        mode: paymentMode,
+        date: new Date().toISOString(),
         created_at: new Date().toISOString(),
         txn_type: 'payment',
         direction: 'in',
@@ -1065,9 +1199,14 @@ const OrdersPage = ({ navigate }) => {
     setReceiptOrder(null);
     openReceipt();
     try {
-      const res = await api.get(`/orders/${order.id}`);
-      const payload = res?.data || {};
-      setReceiptOrder(payload.order || payload);
+      const cached = await getCachedOrderDetails(order.id);
+      const fallbackOrder = orders.find((entry) => String(entry?.id) === String(order.id));
+      const resolved = cached || fallbackOrder || null;
+      if (!resolved) {
+        setReceiptError('Order details are not available in IndexedDB yet.');
+        return;
+      }
+      setReceiptOrder(resolved);
     } catch (err) {
       setReceiptError('Unable to load receipt.');
     } finally {
@@ -1330,6 +1469,48 @@ const OrdersPage = ({ navigate }) => {
     return [];
   };
 
+  const getDrawerProductItems = (order) => {
+    if (!order) return [];
+
+    const rawItems = Array.isArray(order?.items)
+      ? order.items
+      : Array.isArray(order?.products)
+        ? order.products
+        : Array.isArray(order?.order_items)
+          ? order.order_items
+          : [];
+
+    if (rawItems.length > 0) {
+      return rawItems;
+    }
+
+    const names = getProductNames(order);
+    if (names.length > 0) {
+      return names.map((name, idx) => ({
+        id: `name-${idx}`,
+        product_name: name,
+        quantity: '-',
+        price: null,
+        total: null,
+      }));
+    }
+
+    const summaryText = String(order?.products_summary || '').trim();
+    if (!summaryText) return [];
+
+    return summaryText
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((name, idx) => ({
+        id: `summary-${idx}`,
+        product_name: name,
+        quantity: '-',
+        price: null,
+        total: null,
+      }));
+  };
+
   const renderProductSummary = (order) => {
     const names = getProductNames(order);
     if (names.length === 0) return order.products_summary || '-';
@@ -1405,11 +1586,7 @@ const OrdersPage = ({ navigate }) => {
     );
   };
 
-  const drawerItems = Array.isArray(drawerOrder?.items)
-    ? drawerOrder.items
-    : Array.isArray(drawerOrder?.products)
-      ? drawerOrder.products
-      : [];
+  const drawerItems = getDrawerProductItems(drawerOrder);
 
   const paymentHistory = Array.isArray(drawerOrder?.payment_history)
     ? drawerOrder.payment_history
@@ -1422,7 +1599,7 @@ const OrdersPage = ({ navigate }) => {
   const gstEnabledForOrder =
     drawerOrder?.is_gst_enabled === true || drawerOrder?.gst_enabled === true;
 
-  const returnEnabled = false;
+  const returnEnabled = true;
   const hasActions = receiptModuleEnabled || whatsappEnabled || returnEnabled;
 
   return (
@@ -1440,33 +1617,33 @@ const OrdersPage = ({ navigate }) => {
             onChange={(event) => setSearchInput(event.target.value)}
           />
           <div className="orders-controls-right">
-            <div className="sort-controls">
-              <select
-                className="form-select sort-select"
-                value={sortBy}
-                onChange={(event) => handleSortToggle(event.target.value)}
-              >
-                <option value="id">Sort by Order ID</option>
-                <option value="created_at">Sort by Date</option>
-                <option value="total_amount">Sort by Total Amount</option>
-                <option value="total_paid">Sort by Total Paid</option>
-                <option value="balance">Sort by Balance</option>
-              </select>
-              <button
-                className="btn btn-outline-primary btn-sm"
-                onClick={() => {
-                  setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-                  setPagination((prev) => ({ ...prev, page: 1 }));
-                }}
-                type="button"
-              >
-                {sortOrder === 'asc' ? 'Asc' : 'Desc'}
-              </button>
-            </div>
             <select
-              className="form-select range-select"
+              className="form-select sort-select orders-control-select"
+              value={sortBy}
+              onChange={(event) => handleSortToggle(event.target.value)}
+              aria-label="Sort orders by"
+            >
+              <option value="id">Order ID</option>
+              <option value="created_at">Date</option>
+              <option value="total_amount">Total Amount</option>
+              <option value="total_paid">Total Paid</option>
+              <option value="balance">Balance</option>
+            </select>
+            <button
+              className="btn btn-sm orders-sort-order-btn"
+              onClick={() => {
+                setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+                setPagination((prev) => ({ ...prev, page: 1 }));
+              }}
+              type="button"
+            >
+              {sortOrder === 'asc' ? 'Asc' : 'Desc'}
+            </button>
+            <select
+              className="form-select range-select orders-control-select"
               value={selectedRange}
               onChange={(event) => handleRangeChange(event.target.value)}
+              aria-label="Filter orders by date range"
             >
               <option value="today">Today</option>
               <option value="this_week">This Week</option>
@@ -1476,7 +1653,7 @@ const OrdersPage = ({ navigate }) => {
               <option value="custom">Custom Range</option>
             </select>
             <button
-              className="btn btn-outline-secondary btn-sm"
+              className="btn btn-sm orders-resync-btn"
               type="button"
               onClick={handleForceResync}
               disabled={isLoading}
@@ -1484,7 +1661,7 @@ const OrdersPage = ({ navigate }) => {
               Resync
             </button>
             <button
-              className="btn btn-outline-secondary btn-sm"
+              className="btn btn-sm orders-refresh-btn"
               type="button"
               onClick={handleRefreshFromServer}
               disabled={isLoading}
@@ -1732,8 +1909,20 @@ const OrdersPage = ({ navigate }) => {
                         <tr key={`item-${idx}`}>
                           <td>{item.name || item.product_name || '-'}</td>
                           <td>{item.quantity || item.qty || '-'}</td>
-                          <td>{formatMoney(item.price || item.selling_price)}</td>
-                          <td>{formatMoney(item.total || item.line_total)}</td>
+                          <td>
+                            {item.price !== undefined && item.price !== null
+                              ? formatMoney(item.price)
+                              : item.selling_price !== undefined && item.selling_price !== null
+                                ? formatMoney(item.selling_price)
+                                : '-'}
+                          </td>
+                          <td>
+                            {item.total !== undefined && item.total !== null
+                              ? formatMoney(item.total)
+                              : item.line_total !== undefined && item.line_total !== null
+                                ? formatMoney(item.line_total)
+                                : '-'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1784,9 +1973,24 @@ const OrdersPage = ({ navigate }) => {
                       )}
                       {paymentHistory.map((payment, idx) => (
                         <tr key={`payment-${idx}`}>
-                          <td>{formatDate(payment.date || payment.paid_at)}</td>
-                          <td>{payment.method || payment.mode || '-'}</td>
-                          <td>{formatMoney(payment.amount)}</td>
+                          <td>
+                            {formatDate(
+                              payment.date ||
+                                payment.paid_at ||
+                                payment.created_at ||
+                                payment.createdAt ||
+                                payment.transaction_date
+                            )}
+                          </td>
+                          <td>
+                            {payment.method ||
+                              payment.mode ||
+                              payment.payment_mode ||
+                              payment.payment_method ||
+                              payment.paymentMethod ||
+                              '-'}
+                          </td>
+                          <td>{formatMoney(payment.amount ?? payment.total_price)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1815,6 +2019,20 @@ const OrdersPage = ({ navigate }) => {
                             value={paymentAmount}
                             onChange={(event) => setPaymentAmount(event.target.value)}
                           />
+                        </label>
+                        <label>
+                          Payment Method
+                          <select
+                            className="form-select form-select-sm"
+                            value={paymentMethod}
+                            onChange={(event) => setPaymentMethod(event.target.value)}
+                          >
+                            {PAYMENT_METHOD_OPTIONS.map((method) => (
+                              <option key={method} value={method}>
+                                {method.toUpperCase()}
+                              </option>
+                            ))}
+                          </select>
                         </label>
                         <small className="text-secondary">Balance: {formatMoney(balance)}</small>
                       </div>

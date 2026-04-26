@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import CartItemRow from './CartItemRow';
 
 const CartList = ({
@@ -9,6 +9,7 @@ const CartList = ({
   onQtyChange,
   onPriceChange,
   onRemove,
+  canRevealActualPrice = false,
 }) => (
   <div className="billing-table-wrapper">
     <table className="billing-table">
@@ -41,6 +42,7 @@ const CartList = ({
             onQtyChange={onQtyChange}
             onPriceChange={onPriceChange}
             onRemove={onRemove}
+            canRevealActualPrice={canRevealActualPrice}
           />
         ))}
       </tbody>

@@ -302,6 +302,10 @@ body.app-theme-light .wow-page .btn-outline-primary:hover {
   border: 1px solid rgba(148, 163, 184, 0.35);
   background: rgba(15, 23, 42, 0.7);
   color: #e2e8f0;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 body.app-theme-light .wow-page .form-control,
@@ -319,6 +323,36 @@ body.app-theme-light .wow-page .form-select {
   color: #94a3b8;
 }
 
+.wow-page input[type="date"],
+.wow-page input[type="datetime-local"],
+.wow-page input[type="month"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.wow-page .billing-filters > .form-control,
+.wow-page .billing-filters > .billing-input,
+.wow-page .billing-filters > .form-select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.wow-page .range-custom {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.wow-page .range-custom .form-control,
+.wow-page .range-custom input[type="date"] {
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
+}
+
 body.app-theme-light .wow-page .form-control::placeholder {
   color: #64748b;
 }
@@ -327,6 +361,14 @@ body.app-theme-light .wow-page .form-control::placeholder {
 .wow-page .form-select:focus {
   border-color: #7dd3fc;
   box-shadow: 0 0 0 0.2rem rgba(125, 211, 252, 0.25);
+}
+
+@media (max-width: 768px) {
+  .wow-page .range-custom .form-control,
+  .wow-page .range-custom input[type="date"] {
+    flex: 1 1 100%;
+    width: 100%;
+  }
 }
 
 .product-type-badge {

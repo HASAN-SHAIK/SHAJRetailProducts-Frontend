@@ -87,6 +87,9 @@ const CustomerList = () => {
           <button className="btn btn-outline-primary" onClick={() => navigate('/customers/new')}>
             Add Customer
           </button>
+          <button className="btn btn-outline-secondary" onClick={() => navigate('/customers/reorder')}>
+            Reorder
+          </button>
         </div>
       </div>
 

@@ -11,6 +11,27 @@ import {persistor,store} from './store/store';
 import { PersistGate } from 'redux-persist/integration/react';
 import { PopupProvider } from './components/common/PopUp/PopupProvider';
 
+const cleanupLegacyServiceWorkers = async () => {
+  if (!('serviceWorker' in navigator)) return;
+
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  } catch {
+    // Best-effort cleanup only; app startup must continue.
+  }
+
+  if (!('caches' in window)) return;
+  try {
+    const cacheKeys = await caches.keys();
+    await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
+  } catch {
+    // Ignore cache deletion failures.
+  }
+};
+
+cleanupLegacyServiceWorkers();
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <BrowserRouter>  

@@ -30,33 +30,236 @@
   align-items: center;
   gap: 10px;
   flex-wrap: nowrap;
+  width: 100%;
+  font-family: "Space Grotesk", "Archivo", "Segoe UI", sans-serif;
+  overflow: visible;
 }
 
 .search-input {
-  min-width: 420px;
-  flex: 1 1 520px;
+  min-width: 0;
+  width: 45%;
+  flex: 0 1 45%;
+  color: #eaf2ff !important;
+  font-weight: 500;
+  margin-right: 0;
+}
+
+.search-input::placeholder {
+  color: #b8c6df !important;
+  opacity: 1;
 }
 
 .orders-controls-right {
-  margin-left: auto;
-  display: flex;
+  margin-left: 0;
+  display: grid;
   align-items: center;
-  gap: 10px;
-  flex-wrap: nowrap;
+  gap: 8px;
+  grid-template-columns:
+    minmax(120px, 1.6fr)
+    minmax(86px, 0.8fr)
+    minmax(132px, 1.4fr)
+    minmax(96px, 1fr)
+    minmax(208px, 1.9fr);
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .sort-controls {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
 }
 
 .sort-select {
-  min-width: 190px;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+}
+
+.orders-page .orders-control-select {
+  border: 1px solid rgba(125, 211, 252, 0.4);
+  border-radius: 16px;
+  height: 44px;
+  padding: 0 44px 0 14px;
+  font-weight: 700;
+  color: #eaf2ff !important;
+  -webkit-text-fill-color: #eaf2ff;
+  line-height: 42px;
+  background-color: rgba(11, 27, 54, 0.92);
+  background-clip: padding-box;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #93c5fd 50%),
+    linear-gradient(135deg, #93c5fd 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) calc(50% - 3px),
+    calc(100% - 14px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  appearance: none;
+  flex: 0 0 auto;
+}
+
+.orders-page .orders-control-select:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 0.18rem rgba(96, 165, 250, 0.25);
+}
+
+.orders-page .orders-control-select option {
+  color: #0f172a;
+  background: #f8fbff;
+  font-weight: 600;
+}
+
+.orders-sort-order-btn,
+.orders-resync-btn,
+.orders-refresh-btn {
+  border-radius: 16px;
+  height: 44px;
+  padding: 0 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  transition: transform 0.18s ease, box-shadow 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0 12px;
+  font-size: 0.88rem;
+}
+
+.orders-resync-btn,
+.orders-refresh-btn {
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.orders-page .orders-sort-order-btn.btn,
+.orders-page .orders-resync-btn.btn,
+.orders-page .orders-refresh-btn.btn {
+  color: #e8f1ff !important;
+  font-weight: 700 !important;
+}
+
+.orders-sort-order-btn {
+  color: #eff6ff;
+  border: 1px solid rgba(125, 211, 252, 0.75);
+  background:
+    linear-gradient(135deg, rgba(30, 64, 175, 0.96) 0%, rgba(37, 99, 235, 0.94) 55%, rgba(14, 165, 233, 0.88) 100%);
+  box-shadow: 0 10px 20px rgba(30, 64, 175, 0.35);
+}
+
+.orders-sort-order-btn:hover,
+.orders-sort-order-btn:focus {
+  color: #ffffff;
+  border-color: #93c5fd;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.98) 0%, rgba(59, 130, 246, 0.96) 55%, rgba(56, 189, 248, 0.9) 100%);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.42);
+}
+
+.orders-resync-btn,
+.orders-refresh-btn {
+  border: 1px solid rgba(154, 185, 255, 0.9);
+  box-shadow: 0 8px 18px rgba(30, 64, 175, 0.18);
+}
+
+.orders-refresh-btn {
+  color: #1f4fd4;
+  background: rgba(245, 250, 255, 0.98);
+}
+
+.orders-resync-btn {
+  color: #ffffff;
+  border-color: rgba(90, 129, 255, 0.95);
+  background: linear-gradient(135deg, #32b5ee 0%, #5a78ee 100%);
+}
+
+.orders-resync-btn:hover,
+.orders-resync-btn:focus,
+.orders-refresh-btn:hover,
+.orders-refresh-btn:focus {
+  border-color: rgba(114, 150, 255, 0.95);
+  box-shadow: 0 10px 22px rgba(59, 130, 246, 0.24);
+}
+
+.orders-refresh-btn:hover,
+.orders-refresh-btn:focus {
+  color: #163eae;
+  background: #ffffff;
+}
+
+.orders-resync-btn:hover,
+.orders-resync-btn:focus {
+  color: #ffffff;
+  background: linear-gradient(135deg, #2ea8e3 0%, #4f6ee8 100%);
+}
+
+.orders-refresh-btn:disabled,
+.orders-resync-btn:disabled,
+.orders-sort-order-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  color: #a9bddc !important;
+}
+
+body.app-theme-light .orders-page .orders-control-select {
+  color: #0f172a;
+  -webkit-text-fill-color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.45);
+  background-color: rgba(248, 250, 252, 0.98);
+  background-image:
+    linear-gradient(45deg, transparent 50%, #475569 50%),
+    linear-gradient(135deg, #475569 50%, transparent 50%);
+}
+
+body.app-theme-light .search-input {
+  color: #0f172a !important;
+}
+
+body.app-theme-light .search-input::placeholder {
+  color: #64748b !important;
+}
+
+body.app-theme-light .orders-page .orders-sort-order-btn.btn,
+body.app-theme-light .orders-page .orders-resync-btn.btn,
+body.app-theme-light .orders-page .orders-refresh-btn.btn {
+  color: #1e293b !important;
+}
+
+body.app-theme-light .orders-sort-order-btn {
+  color: #1e293b;
+  border-color: rgba(148, 163, 184, 0.45);
+  background: rgba(248, 250, 252, 0.98);
+  box-shadow: none;
+}
+
+body.app-theme-light .orders-sort-order-btn:hover,
+body.app-theme-light .orders-sort-order-btn:focus {
+  color: #0f172a;
+  border-color: rgba(100, 116, 139, 0.65);
+  background: rgba(241, 245, 249, 0.98);
+}
+
+body.app-theme-light .orders-resync-btn,
+body.app-theme-light .orders-refresh-btn {
+  border-color: rgba(154, 185, 255, 0.9);
+}
+
+body.app-theme-light .orders-resync-btn:hover,
+body.app-theme-light .orders-refresh-btn:hover,
+body.app-theme-light .orders-resync-btn:focus,
+body.app-theme-light .orders-refresh-btn:focus {
+  border-color: rgba(114, 150, 255, 0.95);
 }
 
 .range-select {
-  min-width: 170px;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
 }
 
 .range-custom {
@@ -472,7 +675,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 40;
+  z-index: 3200;
   padding: 20px;
 }
 
@@ -604,9 +807,9 @@ body.app-theme-light .return-table td {
     flex-direction: column;
     align-items: flex-start;
   }
-  .orders-controls {
-    flex-wrap: wrap;
-  }
+  .orders-controls { flex-wrap: nowrap; }
+  .orders-controls-right { width: auto; }
+  .search-input { min-width: 280px; flex: 1 1 auto; }
 }
 
 @media (max-width: 768px) {

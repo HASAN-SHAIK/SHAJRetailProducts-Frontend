@@ -86,6 +86,20 @@ const normalizeItem = (product, qty = 1, gstMode = 'INCLUSIVE') => ({
   barcode: product?.barcode ?? null,
   name: product?.name ?? product?.product_name ?? '-',
   mrp: Number(product?.mrp ?? product?.mrp_price ?? 0) || 0,
+  actual_price:
+    Number(
+      product?.actual_price ??
+      product?.purchase_price ??
+      product?.purchasePrice ??
+      0
+    ) || 0,
+  purchase_price:
+    Number(
+      product?.purchase_price ??
+      product?.purchasePrice ??
+      product?.actual_price ??
+      0
+    ) || 0,
   price: getProductPrice(product),
   gstPercent: getProductGst(product),
   ...applyGstTotals(getProductPrice(product), qty, getProductGst(product), gstMode),

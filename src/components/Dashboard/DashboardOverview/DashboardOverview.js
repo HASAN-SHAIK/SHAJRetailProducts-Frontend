@@ -99,6 +99,7 @@ const DashboardOverview = ({ navigate }) => {
   const [isFetchingCustomerCredit, setIsFetchingCustomerCredit] = useState(false);
   const [isFetchingInsights, setIsFetchingInsights] = useState(false);
   const [isFetchingLocationPerf, setIsFetchingLocationPerf] = useState(false);
+  const [isSendingTestDigest, setIsSendingTestDigest] = useState(false);
   const [activeSection, setActiveSection] = useState("overview");
   const [activeProductsTab, setActiveProductsTab] = useState("quantity");
   const [activeExpiryTab, setActiveExpiryTab] = useState("expiring_30_days");
@@ -144,6 +145,31 @@ const DashboardOverview = ({ navigate }) => {
       month: "short",
       year: "numeric",
     });
+  };
+
+  const handleSendTestReportEmail = async () => {
+    const input = window.prompt("Send test report to email:", userDetails?.email || "");
+    const recipientEmail = String(input || "").trim();
+    if (!recipientEmail) return;
+    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail);
+    if (!isValidEmail) {
+      showPopup("Please enter a valid email address.", "Invalid Email");
+      return;
+    }
+
+    setIsSendingTestDigest(true);
+    try {
+      await api.post("/owner-digest/send-test-email", {
+        recipient_email: recipientEmail,
+      });
+      showPopup(`Test report sent to ${recipientEmail}`, "Email Sent");
+    } catch (error) {
+      const errorMessage =
+        error?.response?.data?.message || error?.message || "Failed to send test report email";
+      showPopup(errorMessage, "Email Send Failed");
+    } finally {
+      setIsSendingTestDigest(false);
+    }
   };
 
   useEffect(() => {
@@ -1101,6 +1127,20 @@ const DashboardOverview = ({ navigate }) => {
                 ))}
               </select>
             </div>
+            {!isStaff && (
+              <div className="range-filter report-test-filter">
+                <label htmlFor="send-test-report-btn">SMTP Test</label>
+                <button
+                  id="send-test-report-btn"
+                  type="button"
+                  className="send-test-report-btn"
+                  onClick={handleSendTestReportEmail}
+                  disabled={isSendingTestDigest}
+                >
+                  {isSendingTestDigest ? "Sending..." : "Send Test Report"}
+                </button>
+              </div>
+            )}
           </div>
         </header>
 

@@ -1,6 +1,6 @@
 .sync-center-page {
-  width: 100vw;
-  margin-left: calc(50% - 50vw);
+  width: 100%;
+  margin-left: 0;
   padding: 20px 24px 28px;
   box-sizing: border-box;
 }

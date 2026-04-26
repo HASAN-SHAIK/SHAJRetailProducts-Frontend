@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
-import api from '../../utils/axios';
+import { getCachedOrderById, getCachedOrderDetails } from '../../db/ordersDb';
 import MobileShell from '../components/MobileShell';
 import SectionCard from '../components/SectionCard';
 
@@ -16,8 +16,13 @@ const OrderDetailsMobile = () => {
     let active = true;
     const fetchOrder = async () => {
       try {
-        const res = await api.get(`/orders/${id}`, { params: { view: 'mobile' } });
-        if (active) setOrder(res.data || null);
+        const cachedDetails = await getCachedOrderDetails(id);
+        if (cachedDetails) {
+          if (active) setOrder(cachedDetails);
+          return;
+        }
+        const cachedOrder = await getCachedOrderById(id);
+        if (active) setOrder(cachedOrder || null);
       } catch {
         if (active) setOrder(null);
       } finally {
@@ -42,7 +47,7 @@ const OrderDetailsMobile = () => {
     <MobileShell title={`Order #${id}`} subtitle="Order summary, customer details, and line items in one place.">
       <SectionCard title="Order Summary">
         {loading && <p className="mobile-muted" style={{ margin: 0, fontSize: 12 }}>Loading order details...</p>}
-        {!loading && !order && <p className="mobile-muted" style={{ margin: 0, fontSize: 12 }}>Order not found.</p>}
+        {!loading && !order && <p className="mobile-muted" style={{ margin: 0, fontSize: 12 }}>Order not found in IndexedDB.</p>}
 
         {!loading && order && (
           <>
@@ -62,7 +67,7 @@ const OrderDetailsMobile = () => {
               <p style={{ margin: '6px 0 0', fontWeight: 700 }}>{order?.customer_name || order?.customer?.name || 'Walk-in Customer'}</p>
               <p className="mobile-muted" style={{ margin: '4px 0 0', fontSize: 11 }}>
                 {order?.customer_phone || order?.customer?.phone || 'No phone'}
-                {' • '}
+                {' â€¢ '}
                 {dayjs(order?.created_at || order?.createdAt || new Date()).format('DD MMM YYYY, hh:mm A')}
               </p>
             </div>
@@ -110,7 +115,7 @@ const OrderDetailsMobile = () => {
                   <p style={{ margin: 0, fontSize: 12, fontWeight: 700 }}>Rs {formatCurrency(qty * price)}</p>
                 </div>
                 <p className="mobile-muted" style={{ margin: '6px 0 0', fontSize: 11 }}>
-                  Qty {qty} × Rs {formatCurrency(price)}
+                  Qty {qty} x Rs {formatCurrency(price)}
                 </p>
               </article>
             );

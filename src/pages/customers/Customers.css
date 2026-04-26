@@ -87,3 +87,71 @@ body.app-theme-light .customer-tab.active {
   color: #1e3a8a;
   border-color: rgba(37, 99, 235, 0.35);
 }
+
+.reorder-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.reorder-panel {
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.reorder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.reorder-list-item,
+.reorder-check-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.42);
+  color: inherit;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.reorder-list-item .title,
+.reorder-check-item .title {
+  font-weight: 600;
+}
+
+.reorder-list-item .meta,
+.reorder-check-item .meta {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.reorder-list-item.active,
+.reorder-check-item.active {
+  border-color: rgba(56, 189, 248, 0.75);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35) inset;
+}
+
+.reorder-check-item {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.reorder-check-item input {
+  margin-top: 4px;
+}
+
+@media (max-width: 1100px) {
+  .reorder-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -193,6 +193,31 @@
   border-radius: 8px;
 }
 
+.report-test-filter {
+  min-width: 210px;
+}
+
+.send-test-report-btn {
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  background: linear-gradient(135deg, #38bdf8, #4f46e5);
+  color: #f8fafc;
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.send-test-report-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(56, 189, 248, 0.28);
+}
+
+.send-test-report-btn:disabled {
+  opacity: 0.75;
+  cursor: wait;
+}
+
 .dash-section {
   display: flex;
   flex-direction: column;
@@ -750,6 +775,11 @@ body.app-theme-light .range-filter label {
 body.app-theme-light .range-filter select {
   background: rgba(248, 250, 252, 0.98);
   color: #0f172a;
+}
+
+body.app-theme-light .send-test-report-btn {
+  border-color: rgba(37, 99, 235, 0.45);
+  color: #ffffff;
 }
 
 body.app-theme-light .filter-chip,

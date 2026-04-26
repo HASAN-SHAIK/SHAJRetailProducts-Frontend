@@ -13,24 +13,34 @@ const getTodayKey = () => {
 const SetupScreen = () => {
   const setupVideoSrc = `${process.env.PUBLIC_URL || ''}/videoes/SettingUp%20Video.mp4`;
   const videoRef = useRef(null);
+  const hasMarkedPlayedRef = useRef(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [skipVideoToday, setSkipVideoToday] = useState(false);
-  const [videoDone, setVideoDone] = useState(false);
-
-  useEffect(() => {
+  const [skipVideoToday, setSkipVideoToday] = useState(() => {
     try {
       const today = getTodayKey();
       const lastPlayed = localStorage.getItem(SETUP_VIDEO_LAST_PLAYED_KEY);
-      if (lastPlayed === today) {
-        setSkipVideoToday(true);
-        setVideoDone(true);
-      } else {
-        localStorage.setItem(SETUP_VIDEO_LAST_PLAYED_KEY, today);
-      }
+      return lastPlayed === today;
     } catch {
-      // Ignore storage failures and play video by default.
+      return false;
     }
-  }, []);
+  });
+  const [videoDone, setVideoDone] = useState(false);
+
+  useEffect(() => {
+    if (skipVideoToday) {
+      setVideoDone(true);
+    }
+  }, [skipVideoToday]);
+
+  const markPlayedToday = () => {
+    if (hasMarkedPlayedRef.current) return;
+    hasMarkedPlayedRef.current = true;
+    try {
+      localStorage.setItem(SETUP_VIDEO_LAST_PLAYED_KEY, getTodayKey());
+    } catch {
+      // Ignore storage failures and continue video playback.
+    }
+  };
 
   const handleUnmute = () => {
     const video = videoRef.current;
@@ -70,6 +80,7 @@ const SetupScreen = () => {
               muted={isMuted}
               playsInline
               onClick={handleVideoClick}
+              onPlay={markPlayedToday}
               onEnded={() => setVideoDone(true)}
             />
             <button
