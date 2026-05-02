@@ -665,7 +665,7 @@ const ENTITY_SCHEMAS = {
     idKey: 'id',
     enforceUuid: false,
     syncFields: true,
-    required: ['id', 'order_id'],
+    required: ['id'],
     numberFields: ['total_price', 'amount', 'profit'],
     nonNegativeFields: ['total_price', 'amount', 'profit'],
     allowed: [
@@ -1245,8 +1245,33 @@ export const saveProductsBulk = async (products) => {
   return prepared.length;
 };
 
+const normalizeCustomerPhone = (value) => String(value || '').replace(/\D+/g, '');
+
+const dedupeCustomersByIdentity = (list = []) => {
+  const map = new Map();
+  const score = (entry) => {
+    const hasPhone = Boolean(normalizeCustomerPhone(entry?.phone || entry?.mobile));
+    const hasName = Boolean(String(entry?.name || '').trim());
+    const updated = Date.parse(entry?.updated_at || entry?.updatedAt || entry?.created_at || entry?.createdAt || '') || 0;
+    return (hasPhone ? 10 : 0) + (hasName ? 5 : 0) + updated / 1e13;
+  };
+
+  (Array.isArray(list) ? list : []).forEach((entry) => {
+    const phone = normalizeCustomerPhone(entry?.phone || entry?.mobile);
+    const name = String(entry?.name || '').trim().toLowerCase();
+    const key = phone ? `p:${phone}` : `n:${name}`;
+    const existing = map.get(key);
+    if (!existing || score(entry) >= score(existing)) {
+      map.set(key, entry);
+    }
+  });
+
+  return Array.from(map.values());
+};
+
 export const getAllCustomers = async () => {
-  return await db.customers.toArray();
+  const all = await db.customers.toArray();
+  return dedupeCustomersByIdentity(all);
 };
 
 export const upsertCustomerLocal = async (customer) => {
@@ -2190,21 +2215,42 @@ export const upsertLocalExpense = async (expense) => {
 
 export const getLocalExpenses = async ({ type, staffId, from, to, category } = {}) => {
   const list = await db.expenses.toArray();
-  const fromDate = from ? new Date(from) : null;
-  const toDate = to ? new Date(to) : null;
+  const normalizeDateOnly = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      const maybeIso = new Date(trimmed);
+      if (!Number.isNaN(maybeIso.getTime())) {
+        const y = maybeIso.getFullYear();
+        const m = String(maybeIso.getMonth() + 1).padStart(2, '0');
+        const d = String(maybeIso.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+      return null;
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+  const fromDate = normalizeDateOnly(from);
+  const toDate = normalizeDateOnly(to);
   return list.filter((expense) => {
     if (type && String(expense.type) !== String(type)) return false;
     if (staffId && String(expense.staffId) !== String(staffId)) return false;
     if (category && String(expense.category || '').toLowerCase() !== String(category).toLowerCase()) {
       return false;
     }
-    if (fromDate && !Number.isNaN(fromDate.getTime())) {
-      const expDate = new Date(expense.date);
-      if (Number.isNaN(expDate.getTime()) || expDate < fromDate) return false;
+    const expenseDate = normalizeDateOnly(expense.date);
+    if (!expenseDate) return false;
+    if (fromDate && expenseDate < fromDate) {
+      return false;
     }
-    if (toDate && !Number.isNaN(toDate.getTime())) {
-      const expDate = new Date(expense.date);
-      if (Number.isNaN(expDate.getTime()) || expDate > toDate) return false;
+    if (toDate && expenseDate > toDate) {
+      return false;
     }
     return true;
   });

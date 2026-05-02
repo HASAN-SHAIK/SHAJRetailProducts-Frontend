@@ -1,5 +1,6 @@
 import {
   deleteOfflineOrdersByIds,
+  getAllBatchesCache,
   getOfflineOrders,
   getProductCacheByBarcode,
   getProductIdMappings,
@@ -191,7 +192,10 @@ const buildOfflineSyncOrder = (entry) => {
     client_created_at: payload.client_created_at || entry.createdAt,
     customer_name: payload.customer_name,
     customer_phone: payload.customer_phone || null,
-    customer_id: payload.customer_id || null,
+    customer_id:
+      payload.customer_id && !String(payload.customer_id).startsWith('temp:') && !String(payload.customer_id).startsWith('local:') && !String(payload.customer_id).startsWith('tmp:')
+        ? payload.customer_id
+        : null,
     billing_type: payload.billing_type || payload.billingType || null,
     customer_location: payload.customer_location,
     customer_address: payload.customer_address,
@@ -225,11 +229,31 @@ const resolveProductId = async (product, idMap) => {
   return rawId;
 };
 
+const resolveBatchId = async (product, resolvedProductId, allBatches = []) => {
+  const rawBatchId = product?.batch_id ?? product?.batchId ?? null;
+  if (!rawBatchId) return null;
+  if (!isTempId(rawBatchId)) return rawBatchId;
+
+  const batchNumber = String(product?.batch_number ?? product?.batchNumber ?? '').trim();
+  if (!batchNumber || !resolvedProductId) return null;
+
+  const matched = (Array.isArray(allBatches) ? allBatches : []).find((batch) => {
+    const batchId = batch?.id ?? null;
+    if (!batchId || isTempId(batchId)) return false;
+    return (
+      String(batch?.product_id ?? '') === String(resolvedProductId) &&
+      String(batch?.batch_number ?? '').trim() === batchNumber
+    );
+  });
+  return matched?.id ?? null;
+};
+
 const normalizeTempProductIds = async (entry) => {
   const payload = entry?.payload || {};
   const products = Array.isArray(payload.products) ? payload.products : [];
   if (!products.length) return entry;
   const mappings = await getProductIdMappings();
+  const allBatches = await getAllBatchesCache().catch(() => []);
   const idMap = new Map(
     (Array.isArray(mappings) ? mappings : [])
       .filter((m) => m?.tempId && m?.realId)
@@ -237,11 +261,15 @@ const normalizeTempProductIds = async (entry) => {
   );
   const updatedProducts = await Promise.all(
     products.map(async (item) => {
-      const nextId = await resolveProductId(item, idMap);
-      if (nextId === (item?.product_id ?? item?.productId)) return item;
+      const nextProductId = await resolveProductId(item, idMap);
+      const nextBatchId = await resolveBatchId(item, nextProductId, allBatches);
+      const currentProductId = item?.product_id ?? item?.productId;
+      const currentBatchId = item?.batch_id ?? item?.batchId ?? null;
+      if (nextProductId === currentProductId && nextBatchId === currentBatchId) return item;
       return {
         ...item,
-        product_id: nextId,
+        product_id: nextProductId,
+        batch_id: nextBatchId,
       };
     })
   );

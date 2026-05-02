@@ -19,7 +19,7 @@ const CustomerSidebar = ({ collapsed, onToggle }) => {
         </button>
       </div>
       <nav className="context-sidebar__nav">
-        <NavLink className="context-sidebar__link" to="/customers">
+        <NavLink className="context-sidebar__link" to="/customers" end>
           <span className="context-sidebar__link-text">Customers List</span>
         </NavLink>
         <NavLink className="context-sidebar__link" to="/customers/reorder">

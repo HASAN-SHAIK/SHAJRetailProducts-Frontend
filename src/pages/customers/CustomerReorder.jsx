@@ -2,7 +2,29 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/axios';
 import { getAllCustomers, upsertCustomersBulk } from '../../core/db';
+import { getCachedOrderItems, getCachedOrdersByCustomer } from '../../db/ordersDb';
 import './Customers.css';
+
+const toCustomerIdentity = (customer) => {
+  const phone = String(customer?.phone || customer?.mobile || '').replace(/\D/g, '');
+  const name = String(customer?.name || '').trim().toLowerCase();
+  if (phone && name) return `phone:${phone}|name:${name}`;
+  if (phone) return `phone:${phone}`;
+  const id = String(customer?.id || '').trim();
+  if (id) return `id:${id}`;
+  return `name:${name}`;
+};
+
+const dedupeCustomers = (list) => {
+  const safe = Array.isArray(list) ? list : [];
+  const seen = new Set();
+  return safe.filter((customer) => {
+    const key = toCustomerIdentity(customer);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 const formatDateTime = (value) => {
   if (!value) return '-';
@@ -20,6 +42,47 @@ const formatDateTime = (value) => {
 const toMoney = (value) => {
   const num = Number(value || 0);
   return Number.isFinite(num) ? num.toFixed(2) : '0.00';
+};
+
+const getOrderItemProductId = (item) =>
+  item?.product_id ?? item?.productId ?? item?.id ?? item?.barcode ?? null;
+
+const resolveOrderTotal = (order) => {
+  if (!order || typeof order !== 'object') return 0;
+  const directCandidates = [
+    order.total_price,
+    order.total_amount,
+    order.grand_total,
+    order.net_amount,
+    order.final_amount,
+    order.amount,
+  ];
+  for (const candidate of directCandidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+
+  const subtotal = Number(order.subtotal ?? order.subtotal_amount ?? 0);
+  const gst = Number(order.gst_total ?? order.tax_amount ?? order.tax_total ?? 0);
+  const discount = Number(order.discount ?? order.discount_amount ?? 0);
+  const computed = subtotal + gst - discount;
+  return Number.isFinite(computed) && computed > 0 ? computed : 0;
+};
+
+const isSyncedServerCustomerId = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  const lowered = text.toLowerCase();
+  if (
+    lowered.startsWith('temp:') ||
+    lowered.startsWith('temp_') ||
+    lowered.startsWith('local:') ||
+    lowered.startsWith('local_') ||
+    lowered.startsWith('tmp:')
+  ) {
+    return false;
+  }
+  return Number.isFinite(Number(text));
 };
 
 const CustomerReorder = () => {
@@ -50,20 +113,22 @@ const CustomerReorder = () => {
 
   const loadCustomersFromCache = useCallback(async (term = '') => {
     const list = await getAllCustomers();
-    const safe = Array.isArray(list) ? list : [];
+    const safe = dedupeCustomers(list);
     setCustomers(filterLocalCustomers(safe, term));
   }, [filterLocalCustomers]);
 
   const fetchCustomers = useCallback(async (term = '') => {
     setLoadingCustomers(true);
     try {
-      await loadCustomersFromCache(term);
-      if (!navigator.onLine) return;
+      const cachedList = dedupeCustomers(await getAllCustomers());
+      const filteredCached = filterLocalCustomers(cachedList, term);
+      setCustomers(filteredCached);
+      if (filteredCached.length || !navigator.onLine) return;
       const res = await api.get('/customers', {
         params: term ? { search: term } : { limit: 500 },
       });
       const list = res?.data?.data?.customers || res?.data?.customers || [];
-      const safe = Array.isArray(list) ? list : [];
+      const safe = dedupeCustomers(list);
       if (safe.length) {
         setCustomers(filterLocalCustomers(safe, term));
         upsertCustomersBulk(safe).catch(() => {});
@@ -73,9 +138,33 @@ const CustomerReorder = () => {
     } finally {
       setLoadingCustomers(false);
     }
-  }, [filterLocalCustomers, loadCustomersFromCache]);
+  }, [filterLocalCustomers]);
 
-  const fetchCustomerOrders = async (customerId) => {
+  const loadCustomerOrdersFromCache = useCallback(async (customer) => {
+    if (!customer) return [];
+    try {
+      const cached = await getCachedOrdersByCustomer(customer);
+      const list = Array.isArray(cached) ? cached : [];
+      return list
+        .slice()
+        .sort((a, b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const loadOrderItemsFromCache = useCallback(async (orderId) => {
+    if (!orderId) return [];
+    try {
+      const cached = await getCachedOrderItems(orderId);
+      return Array.isArray(cached) ? cached : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const loadOrdersForCustomer = useCallback(async (customer, { preferApi = true } = {}) => {
+    const customerId = customer?.id;
     if (!customerId) return;
     setLoadingOrders(true);
     setError('');
@@ -84,35 +173,87 @@ const CustomerReorder = () => {
     setOrderItems([]);
     setSelectedProductIds(new Set());
     try {
+      const cachedOrders = await loadCustomerOrdersFromCache(customer);
+      if (cachedOrders.length) {
+        setOrders(cachedOrders);
+      }
+      const shouldFallbackToApi =
+        !cachedOrders.length && preferApi && navigator.onLine && isSyncedServerCustomerId(customerId);
+      if (!shouldFallbackToApi) {
+        return;
+      }
       const res = await api.get(`/customers/${customerId}`);
       const payload = res?.data?.data || res?.data || {};
-      const list = Array.isArray(payload?.orders) ? payload.orders : [];
-      setOrders(list);
+      const apiOrders = Array.isArray(payload?.orders) ? payload.orders : [];
+      if (apiOrders.length) {
+        setOrders(apiOrders);
+      } else if (!cachedOrders.length) {
+        setOrders([]);
+      }
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to load customer orders.');
+      const fallbackOrders = await loadCustomerOrdersFromCache(customer);
+      if (fallbackOrders.length) {
+        setOrders(fallbackOrders);
+        setError('Showing cached orders (offline/local data).');
+      } else {
+        setError(err?.response?.data?.message || 'Failed to load customer orders.');
+      }
     } finally {
       setLoadingOrders(false);
     }
-  };
+  }, [loadCustomerOrdersFromCache]);
 
-  const fetchOrderItems = async (orderId) => {
+  const loadItemsForOrder = useCallback(async (order, { preferApi = false } = {}) => {
+    const orderId = order?.id;
     if (!orderId) return;
     setLoadingOrderItems(true);
     setError('');
     setOrderItems([]);
     setSelectedProductIds(new Set());
     try {
+      const embeddedItems = Array.isArray(order?.items)
+        ? order.items
+        : Array.isArray(order?.products)
+          ? order.products
+          : [];
+      if (embeddedItems.length) {
+        setOrderItems(embeddedItems);
+        setSelectedProductIds(new Set(embeddedItems.map((item) => String(getOrderItemProductId(item)))));
+      }
+
+      const cachedItems = await loadOrderItemsFromCache(orderId);
+      if (cachedItems.length) {
+        setOrderItems(cachedItems);
+        setSelectedProductIds(new Set(cachedItems.map((item) => String(getOrderItemProductId(item)))));
+      }
+      const shouldFallbackToApi =
+        !cachedItems.length && preferApi && navigator.onLine && Number.isFinite(Number(orderId));
+      if (!shouldFallbackToApi) {
+        return;
+      }
       const res = await api.get(`/orders/${orderId}`);
-      const order = res?.data?.order || {};
-      const items = Array.isArray(order?.items) ? order.items : [];
-      setOrderItems(items);
-      setSelectedProductIds(new Set(items.map((item) => String(item.product_id))));
+      const fetchedOrder = res?.data?.order || {};
+      const apiItems = Array.isArray(fetchedOrder?.items) ? fetchedOrder.items : [];
+      if (apiItems.length) {
+        setOrderItems(apiItems);
+        setSelectedProductIds(new Set(apiItems.map((item) => String(getOrderItemProductId(item)))));
+      } else if (!cachedItems.length) {
+        setOrderItems([]);
+        setSelectedProductIds(new Set());
+      }
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to load order items.');
+      const fallbackItems = await loadOrderItemsFromCache(orderId);
+      if (fallbackItems.length) {
+        setOrderItems(fallbackItems);
+        setSelectedProductIds(new Set(fallbackItems.map((item) => String(getOrderItemProductId(item)))));
+        setError('Showing cached order items (offline/local data).');
+      } else {
+        setError(err?.response?.data?.message || 'Failed to load order items.');
+      }
     } finally {
       setLoadingOrderItems(false);
     }
-  };
+  }, [loadOrderItemsFromCache]);
 
   useEffect(() => {
     setLoadingCustomers(true);
@@ -136,14 +277,14 @@ const CustomerReorder = () => {
   }, [search, fetchCustomers, loadCustomersFromCache]);
 
   const selectedItems = useMemo(
-    () => orderItems.filter((item) => selectedProductIds.has(String(item.product_id))),
+    () => orderItems.filter((item) => selectedProductIds.has(String(getOrderItemProductId(item)))),
     [orderItems, selectedProductIds]
   );
 
   const handleCustomerPick = (customer) => {
     setSelectedCustomer(customer || null);
     if (customer?.id) {
-      fetchCustomerOrders(customer.id);
+      loadOrdersForCustomer(customer, { preferApi: isSyncedServerCustomerId(customer.id) });
     } else {
       setOrders([]);
       setSelectedOrder(null);
@@ -155,7 +296,7 @@ const CustomerReorder = () => {
   const handleOrderPick = (order) => {
     setSelectedOrder(order || null);
     if (order?.id) {
-      fetchOrderItems(order.id);
+      loadItemsForOrder(order, { preferApi: false });
     } else {
       setOrderItems([]);
       setSelectedProductIds(new Set());
@@ -174,9 +315,11 @@ const CustomerReorder = () => {
 
   const handleStartReorder = () => {
     if (!selectedCustomer?.id || !selectedOrder?.id || !selectedItems.length) return;
-    const reorderProducts = selectedItems.map((item) => ({
-      id: item.product_id,
-      product_id: item.product_id,
+    const reorderProducts = selectedItems.map((item) => {
+      const productId = getOrderItemProductId(item);
+      return {
+      id: productId,
+      product_id: productId,
       product_name: item.product_name || '',
       quantity: String(item.remaining_quantity ?? item.quantity ?? 1),
       selling_price: String(item.selling_price ?? 0),
@@ -184,11 +327,13 @@ const CustomerReorder = () => {
       gst_percentage: Number(item.gst_percent || 0),
       is_weight_based: item.is_weight_based ? 1 : 0,
       suggestions: [],
-    }));
+    };
+    }).filter((item) => item.product_id !== null && item.product_id !== undefined && String(item.product_id).trim() !== '');
 
-    navigate('/orders/create', {
+    navigate('/billing/retail', {
       state: {
         reorderPrefill: {
+          prefillId: `reorder:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
           sourceOrderId: selectedOrder.id,
           customer: {
             id: selectedCustomer.id,
@@ -239,9 +384,17 @@ const CustomerReorder = () => {
                     String(selectedCustomer?.id) === String(customer.id) ? 'active' : ''
                   }`}
                   onClick={() => handleCustomerPick(customer)}
+                  title={
+                    isSyncedServerCustomerId(customer?.id)
+                      ? ''
+                      : 'This customer is local/offline and not yet synced'
+                  }
                 >
                   <span className="title">{customer.name || 'Unnamed Customer'}</span>
-                  <span className="meta">{customer.phone || customer.mobile || '-'}</span>
+                  <span className="meta">
+                    {customer.phone || customer.mobile || '-'}
+                    {!isSyncedServerCustomerId(customer?.id) ? ' | Pending Sync' : ''}
+                  </span>
                 </button>
               ))}
             </div>
@@ -270,7 +423,7 @@ const CustomerReorder = () => {
                 >
                   <span className="title">Order #{order.id}</span>
                   <span className="meta">
-                    INR {toMoney(order.total_price)} | {formatDateTime(order.created_at)}
+                    INR {toMoney(resolveOrderTotal(order))} | {formatDateTime(order.created_at)}
                   </span>
                 </button>
               ))}

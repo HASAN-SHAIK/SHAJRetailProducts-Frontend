@@ -8,6 +8,7 @@ import {
   getProductCacheById,
   getSupplierCacheById,
   updateProductsBulk,
+  updateBatchesBulk,
   updateSuppliersCacheBulk,
   deleteProductsCacheByIds,
   deleteSuppliersCacheByIds,
@@ -35,6 +36,7 @@ let isSyncing = false;
 let syncRerunRequested = false;
 
 const nowIso = () => new Date().toISOString();
+const isNumericId = (value) => Number.isFinite(Number(value));
 
 const normalizeStatus = (value) => {
   const normalized = String(value || '').toLowerCase();
@@ -326,12 +328,41 @@ const syncPurchaseEntry = async (entry) => {
     expiry_date: item.expiry_date || null,
   }));
   const response = await api.post('/purchases', {
+    type: 'purchase',
+    order_type: 'purchase',
+    source_type: 'purchase',
+    transaction_type: 'purchase',
+    billing_type: 'purchase',
     branch_id: purchase.branchId ?? purchase.branch_id ?? null,
     supplier_id: purchase.supplierId ?? purchase.supplier_id ?? null,
     invoice_number: purchase.invoiceNumber ?? purchase.invoice_number ?? null,
     payment_mode: purchase.paymentMode ?? purchase.payment_mode ?? null,
     items: payloadItems,
   });
+  const responseData = response?.data?.data || response?.data || {};
+  const createdBatches = Array.isArray(responseData?.batches) ? responseData.batches : [];
+  if (createdBatches.length) {
+    const batchesForCache = createdBatches.map((batch) => ({
+      id: batch?.id,
+      product_id: batch?.product_id ?? null,
+      branch_id: batch?.branch_id ?? (purchase.branchId ?? purchase.branch_id ?? null),
+      batch_number: batch?.batch_number ?? null,
+      expiry_date: batch?.expiry_date ?? null,
+      purchase_price: batch?.purchase_price ?? null,
+      selling_price: batch?.selling_price ?? null,
+      mrp: batch?.mrp ?? null,
+      quantity: Number(batch?.quantity ?? 0),
+      quantity_remaining: Number(batch?.quantity_remaining ?? batch?.quantity ?? 0),
+      purchase_order_id: responseData?.order_id ?? null,
+      is_deleted: false,
+      updated_at: batch?.updated_at ?? nowIso(),
+      created_at: batch?.created_at ?? nowIso(),
+      sync_status: 'synced',
+    })).filter((batch) => batch.id);
+    if (batchesForCache.length) {
+      await updateBatchesBulk(batchesForCache).catch(() => {});
+    }
+  }
   const serverId = resolveServerId(response);
   await setPurchaseSyncStatus(entry.entityId, 'synced', {
     serverId: serverId ?? purchase.serverId ?? null,
@@ -352,7 +383,9 @@ const syncPurchaseReturnEntry = async (entry) => {
     const purchase = await getLocalPurchaseById(purchaseId);
     if (purchase && purchase.serverId) {
       returnEntry.purchaseId = purchase.serverId;
-    } else if (String(purchaseId).startsWith('temp_')) {
+    } else if (purchase && !purchase.serverId) {
+      throw new Error('purchase_not_synced');
+    } else if (!isNumericId(purchaseId)) {
       throw new Error('purchase_not_synced');
     }
   }
@@ -395,6 +428,9 @@ const syncAccountingEntry = async (entry) => {
     amount: Number(txn.amount ?? txn.total_price ?? 0),
     payment_mode: txn.payment_mode || 'cash',
     notes: txn.notes || null,
+    order_id: txn.order_id || txn.orderId || null,
+    date: txn.date || txn.created_at || null,
+    client_txn_id: txn.client_txn_id || txn.clientTxnId || String(txn.id || ''),
   };
   if (txnType === 'receipt') {
     payload.customer_id = txn.party_id || txn.partyId;

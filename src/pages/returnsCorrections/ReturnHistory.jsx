@@ -1,19 +1,40 @@
-﻿import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
 import { getLocalSalesReturns } from '../../core/db';
+import { fetchReturns } from '../../services/returnsCorrectionsApi';
 import './ReturnsCorrections.css';
 
 const ReturnHistory = () => {
   const [returns, setReturns] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   const loadReturns = useCallback(async () => {
-    const list = await getLocalSalesReturns();
-    setReturns(list);
+    setIsLoading(true);
+    try {
+      if (navigator.onLine) {
+        try {
+          const serverRows = await fetchReturns();
+          setReturns(
+            serverRows.map((row) => ({
+              ...row,
+              isSynced: true,
+            }))
+          );
+          return;
+        } catch {
+          // fallback to local cache
+        }
+      }
+      const list = await getLocalSalesReturns();
+      setReturns(list);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     loadReturns();
-  }, [loadReturns]);
+  }, []);
 
   useEffect(() => {
     const handler = () => loadReturns();
@@ -37,7 +58,14 @@ const ReturnHistory = () => {
             </tr>
           </thead>
           <tbody>
-            {returns.length === 0 && (
+            {isLoading && (
+              <tr>
+                <td colSpan={6} className="text-center text-secondary">
+                  Loading returns...
+                </td>
+              </tr>
+            )}
+            {!isLoading && returns.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center text-secondary">
                   No returns yet.
@@ -45,7 +73,7 @@ const ReturnHistory = () => {
               </tr>
             )}
             {returns.map((row) => (
-              <tr key={row.returnId}>
+              <tr key={row.returnId || row.returnDbId}>
                 <td>{row.isSynced ? 'Synced' : 'Not Synced'}</td>
                 <td>{row.returnId}</td>
                 <td>{row.originalBillId}</td>
@@ -62,4 +90,3 @@ const ReturnHistory = () => {
 };
 
 export default ReturnHistory;
-

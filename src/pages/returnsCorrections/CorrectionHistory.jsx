@@ -1,14 +1,30 @@
-﻿import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
 import { getLocalCorrections } from '../../core/db';
+import { fetchCorrections } from '../../services/returnsCorrectionsApi';
 import './ReturnsCorrections.css';
 
 const CorrectionHistory = () => {
   const [corrections, setCorrections] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   const loadCorrections = useCallback(async () => {
-    const list = await getLocalCorrections();
-    setCorrections(list);
+    setIsLoading(true);
+    try {
+      if (navigator.onLine) {
+        try {
+          const rows = await fetchCorrections();
+          setCorrections(rows.map((row) => ({ ...row, isSynced: true })));
+          return;
+        } catch {
+          // fallback to local cache
+        }
+      }
+      const list = await getLocalCorrections();
+      setCorrections(list);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -38,7 +54,14 @@ const CorrectionHistory = () => {
             </tr>
           </thead>
           <tbody>
-            {corrections.length === 0 && (
+            {isLoading && (
+              <tr>
+                <td colSpan={7} className="text-center text-secondary">
+                  Loading corrections...
+                </td>
+              </tr>
+            )}
+            {!isLoading && corrections.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center text-secondary">
                   No corrections yet.
@@ -64,4 +87,3 @@ const CorrectionHistory = () => {
 };
 
 export default CorrectionHistory;
-

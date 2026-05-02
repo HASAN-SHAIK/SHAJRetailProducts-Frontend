@@ -24,6 +24,7 @@ const emptyRow = () => ({
   mrp: '',
   qty: '',
   purchase_price: '',
+  discount: '',
   selling_price: '',
   gst_percent: '',
   batch_number: '',
@@ -68,6 +69,27 @@ const normalizeSpaces = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const parseDiscountInput = (rawValue, baseAmount = 0) => {
+  const text = String(rawValue ?? '').trim();
+  if (!text) return { amount: 0, type: 'value', value: 0, valid: true };
+  const isPercent = text.endsWith('%');
+  const numericText = isPercent ? text.slice(0, -1).trim() : text;
+  const parsed = Number(numericText);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { amount: 0, type: isPercent ? 'percent' : 'value', value: parsed, valid: false };
+  }
+  if (isPercent) {
+    const safePercent = Math.min(parsed, 100);
+    return {
+      amount: (Number(baseAmount || 0) * safePercent) / 100,
+      type: 'percent',
+      value: safePercent,
+      valid: true,
+    };
+  }
+  return { amount: parsed, type: 'value', value: parsed, valid: true };
+};
+
 const parseInvoiceTextItems = (text) => {
   const lines = String(text || '')
     .split(/\r?\n/)
@@ -92,6 +114,27 @@ const parseInvoiceTextItems = (text) => {
   const parsed = [];
   for (const line of lines) {
     const lowered = line.toLowerCase();
+    const tableRow = line.match(
+      /^\s*(\d+)\s+([A-Za-z0-9-]+)\s+(.+?)\s+(\d{4,8})\s+(\d+(?:\.\d+)?)\s+([A-Za-z]+)\s+(\d+(?:\.\d{1,2})?)\s+(\d+(?:\.\d{1,2})?)%?\s+(\d+(?:\.\d{1,2})?)\s*$/
+    );
+    if (tableRow) {
+      const name = normalizeSpaces(tableRow[3]);
+      const qty = Number(tableRow[5]);
+      const rate = Number(tableRow[7]);
+      const gst = Number(tableRow[8]);
+      const amount = Number(tableRow[9]);
+      if (!name || !Number.isFinite(qty) || !Number.isFinite(rate)) continue;
+      parsed.push({
+        name,
+        quantity: qty,
+        purchase_price: rate,
+        selling_price: rate,
+        gst_percent: Number.isFinite(gst) ? gst : 0,
+        hsn_code: tableRow[4] || null,
+        line_total: Number.isFinite(amount) ? amount : qty * rate,
+      });
+      continue;
+    }
     if (banned.some((word) => lowered.includes(word))) continue;
     if (!/\d/.test(line)) continue;
 
@@ -110,6 +153,8 @@ const parseInvoiceTextItems = (text) => {
         name,
         quantity: qty,
         purchase_price: rate,
+        selling_price: rate,
+        gst_percent: 0,
         line_total: Number.isFinite(amount) ? amount : qty * rate,
       });
       continue;
@@ -125,6 +170,8 @@ const parseInvoiceTextItems = (text) => {
         name,
         quantity: qty,
         purchase_price: rate,
+        selling_price: rate,
+        gst_percent: 0,
         line_total: qty * rate,
       });
     }
@@ -137,7 +184,8 @@ const parseInvoiceMetaFromText = (text) => {
   const source = String(text || '');
   const invoiceMatch =
     source.match(/invoice\s*(?:no|#|number)\s*[:-]?\s*([A-Za-z0-9/-]+)/i) ||
-    source.match(/\binv\s*(?:no|#)\s*[:-]?\s*([A-Za-z0-9/-]+)/i);
+    source.match(/\binv\s*(?:no|#)\s*[:-]?\s*([A-Za-z0-9/-]+)/i) ||
+    source.match(/\bpo\s*(?:no|#|number)\s*[:-]?\s*([A-Za-z0-9/-]+)/i);
   return {
     invoice_number: invoiceMatch?.[1] || '',
   };
@@ -169,7 +217,6 @@ const Purchase = () => {
   const [rowSuggestions, setRowSuggestions] = useState({});
   const [searchLoadingIndex, setSearchLoadingIndex] = useState(null);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
-  const [syncIssueSummary, setSyncIssueSummary] = useState([]);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [importFile, setImportFile] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -188,15 +235,6 @@ const Purchase = () => {
     const purchaseEntries = (Array.isArray(queue) ? queue : [])
       .filter((entry) => entry?.type === 'purchase')
       .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
-    const summary = purchaseEntries
-      .map((entry) => ({
-        id: entry.entityId,
-        status: entry.status || 'pending',
-        reason: entry.last_error || null,
-        retries: entry.retries || 0,
-      }))
-      .slice(0, 4);
-    setSyncIssueSummary(summary);
     return purchaseEntries;
   };
 
@@ -221,7 +259,6 @@ const Purchase = () => {
 
   const addRow = () => {
     setRows((prev) => [...prev, emptyRow()]);
-    showPopup('Row added.', 'Info');
   };
   const removeRow = (index) => {
     setRows((prev) => prev.filter((_, idx) => idx !== index));
@@ -278,6 +315,7 @@ const Purchase = () => {
       mrp: item.mrp || '',
       qty: item.quantity || item.qty || '',
       purchase_price: item.purchase_price || '',
+      discount: item.discount ?? item.discount_amount ?? '',
       selling_price: item.selling_price || '',
       gst_percent: item.gst_percent || item.gstPercent || '',
       batch_number: item.batch_number || item.batchNo || '',
@@ -406,7 +444,7 @@ const Purchase = () => {
         } else {
           const first = purchaseEntries[0];
           showPopup(
-            `Purchase sync still pending. ${first?.last_error ? `Reason: ${first.last_error}` : 'Check sync notes below.'}`,
+            `Purchase sync still pending. ${first?.last_error ? `Reason: ${first.last_error}` : 'Check Sync Center for details.'}`,
             'Sync'
           );
         }
@@ -524,6 +562,7 @@ const Purchase = () => {
         row.mrp,
         row.qty,
         row.purchase_price,
+        row.discount,
         row.selling_price,
         row.gst_percent,
         row.batch_number,
@@ -544,6 +583,8 @@ const Purchase = () => {
         row.selling_price === '' || row.selling_price === null || row.selling_price === undefined
           ? null
           : Number(row.selling_price);
+      const baseAmount = quantity * purchasePrice;
+      const discountMeta = parseDiscountInput(row.discount, baseAmount);
       const gstPercent =
         row.gst_percent === '' || row.gst_percent === null || row.gst_percent === undefined
           ? 0
@@ -569,6 +610,11 @@ const Purchase = () => {
         nextRowFieldErrors[rowKey].selling_price = 'Selling price must be >= 0.';
         rowHasError = true;
       }
+      if (!discountMeta.valid) {
+        rowErrors.push(`Row ${rowNumber}: Discount must be value (e.g. 50) or percent (e.g. 5%).`);
+        nextRowFieldErrors[rowKey].discount = 'Use value (50) or percent (5%).';
+        rowHasError = true;
+      }
       if (!Number.isFinite(gstPercent) || gstPercent < 0) {
         rowErrors.push(`Row ${rowNumber}: GST % must be >= 0.`);
         nextRowFieldErrors[rowKey].gst_percent = 'GST % must be >= 0.';
@@ -587,6 +633,9 @@ const Purchase = () => {
         batch_number: batchNumber || undefined,
         quantity,
         purchase_price: purchasePrice,
+        discount: discountMeta.amount,
+        discount_type: discountMeta.type,
+        discount_value: discountMeta.value,
         selling_price: sellingPrice ?? 0,
         gst_percent: gstPercent,
         expiry_date: row.expiry_date || null,
@@ -612,6 +661,11 @@ const Purchase = () => {
     }
 
     const payload = {
+      type: 'purchase',
+      order_type: 'purchase',
+      source_type: 'purchase',
+      transaction_type: 'purchase',
+      billing_type: 'purchase',
       branch_id: effectiveBranchId,
       supplier_id: supplierId,
       invoice_number: invoiceNumber || null,
@@ -622,6 +676,19 @@ const Purchase = () => {
 
     setIsSaving(true);
     try {
+      if (String(paymentMode || '').toLowerCase() === 'credit') {
+        if (!navigator.onLine) {
+          showPopup('Credit purchase requires server connection. Please go online and retry.', 'Validation');
+          return;
+        }
+        await api.post('/purchases', payload);
+        showPopup('Credit purchase saved on server.', 'Success');
+        setRows([emptyRow()]);
+        setInvoiceNumber('');
+        await refreshPendingSummary();
+        return;
+      }
+
       await enqueueOfflinePurchase(payload);
       showPopup('Saved offline. Will sync in background.', 'Offline');
       setRows([emptyRow()]);
@@ -642,8 +709,21 @@ const Purchase = () => {
   const totalAmount = useMemo(() => rows.reduce((sum, row) => {
     const qty = Number(row.qty || 0);
     const price = Number(row.purchase_price || 0);
-    return sum + qty * price;
+    const baseAmount = qty * price;
+    const discountMeta = parseDiscountInput(row.discount, baseAmount);
+    const gstPercent =
+      row.gst_percent === '' || row.gst_percent === null || row.gst_percent === undefined
+        ? 0
+        : Number(row.gst_percent);
+    const gstAmount = Number.isFinite(gstPercent) ? (baseAmount * gstPercent) / 100 : 0;
+    const line = Math.max(baseAmount + gstAmount - (discountMeta.amount || 0), 0);
+    return sum + line;
   }, 0), [rows]);
+  const syncStatusLabel = isSyncingNow
+    ? 'Syncing...'
+    : pendingSyncCount > 0
+    ? `Pending Sync: ${pendingSyncCount}`
+    : '';
 
   return (
     <div className="billing-page">
@@ -652,15 +732,12 @@ const Purchase = () => {
           <div className="d-flex align-items-center gap-2">
             <h5 className="mb-0">Purchase</h5>
             {isOffline && <span className="badge bg-warning text-dark">Offline Mode</span>}
-            {pendingSyncCount > 0 && (
-              <span className="badge bg-info text-dark">Pending Sync: {pendingSyncCount}</span>
+            {syncStatusLabel && (
+              <span className={`badge ${isSyncingNow ? 'bg-secondary' : 'bg-info text-dark'}`}>{syncStatusLabel}</span>
             )}
-            {isSyncingNow && (
-              <span className="badge bg-secondary">Syncing...</span>
-            )}
-            {(pendingSyncCount > 0 || syncIssueSummary.length > 0 || isSyncingNow) && (
+            {(pendingSyncCount > 0 || isSyncingNow) && (
               <button className="btn btn-outline-info btn-sm" type="button" onClick={handleSyncNow} disabled={isSyncingNow}>
-                {isSyncingNow ? 'Syncing...' : 'Sync Now'}
+                Sync Now
               </button>
             )}
           </div>
@@ -724,23 +801,11 @@ const Purchase = () => {
             onChange={(event) => setPaymentMode(event.target.value)}
           >
             <option value="cash">Cash</option>
+            <option value="bank">Bank</option>
             <option value="credit">Credit</option>
             <option value="online">Online</option>
           </select>
         </div>
-        {syncIssueSummary.length > 0 && (
-          <div className="alert alert-warning py-2 px-3 mt-2 mb-2">
-            <strong>Sync Notes:</strong>
-            <div className="small mt-1">
-              {syncIssueSummary.map((entry, idx) => (
-                <div key={`${entry.id}-${idx}`}>
-                  {idx + 1}. {entry.id} ({entry.status}{entry.retries ? `, retry ${entry.retries}` : ''})
-                  {entry.reason ? ` - ${entry.reason}` : ''}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
         <div className="billing-table-wrapper">
           <table className="billing-table purchase-entry-table">
             <thead>
@@ -753,6 +818,7 @@ const Purchase = () => {
                 <th>MRP</th>
                 <th>Qty</th>
                 <th>Cost Price</th>
+                <th>Discount</th>
                 <th>Selling Price</th>
                 <th>GST %</th>
                 <th>Batch No</th>
@@ -870,6 +936,16 @@ const Purchase = () => {
                   </td>
                   <td>
                     <input
+                      className={`form-control billing-input ${rowFieldErrors[String(idx)]?.discount ? 'is-invalid' : ''}`}
+                      type="text"
+                      placeholder="50 or 5%"
+                      value={row.discount}
+                      onChange={(event) => updateRow(idx, { discount: event.target.value })}
+                    />
+                    {rowFieldErrors[String(idx)]?.discount && <small className="text-danger">{rowFieldErrors[String(idx)].discount}</small>}
+                  </td>
+                  <td>
+                    <input
                       className={`form-control billing-input ${rowFieldErrors[String(idx)]?.selling_price ? 'is-invalid' : ''}`}
                       type="number"
                       min="0"
@@ -912,7 +988,7 @@ const Purchase = () => {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="billing-empty">No items yet.</td>
+                  <td colSpan={14} className="billing-empty">No items yet.</td>
                 </tr>
               )}
             </tbody>

@@ -9,6 +9,7 @@ const EwayBill = () => {
   const { showPopup } = usePopup();
   const [orders, setOrders] = useState([]);
   const [ewayBills, setEwayBills] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [form, setForm] = useState({
     billId: '',
     transportDetails: '',
@@ -17,6 +18,17 @@ const EwayBill = () => {
     generatedNumber: '',
     status: 'pending',
   });
+  const getBillOptionLabel = (order) => {
+    const status = String(order?.order_status || '').toLowerCase();
+    const returnedAmount = Number(order?.returned_amount || 0);
+    const totalAmount = Number(order?.total_amount || order?.total_price || 0);
+    const isFullyReturned = status === 'returned' || (totalAmount > 0 && returnedAmount >= totalAmount);
+    const isPartiallyReturned =
+      status === 'partially_returned' || (!isFullyReturned && returnedAmount > 0);
+    if (isFullyReturned) return `Bill #${order.id} (Returned)`;
+    if (isPartiallyReturned) return `Bill #${order.id} (Partially Returned)`;
+    return `Bill #${order.id}`;
+  };
 
   const loadOrders = useCallback(async () => {
     const list = await db.orders.toArray();
@@ -24,8 +36,13 @@ const EwayBill = () => {
   }, []);
 
   const loadEways = useCallback(async () => {
-    const list = await getLocalEwayBills();
-    setEwayBills(list);
+    setIsLoading(true);
+    try {
+      const list = await getLocalEwayBills();
+      setEwayBills(list);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -63,7 +80,7 @@ const EwayBill = () => {
       updatedAt: new Date().toISOString(),
     };
     await upsertLocalEwayBill(payload);
-    showPopup('Saved Offline', 'Offline');
+    showPopup('E-way bill saved successfully.', 'Success');
     setForm((prev) => ({
       ...prev,
       transportDetails: '',
@@ -86,7 +103,7 @@ const EwayBill = () => {
                 <option value="">Select bill</option>
                 {orders.map((order) => (
                   <option key={order.id} value={order.id}>
-                    Bill #{order.id}
+                    {getBillOptionLabel(order)}
                   </option>
                 ))}
               </select>
@@ -138,7 +155,14 @@ const EwayBill = () => {
             </tr>
           </thead>
           <tbody>
-            {ewayBills.length === 0 && (
+            {isLoading && (
+              <tr>
+                <td colSpan={5} className="text-center text-secondary">
+                  Loading e-way bills...
+                </td>
+              </tr>
+            )}
+            {!isLoading && ewayBills.length === 0 && (
               <tr>
                 <td colSpan={5} className="text-center text-secondary">
                   No e-way bills.

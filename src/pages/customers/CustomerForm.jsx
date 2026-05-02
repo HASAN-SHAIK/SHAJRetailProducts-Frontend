@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../utils/axios';
-import { getCustomerById, upsertCustomersBulk } from '../../core/db';
+import { addSyncQueueItem, getCustomerById, replaceCustomerIdReferences, upsertCustomersBulk } from '../../core/db';
+import { syncAllCustomers } from '../../utils/customersSync';
 import './Customers.css';
 
 const defaultForm = {
@@ -91,24 +92,57 @@ const CustomerForm = () => {
     setError('');
     try {
       const payload = { ...form };
+      const nowIso = new Date().toISOString();
+      const localId = isEdit ? id : `temp:${Date.now()}`;
+      const localCustomer = {
+        ...payload,
+        id: localId,
+        mobile: payload.phone || payload.mobile || '',
+        updated_at: nowIso,
+      };
+      await upsertCustomersBulk([localCustomer]);
+
       let savedCustomer = null;
       let response = null;
-      if (isEdit) {
-        response = await api.put(`/customers/${id}`, payload);
-        savedCustomer = response?.data?.data?.customer || response?.data?.customer || response?.data?.data || null;
-      } else {
-        response = await api.post('/customers', payload);
-        savedCustomer = response?.data?.data?.customer || response?.data?.customer || response?.data?.data || null;
+      let synced = false;
+
+      if (navigator.onLine) {
+        try {
+          if (isEdit) {
+            response = await api.put(`/customers/${id}`, payload);
+            savedCustomer = response?.data?.data?.customer || response?.data?.customer || response?.data?.data || null;
+          } else {
+            response = await api.post('/customers', payload);
+            savedCustomer = response?.data?.data?.customer || response?.data?.customer || response?.data?.data || null;
+          }
+          synced = true;
+        } catch {
+          synced = false;
+        }
       }
-      if (!savedCustomer) {
+
+      if (synced && !savedCustomer) {
         const possibleId = response?.data?.data?.id || response?.data?.id || null;
         if (possibleId) {
           savedCustomer = { ...payload, id: possibleId };
         }
       }
-      if (savedCustomer) {
+
+      if (synced && savedCustomer) {
+        if (!isEdit && savedCustomer?.id && String(savedCustomer.id) !== String(localId)) {
+          await replaceCustomerIdReferences(localId, savedCustomer.id).catch(() => {});
+        }
         upsertCustomersBulk([savedCustomer]).catch(() => {});
+      } else {
+        await addSyncQueueItem({
+          type: 'customer',
+          entityId: localId,
+          action: isEdit ? 'update' : 'create',
+          payload,
+        });
+        syncAllCustomers().catch(() => {});
       }
+
       navigate('/customers');
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to save customer');

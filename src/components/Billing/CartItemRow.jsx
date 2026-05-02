@@ -10,6 +10,7 @@ const CartItemRow = ({
   onGstChange,
   onRemove,
   canRevealActualPrice = false,
+  canEditPrice = true,
 }) => {
   const lineTotal = Number(item.lineTotal ?? item.total ?? 0);
   const baseTotal = Number(item.basePrice ?? item.base_price ?? item.price * item.qty);
@@ -73,8 +74,13 @@ const CartItemRow = ({
             type="number"
             min="0"
             value={item.price}
+            readOnly={!canEditPrice}
+            disabled={!canEditPrice}
             onClick={(event) => event.stopPropagation()}
-            onChange={(event) => onPriceChange(item.key, event.target.value)}
+            onChange={(event) => {
+              if (!canEditPrice) return;
+              onPriceChange(item.key, event.target.value);
+            }}
           />
           {canRevealActualPrice && (
             <div className="billing-actual-price-row">

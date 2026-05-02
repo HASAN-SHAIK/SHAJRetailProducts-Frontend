@@ -8,7 +8,7 @@ import { isFeatureEnabled } from '../../../utils/entitlements';
 import { ThemeContext } from '../../../ThemeContext';
 
 
-const Navbar = () => {
+const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
@@ -61,6 +61,8 @@ const Navbar = () => {
   })();
   const canSelectAllBranches =
     String(userRole || '').toLowerCase() === 'admin' || userDetails?.all_branch_access !== false;
+  const isStaffUser =
+    String(userDetails?.role || userRole || '').toLowerCase() === 'staff';
 
   useEffect(() => {
     if (!branchOpen) return;
@@ -112,9 +114,9 @@ const Navbar = () => {
 
   const hasSecondaryActive =
     isActive('/customers') ||
-    isActive('/staff-expenses') ||
-    isActive('/accounts') ||
-    isActive('/returns-corrections') ||
+    (!isStaffUser && isActive('/staff-expenses')) ||
+    (!isStaffUser && isActive('/accounts')) ||
+    (!isStaffUser && isActive('/returns-corrections')) ||
     isActive('/sync-center');
 
   const detectWrapOrOverflow = useCallback(() => {
@@ -282,7 +284,7 @@ const Navbar = () => {
             </div>
             <div className="nav-actions-right" ref={navActionsRightRef}>
             <div className="nav-main-links">
-              {reportsEnabled && (
+              {reportsEnabled && isOpeningCompleted && (
                 <button className={`btn btn-outline-primary nav-pill${isActive('/dashboard') ? ' active' : ''}`} onClick={() => navigateTo('/dashboard')}>
                   <span className="nav-pill-content">
                     <i className="bi bi-speedometer2 fs-6" aria-hidden="true" />
@@ -290,18 +292,22 @@ const Navbar = () => {
                   </span>
                 </button>
               )}
+              {isOpeningCompleted && (
               <button className={`btn btn-outline-primary nav-pill${isActive('/orders') ? ' active' : ''}`} onClick={() => navigateTo('/orders')}>
                 <span className="nav-pill-content">
                   <i className="bi bi-collection fs-6" aria-hidden="true" />
                   <span className="nav-pill-label">Orders</span>
                 </span>
               </button>
+              )}
+              {isOpeningCompleted && (
               <button className={`btn btn-outline-primary nav-pill${isActive('/billing') ? ' active' : ''}`} onClick={() => navigateTo('/billing/retail')}>
                 <span className="nav-pill-content">
                   <i className="bi bi-receipt fs-6" aria-hidden="true" />
                   <span className="nav-pill-label">Billing</span>
                 </span>
               </button>
+              )}
               <button className={`btn btn-outline-primary nav-pill${isActive('/inventory') ? ' active' : ''}`} onClick={() => navigateTo('/inventory/catalog')}>
                 <span className="nav-pill-content">
                   <i className="bi bi-box-seam fs-6" aria-hidden="true" />
@@ -317,24 +323,30 @@ const Navbar = () => {
                     <span className="nav-pill-label">Customers</span>
                   </span>
                 </button>
-                <button className={`btn btn-outline-primary nav-pill${isActive('/staff-expenses') ? ' active' : ''}`} onClick={() => navigateTo('/staff-expenses/staff/list')}>
-                  <span className="nav-pill-content">
-                    <i className="bi bi-people-fill fs-6" aria-hidden="true" />
-                    <span className="nav-pill-label">Staff & Expenses</span>
-                  </span>
-                </button>
-                <button className={`btn btn-outline-primary nav-pill${isActive('/accounts') ? ' active' : ''}`} onClick={() => navigateTo('/accounts/receipt')}>
-                  <span className="nav-pill-content">
-                    <i className="bi bi-journal-text fs-6" aria-hidden="true" />
-                    <span className="nav-pill-label">Accounts</span>
-                  </span>
-                </button>
-                <button className={`btn btn-outline-primary nav-pill${isActive('/returns-corrections') ? ' active' : ''}`} onClick={() => navigateTo('/returns-corrections/returns/new')}>
-                  <span className="nav-pill-content">
-                    <i className="bi bi-arrow-repeat fs-6" aria-hidden="true" />
-                    <span className="nav-pill-label">Adjustments</span>
-                  </span>
-                </button>
+                {isOpeningCompleted && !isStaffUser && (
+                  <button className={`btn btn-outline-primary nav-pill${isActive('/staff-expenses') ? ' active' : ''}`} onClick={() => navigateTo('/staff-expenses/staff/list')}>
+                    <span className="nav-pill-content">
+                      <i className="bi bi-people-fill fs-6" aria-hidden="true" />
+                      <span className="nav-pill-label">Staff & Expenses</span>
+                    </span>
+                  </button>
+                )}
+                {isOpeningCompleted && !isStaffUser && (
+                  <button className={`btn btn-outline-primary nav-pill${isActive('/accounts') ? ' active' : ''}`} onClick={() => navigateTo('/accounts/receipt')}>
+                    <span className="nav-pill-content">
+                      <i className="bi bi-journal-text fs-6" aria-hidden="true" />
+                      <span className="nav-pill-label">Accounts</span>
+                    </span>
+                  </button>
+                )}
+                {isOpeningCompleted && !isStaffUser && (
+                  <button className={`btn btn-outline-primary nav-pill${isActive('/returns-corrections') ? ' active' : ''}`} onClick={() => navigateTo('/returns-corrections/returns/new')}>
+                    <span className="nav-pill-content">
+                      <i className="bi bi-arrow-repeat fs-6" aria-hidden="true" />
+                      <span className="nav-pill-label">Adjustments</span>
+                    </span>
+                  </button>
+                )}
                 <button className={`btn btn-outline-primary nav-pill${isActive('/sync-center') ? ' active' : ''}`} onClick={() => navigateTo('/sync-center')}>
                   <span className="nav-pill-content">
                     <i className="bi bi-arrow-repeat fs-6" aria-hidden="true" />
@@ -368,30 +380,36 @@ const Navbar = () => {
                       </span>
                     </button>
                   </li>
-                  <li>
-                    <button type="button" className="dropdown-item" onClick={() => navigateTo('/staff-expenses/staff/list')}>
-                      <span className="nav-pill-content">
-                        <i className="bi bi-people-fill fs-6" aria-hidden="true" />
-                        <span className="nav-pill-label">Staff & Expenses</span>
-                      </span>
-                    </button>
-                  </li>
-                  <li>
-                    <button type="button" className="dropdown-item" onClick={() => navigateTo('/accounts/receipt')}>
-                      <span className="nav-pill-content">
-                        <i className="bi bi-journal-text fs-6" aria-hidden="true" />
-                        <span className="nav-pill-label">Accounts</span>
-                      </span>
-                    </button>
-                  </li>
-                  <li>
-                    <button type="button" className="dropdown-item" onClick={() => navigateTo('/returns-corrections/returns/new')}>
-                      <span className="nav-pill-content">
-                        <i className="bi bi-arrow-repeat fs-6" aria-hidden="true" />
-                        <span className="nav-pill-label">Adjustments</span>
-                      </span>
-                    </button>
-                  </li>
+                  {isOpeningCompleted && !isStaffUser && (
+                    <li>
+                      <button type="button" className="dropdown-item" onClick={() => navigateTo('/staff-expenses/staff/list')}>
+                        <span className="nav-pill-content">
+                          <i className="bi bi-people-fill fs-6" aria-hidden="true" />
+                          <span className="nav-pill-label">Staff & Expenses</span>
+                        </span>
+                      </button>
+                    </li>
+                  )}
+                  {isOpeningCompleted && !isStaffUser && (
+                    <li>
+                      <button type="button" className="dropdown-item" onClick={() => navigateTo('/accounts/receipt')}>
+                        <span className="nav-pill-content">
+                          <i className="bi bi-journal-text fs-6" aria-hidden="true" />
+                          <span className="nav-pill-label">Accounts</span>
+                        </span>
+                      </button>
+                    </li>
+                  )}
+                  {isOpeningCompleted && !isStaffUser && (
+                    <li>
+                      <button type="button" className="dropdown-item" onClick={() => navigateTo('/returns-corrections/returns/new')}>
+                        <span className="nav-pill-content">
+                          <i className="bi bi-arrow-repeat fs-6" aria-hidden="true" />
+                          <span className="nav-pill-label">Adjustments</span>
+                        </span>
+                      </button>
+                    </li>
+                  )}
                   <li>
                     <button type="button" className="dropdown-item" onClick={() => navigateTo('/sync-center')}>
                       <span className="nav-pill-content">
@@ -434,6 +452,34 @@ const Navbar = () => {
                     </span>
                   </button>
                 </li>
+                {!isOpeningCompleted && canManageOpeningSetup && (
+                  <li>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => navigateTo('/accounts/opening-setup')}
+                    >
+                      <span className="nav-pill-content">
+                        <i className="bi bi-play-btn fs-6" aria-hidden="true" />
+                        <span className="nav-pill-label">Opening Setup</span>
+                      </span>
+                    </button>
+                  </li>
+                )}
+                {isOpeningCompleted && userRole === 'admin' && (
+                  <li>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => navigateTo('/settings/business-setup')}
+                    >
+                      <span className="nav-pill-content">
+                        <i className="bi bi-clipboard2-check fs-6" aria-hidden="true" />
+                        <span className="nav-pill-label">Business Setup</span>
+                      </span>
+                    </button>
+                  </li>
+                )}
                 {userRole === 'admin' && (
                   <li>
                     <button

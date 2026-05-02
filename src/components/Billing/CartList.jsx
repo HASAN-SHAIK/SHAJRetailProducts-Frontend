@@ -10,6 +10,7 @@ const CartList = ({
   onPriceChange,
   onRemove,
   canRevealActualPrice = false,
+  canEditPrice = true,
 }) => (
   <div className="billing-table-wrapper">
     <table className="billing-table">
@@ -43,6 +44,7 @@ const CartList = ({
             onPriceChange={onPriceChange}
             onRemove={onRemove}
             canRevealActualPrice={canRevealActualPrice}
+            canEditPrice={canEditPrice}
           />
         ))}
       </tbody>

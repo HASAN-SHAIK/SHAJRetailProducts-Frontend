@@ -35,7 +35,7 @@ const StaffList = () => {
       isDeleted: true,
       updatedAt: new Date().toISOString(),
     });
-    showPopup('Saved Offline', 'Offline');
+    showPopup('Saved Successfully', 'Success');
     loadStaff();
   };
 

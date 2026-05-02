@@ -1,13 +1,16 @@
 .sync-center-page {
   width: 100%;
+  max-width: none;
   margin-left: 0;
-  padding: 20px 24px 28px;
+  margin-right: 0;
+  padding: 20px 0 28px;
   box-sizing: border-box;
 }
 
 .sync-center-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
@@ -193,7 +196,8 @@
   .sync-center-page {
     margin-left: 0;
     width: 100%;
-    padding: 14px 12px 20px;
+    max-width: none;
+    padding: 14px 0 20px;
   }
 
   .sync-inline-select {

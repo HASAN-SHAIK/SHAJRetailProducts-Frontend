@@ -82,7 +82,7 @@ const StaffForm = () => {
       updatedAt: new Date().toISOString(),
     };
     await upsertLocalStaff(payload);
-    showPopup('Saved Offline', 'Offline');
+    showPopup('Saved Successfully', 'Success');
     setErrors({});
     navigate('/staff-expenses/staff/list');
   };

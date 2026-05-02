@@ -10,8 +10,13 @@ const monthRange = (monthValue) => {
   if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return { from: null, to: null };
   const start = new Date(year, monthIndex, 1);
   const end = new Date(year, monthIndex + 1, 0);
-  const toIso = (date) => date.toISOString().slice(0, 10);
-  return { from: toIso(start), to: toIso(end) };
+  const toLocalDate = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+  return { from: toLocalDate(start), to: toLocalDate(end) };
 };
 
 const ExpenseMonthlyReport = () => {

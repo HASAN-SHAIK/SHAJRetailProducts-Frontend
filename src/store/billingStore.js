@@ -36,6 +36,10 @@ const applyGstTotals = (price, qty, gstPercent, gstMode) => {
 
 const getProductStock = (product) => {
   const raw =
+    product?.quantity_remaining ??
+    product?.quantityRemaining ??
+    product?.available_quantity ??
+    product?.availableQuantity ??
     product?.stock_quantity ??
     product?.stockQuantity ??
     product?.quantity ??

@@ -105,6 +105,7 @@
   width: 100%;
   border-collapse: collapse;
   min-width: 760px;
+  table-layout: fixed;
 }
 
 .billing-table th,
@@ -159,17 +160,33 @@
 }
 
 .billing-qty-input {
-  max-width: 90px;
+  width: 100%;
+  min-width: 84px;
+  max-width: 110px;
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.3);
   color: #e2e8f0;
 }
 
 .billing-price-input {
-  max-width: 110px;
+  width: 100%;
+  min-width: 108px;
+  max-width: 140px;
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.3);
   color: #e2e8f0;
+}
+
+.qty-cell {
+  width: 110px;
+  min-width: 110px;
+  white-space: nowrap;
+}
+
+.price-cell {
+  width: 150px;
+  min-width: 150px;
+  white-space: nowrap;
 }
 
 .billing-price-stack {
@@ -303,7 +320,7 @@
 .billing-search-list {
   display: grid;
   gap: 8px;
-  max-height: 220px;
+  max-height: min(420px, 52vh);
   overflow: auto;
   background: #0f172a;
   border-radius: 12px;

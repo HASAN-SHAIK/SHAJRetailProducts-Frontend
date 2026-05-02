@@ -17,6 +17,7 @@ const probeServerReachability = async () => {
 
   const baseURL = String(api.defaults.baseURL || '').replace(/\/$/, '');
   const pingUrl = `${baseURL}/auth/getLogin`;
+  const token = typeof window !== 'undefined' ? await getAuthToken().catch(() => null) : null;
 
   serverReachabilityProbe = axios
     .get(pingUrl, {
@@ -26,6 +27,7 @@ const probeServerReachability = async () => {
       headers: {
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     })
     .then(() => true)

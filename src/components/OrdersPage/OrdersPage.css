@@ -59,10 +59,30 @@
     minmax(86px, 0.8fr)
     minmax(132px, 1.4fr)
     minmax(96px, 1fr)
-    minmax(208px, 1.9fr);
+    minmax(208px, 1.9fr)
+    minmax(170px, 1.3fr);
   width: auto;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.orders-purchase-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 211, 252, 0.32);
+  background: rgba(11, 27, 54, 0.72);
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.orders-purchase-toggle input {
+  accent-color: #38bdf8;
 }
 
 .sort-controls {
@@ -424,6 +444,18 @@ body.app-theme-light .orders-refresh-btn:focus {
   background: rgba(251, 191, 36, 0.18);
   color: #fbbf24;
   border: 1px solid rgba(251, 191, 36, 0.45);
+}
+
+.order-type-tag.purchase {
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.42);
+}
+
+.order-type-tag.billing {
+  background: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.42);
 }
 
 .sync-icon {
@@ -802,6 +834,10 @@ body.app-theme-light .return-table td {
   border-bottom-color: rgba(148, 163, 184, 0.25);
 }
 
+body.app-theme-light .delete-modal .form-label {
+  color: #0f172a;
+}
+
 @media (max-width: 992px) {
   .orders-page-header {
     flex-direction: column;
@@ -848,6 +884,11 @@ body.app-theme-light .return-table td {
 .delete-modal p {
   margin: 0 0 10px;
   color: #cbd5f5;
+}
+
+.delete-modal .form-label {
+  color: #e2e8f0;
+  font-weight: 600;
 }
 
 .delete-warning {

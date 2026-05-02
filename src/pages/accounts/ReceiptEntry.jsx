@@ -1,16 +1,39 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '../../utils/axios';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import { getAllCustomers, upsertCustomersBulk } from '../../core/db';
-import { createReceipt } from '../../services/accountingService';
+import { createReceipt, fetchReceiptEntries } from '../../services/accountingService';
 import { enqueueReceipt } from '../../utils/accountingOffline';
 import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './Accounts.css';
 
+const dedupeCustomers = (list = []) => {
+  const seen = new Set();
+  const out = [];
+  for (const raw of Array.isArray(list) ? list : []) {
+    if (!raw) continue;
+    const nameKey = String(raw.name || '').trim().toLowerCase();
+    const phoneKey = String(raw.mobile || raw.phone || '').trim().toLowerCase();
+    const key = phoneKey ? `np:${nameKey}|${phoneKey}` : `n:${nameKey}`;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(raw);
+  }
+  return out;
+};
+
+const customerLabel = (customer) => {
+  const name = String(customer?.name || '').trim();
+  const mobile = String(customer?.mobile || customer?.phone || '').trim();
+  return mobile ? `${name} (${mobile})` : name;
+};
+
 const ReceiptEntry = () => {
   const { showPopup } = usePopup();
+  const location = useLocation();
   const [customers, setCustomers] = useState([]);
-  const [search, setSearch] = useState('');
+  const [customerInput, setCustomerInput] = useState('');
   const [customerId, setCustomerId] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('cash');
@@ -18,28 +41,21 @@ const ReceiptEntry = () => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState([]);
 
-  const loadCustomers = async (term = '') => {
+  const loadCustomers = async () => {
     setLoading(true);
     try {
       const cached = await getAllCustomers();
       let list = Array.isArray(cached) ? cached : [];
-      if (term) {
-        const needle = term.toLowerCase();
-        list = list.filter((item) => {
-          const name = String(item.name || '').toLowerCase();
-          const mobile = String(item.mobile || '').toLowerCase();
-          return name.includes(needle) || mobile.includes(needle);
-        });
-      }
-      setCustomers(list);
+      setCustomers(dedupeCustomers(list));
       if (!navigator.onLine) return;
-      const res = await api.get('/customers', { params: term ? { search: term, limit: 200 } : { limit: 200 } });
+      const res = await api.get('/customers', { params: { limit: 200 } });
       const serverList = res?.data?.data?.customers || res?.data?.customers || [];
       if (Array.isArray(serverList) && serverList.length) {
         upsertCustomersBulk(serverList).catch(() => {});
       }
-      setCustomers(Array.isArray(serverList) ? serverList : list);
+      setCustomers(dedupeCustomers(Array.isArray(serverList) ? serverList : list));
     } catch {
       setCustomers([]);
     } finally {
@@ -48,17 +64,79 @@ const ReceiptEntry = () => {
   };
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadCustomers(search.trim());
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  useEffect(() => {
-    loadCustomers('');
+    loadCustomers();
   }, []);
 
-  const filtered = useMemo(() => customers || [], [customers]);
+  const loadHistory = async () => {
+    try {
+      const payload = await fetchReceiptEntries({ limit: 50 });
+      setHistory(Array.isArray(payload.entries) ? payload.entries : []);
+    } catch {
+      setHistory([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!navigator.onLine) return;
+    loadHistory();
+  }, []);
+
+  useEffect(() => {
+    const prefill = location?.state?.receiptPrefill || null;
+    const params = new URLSearchParams(location?.search || '');
+    const partyType = String(params.get('party_type') || '').toLowerCase();
+    const prefillCustomerId = prefill?.customerId ?? params.get('customer_id') ?? (partyType === 'customer' ? params.get('party_id') : '') ?? '';
+    const prefillAmount = prefill?.amount ?? params.get('amount') ?? '';
+    if (prefillCustomerId) setCustomerId(String(prefillCustomerId));
+    if (prefillAmount && Number(prefillAmount) > 0) setAmount(String(prefillAmount));
+  }, [location?.state, location?.search]);
+
+  const filtered = useMemo(() => {
+    const list = customers || [];
+    const needle = String(customerInput || '').trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter((customer) => {
+      const name = String(customer?.name || '').toLowerCase();
+      const mobile = String(customer?.mobile || customer?.phone || '').toLowerCase();
+      return name.includes(needle) || mobile.includes(needle);
+    });
+  }, [customers, customerInput]);
+
+  const resolveCustomerFromInput = (value) => {
+    const needle = String(value || '').trim().toLowerCase();
+    if (!needle) return null;
+    const pool = customers || [];
+    const exact = pool.find((customer) => {
+      const name = String(customer?.name || '').trim().toLowerCase();
+      const mobile = String(customer?.mobile || customer?.phone || '').trim().toLowerCase();
+      const label = `${name}${mobile ? ` (${mobile})` : ''}`;
+      return name === needle || mobile === needle || label === needle;
+    });
+    if (exact) return exact;
+    // If user typed number/name fragment and only one match remains, auto-pick it.
+    const matches = pool.filter((customer) => {
+      const name = String(customer?.name || '').trim().toLowerCase();
+      const mobile = String(customer?.mobile || customer?.phone || '').trim().toLowerCase();
+      return name.includes(needle) || mobile.includes(needle);
+    });
+    return matches.length === 1 ? matches[0] : null;
+  };
+
+  useEffect(() => {
+    if (!customerId) return;
+    const selected = (customers || []).find((customer) => String(customer?.id) === String(customerId));
+    if (!selected) return;
+    const label = customerLabel(selected);
+    if (label && label !== customerInput) {
+      setCustomerInput(label);
+    }
+    if (!amount || Number(amount) <= 0) {
+      const outstanding = Number(selected?.current_balance || 0);
+      if (Number.isFinite(outstanding) && outstanding > 0) {
+        setAmount(String(outstanding.toFixed(2)));
+      }
+    }
+  }, [customerId, customers]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -87,7 +165,9 @@ const ReceiptEntry = () => {
       } else {
         await createReceipt(payload);
         showPopup('Receipt saved.', 'Success');
+        loadHistory();
       }
+      setCustomerInput('');
       setCustomerId('');
       setAmount('');
       setNotes('');
@@ -106,28 +186,28 @@ const ReceiptEntry = () => {
       </div>
       <form className="accounts-form" onSubmit={handleSubmit}>
         <label>
-          Search Customer
-          <input
-            className="form-control billing-input"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name or mobile"
-          />
-        </label>
-        <label>
           Select Customer *
-          <select
+          <input
+            list="receipt-customer-options"
             className={`form-control billing-input ${errors.customerId ? 'is-invalid' : ''}`}
-            value={customerId}
-            onChange={(event) => setCustomerId(event.target.value)}
-          >
-            <option value="">Select</option>
+            value={customerInput}
+            onChange={(event) => {
+              const value = event.target.value;
+              setCustomerInput(value);
+              const matched = resolveCustomerFromInput(value);
+              setCustomerId(matched ? String(matched.id) : '');
+            }}
+            onBlur={() => {
+              const matched = resolveCustomerFromInput(customerInput);
+              setCustomerId(matched ? String(matched.id) : '');
+            }}
+            placeholder="Search by customer name or number"
+          />
+          <datalist id="receipt-customer-options">
             {filtered.map((customer) => (
-              <option key={customer.id} value={customer.id}>
-                {customer.name} {customer.mobile ? `(${customer.mobile})` : ''}
-              </option>
+              <option key={customer.id} value={customerLabel(customer)} />
             ))}
-          </select>
+          </datalist>
           {errors.customerId && <small className="text-danger">{errors.customerId}</small>}
           {loading && <small className="text-secondary">Loading customers...</small>}
         </label>
@@ -169,9 +249,42 @@ const ReceiptEntry = () => {
           {saving ? 'Saving...' : 'Save Receipt'}
         </button>
       </form>
+      <div className="billing-table-wrapper mt-3">
+        <table className="billing-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Customer</th>
+              <th>Mode</th>
+              <th>Amount</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.length === 0 && (
+              <tr>
+                <td colSpan="6" className="billing-empty">No receipt entries.</td>
+              </tr>
+            )}
+            {history.map((entry) => (
+              <tr key={entry.id}>
+                <td>{entry.created_at ? new Date(entry.created_at).toLocaleDateString() : '-'}</td>
+                <td>{entry.txn_type || '-'}</td>
+                <td>{entry.party_name || entry.party_id || '-'}</td>
+                <td>{entry.payment_mode || '-'}</td>
+                <td>INR {Number(entry.amount || 0).toFixed(2)}</td>
+                <td>{entry.notes || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
 
 export default ReceiptEntry;
+
+
 

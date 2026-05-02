@@ -11,6 +11,8 @@ const buildBaseTransaction = (payload = {}) => {
     amount: Number(payload.amount || 0),
     payment_mode: payload.payment_mode || payload.paymentMode || 'cash',
     notes: payload.notes || null,
+    order_id: payload.order_id || payload.orderId || null,
+    date: payload.date || null,
     source: payload.source || null,
     sync_status: 'pending',
   };

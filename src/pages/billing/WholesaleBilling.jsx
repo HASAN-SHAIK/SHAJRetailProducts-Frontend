@@ -29,8 +29,9 @@ const WholesaleBilling = () => {
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const branchConfirmed = useBranchStore((state) => state.branchConfirmed);
   const effectiveBranchId = selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null;
+  const isAdminUser = String(userDetails?.role || '').toLowerCase() === 'admin';
   const canRevealActualPrice =
-    String(userDetails?.role || '').toLowerCase() === 'admin' &&
+    isAdminUser &&
     hasFeature(tenantConfig, 'billing_actual_price_module');
 
   const items = useBillingStore((state) => state.items);
@@ -207,7 +208,7 @@ const WholesaleBilling = () => {
 
   const handleCheckout = async () => {
     if (!items.length || isSubmitting) return;
-    if (!effectiveBranchId || !branchConfirmed) {
+    if (!effectiveBranchId) {
       showPopup('Select a branch before billing.', 'Validation');
       return;
     }
@@ -445,6 +446,7 @@ const WholesaleBilling = () => {
             onPriceChange={updatePrice}
             onRemove={removeItem}
             canRevealActualPrice={canRevealActualPrice}
+            canEditPrice={isAdminUser}
           />
         </div>
 
@@ -532,7 +534,7 @@ const WholesaleBilling = () => {
             <div className="billing-option-group">
               <span className="billing-option-title">Payment</span>
               <div className="billing-option-row">
-                {['cash', 'credit'].map((method) => (
+                {['cash', 'bank', 'credit'].map((method) => (
                   <label key={method}>
                     <input
                       type="radio"

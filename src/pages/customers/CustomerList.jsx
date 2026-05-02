@@ -4,6 +4,27 @@ import api from '../../utils/axios';
 import { getAllCustomers, upsertCustomersBulk } from '../../core/db';
 import './Customers.css';
 
+const toCustomerIdentity = (customer) => {
+  const phone = String(customer?.phone || customer?.mobile || '').replace(/\D/g, '');
+  const name = String(customer?.name || '').trim().toLowerCase();
+  if (phone && name) return `phone:${phone}|name:${name}`;
+  if (phone) return `phone:${phone}`;
+  const id = String(customer?.id || '').trim();
+  if (id) return `id:${id}`;
+  return `name:${name}`;
+};
+
+const dedupeCustomers = (list) => {
+  const safe = Array.isArray(list) ? list : [];
+  const seen = new Set();
+  return safe.filter((customer) => {
+    const key = toCustomerIdentity(customer);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 const CustomerList = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
@@ -24,7 +45,7 @@ const CustomerList = () => {
 
   const loadCustomersFromCache = async (term = '') => {
     const list = await getAllCustomers();
-    const safe = Array.isArray(list) ? list : [];
+    const safe = dedupeCustomers(list);
     const filtered = filterLocalCustomers(safe, term);
     setCustomers(filtered);
   };
@@ -38,7 +59,7 @@ const CustomerList = () => {
         params: term ? { search: term } : { limit: 500 },
       });
       const list = res?.data?.data?.customers || res?.data?.customers || [];
-      const safe = Array.isArray(list) ? list : [];
+      const safe = dedupeCustomers(list);
       setCustomers(safe.length ? safe : filterLocalCustomers(await getAllCustomers(), term));
       if (safe.length) {
         upsertCustomersBulk(safe).catch(() => {});
@@ -53,7 +74,13 @@ const CustomerList = () => {
   useEffect(() => {
     setLoading(true);
     loadCustomersFromCache('')
-      .finally(() => setLoading(false));
+      .finally(async () => {
+        if (navigator.onLine) {
+          await fetchCustomers('');
+        } else {
+          setLoading(false);
+        }
+      });
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     };

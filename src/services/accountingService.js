@@ -1,6 +1,13 @@
 import api from '../utils/axios';
 import { saveTransactionsBulk, upsertAccountingTransaction, getAccountingTransactions } from '../core/db';
 
+const generateClientTxnId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `ctxn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+};
+
 const normalizePaymentMode = (value) => {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw) return 'cash';
@@ -43,15 +50,20 @@ export const createReceipt = async (payload) => {
 };
 
 export const createPayment = async (payload) => {
-  const res = await api.post('/accounts/payment', payload);
+  const requestPayload = {
+    type: payload?.type || 'supplier',
+    client_txn_id: payload?.client_txn_id || payload?.clientTxnId || generateClientTxnId(),
+    ...payload,
+  };
+  const res = await api.post('/accounts/payment', requestPayload);
   const serverId = res?.data?.data?.id ?? res?.data?.id ?? null;
   await upsertAccountingTransaction(
-    buildLocalTxn(payload, {
+    buildLocalTxn(requestPayload, {
       id: serverId || `payment_${Date.now()}`,
       txn_type: 'payment',
       direction: 'out',
       party_type: 'supplier',
-      party_id: payload.supplier_id,
+      party_id: requestPayload.supplier_id,
       sync_status: 'synced',
     })
   );
@@ -66,6 +78,7 @@ const queryParams = (filters = {}) => {
   if (filters.page) params.page = filters.page;
   if (filters.limit) params.limit = filters.limit;
   if (filters.party_type) params.party_type = filters.party_type;
+  if (filters.type) params.type = filters.type;
   if (filters.party_id) params.party_id = filters.party_id;
   if (filters.branch_id) params.branch_id = filters.branch_id;
   return params;
@@ -116,5 +129,20 @@ export const fetchOutstanding = async (filters = {}) => {
     return { rows: [] };
   }
   const res = await api.get('/accounts/outstanding', { params: queryParams(filters) });
+  return res?.data?.data || {};
+};
+
+export const fetchReceiptEntries = async (filters = {}) => {
+  const res = await api.get('/accounts/receipt', { params: queryParams(filters) });
+  return res?.data?.data || { entries: [], total: 0 };
+};
+
+export const fetchPaymentEntries = async (filters = {}) => {
+  const res = await api.get('/accounts/payment', { params: queryParams(filters) });
+  return res?.data?.data || { entries: [], total: 0 };
+};
+
+export const reconcileSystem = async () => {
+  const res = await api.get('/accounts/reconcile');
   return res?.data?.data || {};
 };

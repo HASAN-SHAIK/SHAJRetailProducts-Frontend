@@ -1,16 +1,43 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
 import { getLocalGstEntries } from '../../core/db';
+import { fetchGstReports } from '../../services/returnsCorrectionsApi';
 import './ReturnsCorrections.css';
 
 const TaxReports = () => {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [entries, setEntries] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   const loadEntries = useCallback(async () => {
-    const list = await getLocalGstEntries({ from, to });
-    setEntries(list);
+    setIsLoading(true);
+    try {
+      if (navigator.onLine) {
+        try {
+          const serverRows = await fetchGstReports({ from, to });
+          setEntries(
+            serverRows.map((row) => ({
+              date: row.date,
+              billId: '-',
+              type: 'SUMMARY',
+              taxableAmount: 0,
+              cgst: row.cgst,
+              sgst: row.sgst,
+              igst: row.igst,
+              gstEntryId: `${row.date}-summary`,
+            }))
+          );
+          return;
+        } catch {
+          // fallback to local
+        }
+      }
+      const list = await getLocalGstEntries({ from, to });
+      setEntries(list);
+    } finally {
+      setIsLoading(false);
+    }
   }, [from, to]);
 
   useEffect(() => {
@@ -67,7 +94,14 @@ const TaxReports = () => {
             </tr>
           </thead>
           <tbody>
-            {entries.length === 0 && (
+            {isLoading && (
+              <tr>
+                <td colSpan={7} className="text-center text-secondary">
+                  Loading GST entries...
+                </td>
+              </tr>
+            )}
+            {!isLoading && entries.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center text-secondary">
                   No GST entries.
@@ -93,4 +127,3 @@ const TaxReports = () => {
 };
 
 export default TaxReports;
-

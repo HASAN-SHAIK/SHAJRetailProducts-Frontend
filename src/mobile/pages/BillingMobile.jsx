@@ -27,6 +27,13 @@ const createEmptyItem = (itemNumber = 1) => ({
 
 const formatCurrency = (value) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
+const mapSearchProduct = (product) => ({
+  ...product,
+  name: product?.name || product?.product_name || '',
+  price: Number(product?.selling_price ?? product?.price ?? product?.purchase_price ?? 0),
+  stock: Number(product?.stock_quantity ?? product?.stock ?? product?.quantity ?? 0),
+});
+
 const BillingMobile = () => {
   const userDetails = useSelector((state) => state.user.userDetails);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
@@ -68,6 +75,46 @@ const BillingMobile = () => {
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
     );
+  };
+
+  const searchRemoteProducts = async (queryText) => {
+    const text = String(queryText || '').trim();
+    if (!text) return [];
+
+    // Keep contract aligned with desktop billing/backend expectations.
+    try {
+      const saleResponse = await api.get('/products/search/sale', {
+        params: { name: text },
+      });
+      const saleList =
+        saleResponse?.data?.data?.products ||
+        saleResponse?.data?.products ||
+        saleResponse?.data?.data ||
+        [];
+      if (Array.isArray(saleList) && saleList.length) {
+        return saleList;
+      }
+    } catch {
+      // try fallback endpoint below
+    }
+
+    try {
+      const fallbackResponse = await api.get('/products/search', {
+        params: {
+          view: 'mobile',
+          q: text,
+          name: text,
+        },
+      });
+      const fallbackList =
+        fallbackResponse?.data?.data?.products ||
+        fallbackResponse?.data?.products ||
+        fallbackResponse?.data?.data ||
+        [];
+      return Array.isArray(fallbackList) ? fallbackList : [];
+    } catch {
+      return [];
+    }
   };
 
   const selectedCreditLimit = Number(selectedCustomer?.credit_limit || 0);
@@ -188,12 +235,7 @@ const BillingMobile = () => {
         const localResults = await searchLocalProducts(query);
         const localMapped = (Array.isArray(localResults) ? localResults : [])
           .map(normalizeDisplayProduct)
-          .map((product) => ({
-            ...product,
-            name: product?.name || product?.product_name || '',
-            price: Number(product?.selling_price ?? product?.price ?? product?.purchase_price ?? 0),
-            stock: Number(product?.stock_quantity ?? product?.stock ?? product?.quantity ?? 0),
-          }))
+          .map(mapSearchProduct)
           .filter(isProductInSelectedBranch);
 
         if (localMapped.length > 0) {
@@ -203,20 +245,9 @@ const BillingMobile = () => {
           return;
         }
 
-        const response = await api.get('/products/search', {
-          params: {
-            view: 'mobile',
-            q: query,
-          },
-        });
-        const remoteList = response?.data?.products || response?.data?.data || [];
+        const remoteList = await searchRemoteProducts(query);
         const remoteMapped = (Array.isArray(remoteList) ? remoteList : [])
-          .map((product) => ({
-            ...product,
-            name: product?.name || product?.product_name || '',
-            price: Number(product?.selling_price ?? product?.price ?? product?.purchase_price ?? 0),
-            stock: Number(product?.stock_quantity ?? product?.stock ?? product?.quantity ?? 0),
-          }))
+          .map(mapSearchProduct)
           .filter(isProductInSelectedBranch);
 
         if (!cancelled) {
@@ -279,29 +310,13 @@ const BillingMobile = () => {
       const localResults = await searchLocalProducts(scannedCode);
       let products = (Array.isArray(localResults) ? localResults : [])
         .map(normalizeDisplayProduct)
-        .map((product) => ({
-          ...product,
-          name: product?.name || product?.product_name || '',
-          price: Number(product?.selling_price ?? product?.price ?? product?.purchase_price ?? 0),
-          stock: Number(product?.stock_quantity ?? product?.stock ?? product?.quantity ?? 0),
-        }))
+        .map(mapSearchProduct)
         .filter(isProductInSelectedBranch);
 
       if (products.length === 0 && navigator.onLine) {
-        const response = await api.get('/products/search', {
-          params: {
-            view: 'mobile',
-            q: scannedCode,
-          },
-        });
-        const remoteList = response?.data?.products || response?.data?.data || [];
+        const remoteList = await searchRemoteProducts(scannedCode);
         products = (Array.isArray(remoteList) ? remoteList : [])
-          .map((product) => ({
-            ...product,
-            name: product?.name || product?.product_name || '',
-            price: Number(product?.selling_price ?? product?.price ?? product?.purchase_price ?? 0),
-            stock: Number(product?.stock_quantity ?? product?.stock ?? product?.quantity ?? 0),
-          }))
+          .map(mapSearchProduct)
           .filter(isProductInSelectedBranch);
       }
 

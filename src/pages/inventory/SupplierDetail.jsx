@@ -10,10 +10,8 @@ import {
   saveTransactionsBulk,
   upsertAccountingTransaction,
   upsertSupplierLedgerBulk,
-  upsertSupplierLedgerEntry,
   updateSuppliersCacheBulk,
 } from '../../core/db';
-import { enqueuePayment } from '../../utils/accountingOffline';
 import { processInventorySyncQueue } from '../../utils/inventorySync';
 import './Suppliers.css';
 
@@ -22,9 +20,6 @@ const SupplierDetail = () => {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [payment, setPayment] = useState({ amount: '', payment_mode: 'cash', notes: '' });
-  const [error, setError] = useState('');
-  const [savingPayment, setSavingPayment] = useState(false);
 
   const mapLedgerToTransaction = (entry) => {
     if (!entry) return null;
@@ -46,10 +41,17 @@ const SupplierDetail = () => {
     };
   };
 
-  const buildLocalLedger = (transactions = []) =>
-    transactions.map((entry) => ({
+  const buildLocalPaymentLedger = (transactions = []) =>
+    (Array.isArray(transactions) ? transactions : [])
+    .filter((entry) =>
+      entry
+      && String(entry.party_type || '').toLowerCase() === 'supplier'
+      && String(entry.party_id) === String(id)
+      && String(entry.txn_type || '').toLowerCase() === 'payment'
+    )
+    .map((entry) => ({
       id: entry.id,
-      type: entry.txn_type || 'payment',
+      type: 'payment',
       amount: entry.amount,
       payment_mode: entry.payment_mode,
       running_balance: null,
@@ -57,18 +59,23 @@ const SupplierDetail = () => {
       sync_status: entry.sync_status,
     }));
 
-  const mergeLedgerLists = (base = [], extras = []) => {
+  const mergeLedgerLists = (base = [], payments = []) => {
     const merged = new Map();
-    base.forEach((entry) => {
+    // Base should primarily be supplier-ledger purchases/history.
+    (Array.isArray(base) ? base : []).forEach((entry) => {
       if (!entry?.id) return;
       merged.set(String(entry.id), entry);
     });
-    extras.forEach((entry) => {
+    // Payment rows are sourced from IndexedDB payment-entry data and take priority.
+    (Array.isArray(payments) ? payments : []).forEach((entry) => {
       if (!entry?.id) return;
       const key = String(entry.id);
       if (!merged.has(key)) {
         merged.set(key, entry);
+        return;
       }
+      // Keep IndexedDB details (like payment_mode) in priority when available.
+      merged.set(key, { ...merged.get(key), ...entry });
     });
     return Array.from(merged.values());
   };
@@ -88,16 +95,13 @@ const SupplierDetail = () => {
             upsertAccountingTransaction({ ...entry, source: 'supplier_ledger' }).catch(() => {});
           });
       }
-      const pendingList = Array.isArray(cachedTxns)
-        ? cachedTxns.filter((entry) => String(entry.sync_status || '').toLowerCase() === 'pending')
-        : [];
-      const pendingLedger = buildLocalLedger(pendingList);
+      const localPaymentLedgerFromIndexedDb = buildLocalPaymentLedger(cachedTxns);
 
       const hasCachedLedger = Array.isArray(cachedLedger) && cachedLedger.length > 0;
       if (cachedSupplier) {
         setData({
           supplier: cachedSupplier,
-          ledger: mergeLedgerLists(cachedLedger, pendingLedger),
+          ledger: mergeLedgerLists(cachedLedger, localPaymentLedgerFromIndexedDb),
           offline: !navigator.onLine,
         });
         setLoading(false);
@@ -130,10 +134,7 @@ const SupplierDetail = () => {
             await saveTransactionsBulk(transactions).catch(() => {});
           }
           await upsertSupplierLedgerBulk(ledgerWithSupplier).catch(() => {});
-          if (pendingList.length) {
-            const mappedPending = buildLocalLedger(pendingList);
-            serverData.ledger = mergeLedgerLists(ledgerWithSupplier, mappedPending);
-          }
+          serverData.ledger = mergeLedgerLists(ledgerWithSupplier, localPaymentLedgerFromIndexedDb);
           await saveConfigValue(cacheKey, { ready: true, updatedAt: new Date().toISOString() }).catch(() => {});
         }
         setData(serverData);
@@ -149,7 +150,7 @@ const SupplierDetail = () => {
       if (cached) {
         setData({
           supplier: cached,
-          ledger: mergeLedgerLists(cachedLedger, buildLocalLedger(pendingPayments)),
+          ledger: mergeLedgerLists(cachedLedger, buildLocalPaymentLedger(pendingPayments)),
           offline: true,
         });
       } else {
@@ -162,46 +163,6 @@ const SupplierDetail = () => {
   useEffect(() => {
     fetchDetail();
   }, [id]);
-
-  const handlePayment = async () => {
-    if (!payment.amount || savingPayment) return;
-    setSavingPayment(true);
-    setError('');
-    try {
-      if (data?.supplier?.id) {
-        updateSuppliersCacheBulk([data.supplier]).catch(() => {});
-      }
-      const entry = await enqueuePayment({ ...payment, supplier_id: id, source: 'supplier_ledger' });
-      const paidAmount = Number(entry.amount || payment.amount || 0);
-      const currentBalance = Number(data?.supplier?.current_balance || 0);
-      const nextBalance = currentBalance - paidAmount;
-      const localEntry = {
-        id: entry.id,
-        type: 'payment',
-        amount: entry.amount,
-        payment_mode: entry.payment_mode,
-        running_balance: nextBalance,
-        created_at: entry.created_at,
-        sync_status: entry.sync_status,
-      };
-      await upsertSupplierLedgerEntry({ ...localEntry, supplier_id: String(id) }).catch(() => {});
-      setPayment({ amount: '', payment_mode: 'cash', notes: '' });
-      setData((prev) => {
-        if (!prev?.supplier) return prev;
-        const ledger = Array.isArray(prev.ledger) ? prev.ledger : [];
-        const nextSupplier = {
-          ...prev.supplier,
-          current_balance: nextBalance,
-        };
-        updateSuppliersCacheBulk([nextSupplier]).catch(() => {});
-        return { ...prev, supplier: nextSupplier, ledger: [localEntry, ...ledger], offline: !navigator.onLine };
-      });
-    } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to add payment');
-    } finally {
-      setSavingPayment(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -225,28 +186,32 @@ const SupplierDetail = () => {
   const isOffline = data?.offline === true || !navigator.onLine;
   const displayLedger = (() => {
     if (!Array.isArray(ledger) || ledger.length === 0) return [];
-    const sorted = [...ledger].sort((a, b) => {
-      const aTime = new Date(a.created_at || 0).getTime();
-      const bTime = new Date(b.created_at || 0).getTime();
-      return bTime - aTime;
-    });
-    let running = balance;
-    return sorted.map((entry) => {
-      const amount = Number(entry.amount || 0);
-      const type = String(entry.type || '').toLowerCase();
-      const resolvedRunning =
-        entry.running_balance !== null && entry.running_balance !== undefined
-          ? Number(entry.running_balance || 0)
-          : running;
-      if (type === 'purchase') {
-        running = resolvedRunning - amount;
-      } else if (type === 'payment' || type === 'return') {
-        running = resolvedRunning + amount;
-      } else {
-        running = resolvedRunning;
+    const sortedAsc = [...ledger]
+      .sort((a, b) => {
+        const aTime = new Date(a.created_at || 0).getTime();
+        const bTime = new Date(b.created_at || 0).getTime();
+        return aTime - bTime;
+      });
+
+    let computedRunning = 0;
+    const withRunningAsc = sortedAsc.map((entry) => {
+      const entryType = String(entry?.type || '').toLowerCase();
+      const paymentMode = String(entry?.payment_mode || '').toLowerCase();
+      const entryAmount = Number(entry?.amount || 0);
+
+      if (entryType === 'purchase' && paymentMode === 'credit') {
+        computedRunning += entryAmount;
+      } else if (entryType === 'payment' && paymentMode !== 'credit') {
+        computedRunning -= entryAmount;
       }
-      return { ...entry, running_balance: resolvedRunning };
+
+      return {
+        ...entry,
+        running_balance: computedRunning,
+      };
     });
+
+    return withRunningAsc.reverse();
   })();
 
   return (
@@ -282,47 +247,15 @@ const SupplierDetail = () => {
       </div>
 
       <div className="customer-card">
-        <h5 className="section-title">Add Payment</h5>
-        {error && <div className="billing-error">{error}</div>}
-        {isOffline && <div className="billing-error">You are offline. Payments will be saved and synced later.</div>}
-        <div className="customer-form-grid">
-          <label>
-            Amount
-            <input
-              className="form-control billing-input"
-              type="number"
-              min="0"
-              value={payment.amount}
-              onChange={(event) => setPayment((prev) => ({ ...prev, amount: event.target.value }))}
-              disabled={savingPayment}
-            />
-          </label>
-          <label>
-            Payment Mode
-            <select
-              className="form-control billing-input"
-              value={payment.payment_mode}
-              onChange={(event) => setPayment((prev) => ({ ...prev, payment_mode: event.target.value }))}
-              disabled={savingPayment}
-            >
-              <option value="cash">Cash</option>
-              <option value="online">Online</option>
-              <option value="upi">UPI</option>
-              <option value="bank">Bank</option>
-            </select>
-          </label>
-          <label>
-            Notes
-            <input
-              className="form-control billing-input"
-              value={payment.notes}
-              onChange={(event) => setPayment((prev) => ({ ...prev, notes: event.target.value }))}
-              disabled={savingPayment}
-            />
-          </label>
-        </div>
-        <button className="btn btn-primary" type="button" onClick={handlePayment} disabled={savingPayment}>
-          {savingPayment ? 'Adding payment...' : 'Add Payment'}
+        <h5 className="section-title">Payments</h5>
+        {isOffline && <div className="billing-error">You are offline. Online payment entry is unavailable.</div>}
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={() => navigate(`/accounts/payment?party_type=supplier&party_id=${id}`)}
+          disabled={isOffline}
+        >
+          Add Payment
         </button>
       </div>
 

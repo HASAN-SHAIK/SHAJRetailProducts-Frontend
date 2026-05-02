@@ -13,7 +13,7 @@ import {
   upsertOrderDetailsCache,
   upsertOrders,
 } from '../../db/ordersDb';
-import { getSessionValue, saveSessionValue, saveTransactionsBulk } from '../../core/db';
+import { getOfflineOrders, getSessionValue, saveSessionValue, saveTransactionsBulk } from '../../core/db';
 import { useSelector } from 'react-redux';
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -45,12 +45,13 @@ const OrdersPage = ({ navigate }) => {
     total_pages: 1,
     total_records: 0,
   });
-  const [selectedRange, setSelectedRange] = useState('this_month');
+  const [selectedRange, setSelectedRange] = useState('all');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [customRangeKey, setCustomRangeKey] = useState(0);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showPurchaseOrders, setShowPurchaseOrders] = useState(false);
   const [sortBy, setSortBy] = useState('id');
   const [sortOrder, setSortOrder] = useState('desc');
   const [isLoading, setIsLoading] = useState(true);
@@ -66,8 +67,8 @@ const OrdersPage = ({ navigate }) => {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [customerDetailsEnabled, setCustomerDetailsEnabled] = useState(false);
-  const [shopDetails] = useState(null);
-  const [shopDetailsLoading] = useState(false);
+  const [shopDetails, setShopDetails] = useState(null);
+  const [shopDetailsLoading, setShopDetailsLoading] = useState(false);
   const [gstModalOpen, setGstModalOpen] = useState(false);
   const [gstCustomer, setGstCustomer] = useState({
     name: '',
@@ -131,10 +132,81 @@ const OrdersPage = ({ navigate }) => {
     }).format(Number.isFinite(amount) ? amount : 0);
   }, [gstInvoiceEnabled, shopDetails, shopDetailsLoading]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadShopDetails = async () => {
+      setShopDetailsLoading(true);
+      try {
+        const response = await api.get('/shop-details/me');
+        const details = response?.data?.shop_details || response?.data?.data || response?.data || null;
+        if (!cancelled) {
+          setShopDetails(details && typeof details === 'object' ? details : null);
+        }
+      } catch {
+        if (!cancelled) {
+          setShopDetails(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setShopDetailsLoading(false);
+        }
+      }
+    };
+    loadShopDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const getBillingType = useCallback((order = {}) => {
     const raw = String(order?.billing_type || order?.billingType || '').trim().toLowerCase();
     if (raw === 'wholesale') return 'wholesale';
     return 'retail';
+  }, []);
+
+  const getOrderKind = useCallback((order = {}) => {
+    const candidates = [
+      order?.order_type,
+      order?.orderType,
+      order?.type,
+      order?.module,
+      order?.source_type,
+      order?.sourceType,
+      order?.transaction_type,
+      order?.transactionType,
+      order?.billing_type,
+      order?.billingType,
+    ]
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean);
+    if (candidates.some((value) => value.includes('purchase'))) {
+      return 'purchase';
+    }
+    if (candidates.some((value) => value.includes('sale') || value.includes('billing'))) {
+      return 'billing';
+    }
+    const hasValue = (value) => value !== undefined && value !== null && String(value).trim() !== '';
+    const hasSupplier =
+      hasValue(order?.supplier_id) ||
+      hasValue(order?.supplierId) ||
+      hasValue(order?.supplier_name) ||
+      hasValue(order?.supplierName);
+    const hasPurchaseInvoice =
+      hasValue(order?.invoice_number) ||
+      hasValue(order?.invoiceNumber) ||
+      hasValue(order?.purchase_invoice_number);
+    const hasCustomer =
+      hasValue(order?.customer_id) ||
+      hasValue(order?.customerId) ||
+      hasValue(order?.customer_name) ||
+      hasValue(order?.customerName);
+    const hasPurchasePriceItems = Array.isArray(order?.items || order?.products)
+      ? (order?.items || order?.products).some((item) => Number(item?.purchase_price ?? item?.purchasePrice ?? 0) > 0)
+      : false;
+    if ((hasSupplier || hasPurchaseInvoice || hasPurchasePriceItems) && !hasCustomer) {
+      return 'purchase';
+    }
+    return 'billing';
   }, []);
 
   const generateLocalTxnId = () => {
@@ -160,13 +232,81 @@ const OrdersPage = ({ navigate }) => {
     return params;
   }, [pagination.page, pagination.limit, selectedRange, customStartDate, customEndDate, searchQuery, sortBy, sortOrder]);
 
+  const buildPendingOrderFromQueueEntry = useCallback((entry = {}) => {
+    const payload = entry?.payload || {};
+    if (entry?.type !== 'create') return null;
+    const clientOrderId = payload.client_order_id || entry.client_order_id || entry.id;
+    const localId = clientOrderId ? `local:${clientOrderId}` : `local:${entry.id}`;
+    const products = Array.isArray(payload.products) ? payload.products : [];
+    const productNames = products
+      .map((item) => item?.name || item?.product_name || item?.product || '')
+      .filter(Boolean);
+    const computedSubtotal = products.reduce((sum, item) => {
+      const qty = Number(item.quantity || item.qty || 0);
+      const price = Number(item.price || item.selling_price || 0);
+      return sum + qty * price;
+    }, 0);
+    const computedGst = payload.is_gst_enabled
+      ? products.reduce((sum, item) => {
+          const qty = Number(item.quantity || item.qty || 0);
+          const price = Number(item.price || item.selling_price || 0);
+          const gst = Number(item.gst_percent || item.gst || 0);
+          return sum + (qty * price * gst) / 100;
+        }, 0)
+      : 0;
+    const totalAmount = payload.total_amount ?? payload.total_price ?? (computedSubtotal + computedGst);
+    return {
+      id: localId,
+      local_id: entry.id || null,
+      client_order_id: clientOrderId || null,
+      sync_status: 'pending',
+      is_offline: true,
+      branch_id: payload.branch_id || null,
+      products_summary: productNames.slice(0, 3).join(', '),
+      product_names: productNames,
+      product_count: products.length,
+      customer_name: payload.customer_name || null,
+      customer_phone: payload.customer_phone || null,
+      customer_id: payload.customer_id || null,
+      total_amount: totalAmount,
+      total_paid: 0,
+      returned_amount: 0,
+      balance: null,
+      payment_status: null,
+      billing_type: payload.billing_type || payload.billingType || 'retail',
+      payment_mode: payload.payment_mode || payload.payment_method || payload.payment || null,
+      order_status: payload.order_status || 'pending',
+      is_gst_enabled: payload.is_gst_enabled === true,
+      created_at: payload.client_created_at || entry.createdAt || new Date().toISOString(),
+      products,
+    };
+  }, []);
+
   const loadCachedOrders = useCallback(async () => {
     try {
       const allOrders = await getAllCachedOrders();
-      let filtered = Array.isArray(allOrders) ? allOrders.slice() : [];
+      const queuedEntries = await getOfflineOrders().catch(() => []);
+      const pendingQueueOrders = (Array.isArray(queuedEntries) ? queuedEntries : [])
+        .map((entry) => buildPendingOrderFromQueueEntry(entry))
+        .filter(Boolean);
+      const merged = new Map();
+      (Array.isArray(allOrders) ? allOrders : []).forEach((order) => {
+        if (!order?.id) return;
+        merged.set(String(order.id), order);
+      });
+      pendingQueueOrders.forEach((order) => {
+        if (!order?.id) return;
+        if (!merged.has(String(order.id))) {
+          merged.set(String(order.id), order);
+        }
+      });
+      let filtered = Array.from(merged.values());
+      if (!showPurchaseOrders) {
+        filtered = filtered.filter((order) => getOrderKind(order) !== 'purchase');
+      }
 
       if (effectiveBranchId) {
-        filtered = filtered.filter((order) => order.branch_id === effectiveBranchId);
+        filtered = filtered.filter((order) => String(order.branch_id || '') === String(effectiveBranchId));
       }
 
       if (searchQuery) {
@@ -245,6 +385,7 @@ const OrdersPage = ({ navigate }) => {
       // ignore cache errors
     }
   }, [
+    buildPendingOrderFromQueueEntry,
     pagination.page,
     pagination.limit,
     searchQuery,
@@ -254,6 +395,8 @@ const OrdersPage = ({ navigate }) => {
     sortBy,
     sortOrder,
     effectiveBranchId,
+    showPurchaseOrders,
+    getOrderKind,
   ]);
 
   const syncOrdersSince = useCallback(async () => {
@@ -339,7 +482,11 @@ const OrdersPage = ({ navigate }) => {
       }
       const res = await api.get('/orders', { params: buildRangeParams() });
       const payload = res?.data || {};
-      setOrders(Array.isArray(payload.orders) ? payload.orders : []);
+      const fetchedOrders = Array.isArray(payload.orders) ? payload.orders : [];
+      const visibleOrders = showPurchaseOrders
+        ? fetchedOrders
+        : fetchedOrders.filter((order) => getOrderKind(order) !== 'purchase');
+      setOrders(visibleOrders);
       setCustomerDetailsEnabled(Boolean(payload.customer_details_enabled));
       setPagination((prev) => ({
         ...prev,
@@ -351,7 +498,7 @@ const OrdersPage = ({ navigate }) => {
 
       const totalRecords = Number(payload.pagination?.total_records || 0);
       const currentPage = Number(payload.pagination?.page || pagination.page);
-      const pageOrders = Array.isArray(payload.orders) ? payload.orders : [];
+      const pageOrders = fetchedOrders;
       cacheOrderDetailsFromList(pageOrders);
       (async () => {
         if (!navigator.onLine) return;
@@ -425,7 +572,7 @@ const OrdersPage = ({ navigate }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [buildRangeParams, cacheOrderDetailsFromList, customEndDate, customStartDate, navigate, selectedRange, showPopup, loadCachedOrders, pagination.page, ORDER_CACHE_FULL_SYNC_LIMIT, ORDER_CACHE_PAGE_SIZE, searchQuery, syncOrdersSince]);
+  }, [buildRangeParams, cacheOrderDetailsFromList, customEndDate, customStartDate, navigate, selectedRange, showPopup, loadCachedOrders, pagination.page, ORDER_CACHE_FULL_SYNC_LIMIT, ORDER_CACHE_PAGE_SIZE, searchQuery, syncOrdersSince, showPurchaseOrders, getOrderKind]);
 
   const fetchOrders = useCallback(async () => {
     if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
@@ -447,6 +594,20 @@ const OrdersPage = ({ navigate }) => {
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders, customRangeKey]);
+
+  useEffect(() => {
+    if (!navigator.onLine) return;
+    if (cacheSyncRef.current) return;
+    cacheSyncRef.current = true;
+    (async () => {
+      try {
+        await syncOrdersSince();
+      } finally {
+        cacheSyncRef.current = false;
+        loadCachedOrders();
+      }
+    })();
+  }, [syncOrdersSince, loadCachedOrders, selectedBranchId]);
 
   useEffect(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
@@ -981,6 +1142,28 @@ const OrdersPage = ({ navigate }) => {
     setReceiptOrder(null);
   };
 
+  const openReceiptEntryPrefill = useCallback((order) => {
+    const selected = order || drawerOrder;
+    if (!selected) return;
+    const customerId = selected?.customer_id || selected?.customer?.id || null;
+    const balanceAmount = Number(
+      selected?.balance ??
+      (Number(selected?.total_amount || 0) - Number(selected?.total_paid || 0) - Number(selected?.returned_amount || 0))
+    );
+    if (!customerId) {
+      showPopup('Customer is required to create receipt entry.', 'Validation');
+      return;
+    }
+    navigate('/accounts/receipt', {
+      state: {
+        receiptPrefill: {
+          customerId: String(customerId),
+          amount: Number.isFinite(balanceAmount) && balanceAmount > 0 ? Number(balanceAmount.toFixed(2)) : '',
+        },
+      },
+    });
+  }, [drawerOrder, navigate, showPopup]);
+
   const resolveOrderPhone = (order) =>
     order?.customer_phone ||
     order?.customer_mobile ||
@@ -1088,7 +1271,11 @@ const OrdersPage = ({ navigate }) => {
         ? order.products
         : [];
 
-    const headerLine = `${padRight('Item Name', 20)}${padLeft('Qty', 4)}${padLeft('Rate', 6)}${padLeft('Net', 8)}`;
+    const itemWidth = 17;
+    const qtyWidth = 4;
+    const rateWidth = 10;
+    const netWidth = 8;
+    const headerLine = `${padRight('Item Name', itemWidth)}${padLeft('Qty', qtyWidth)}${padLeft('Rate', rateWidth)}${padLeft('Net', netWidth)}`;
     const lines = [
       shopName,
       shopAddress,
@@ -1107,12 +1294,12 @@ const OrdersPage = ({ navigate }) => {
       const rate = formatReceiptAmount(item?.price || item?.selling_price || 0);
       const netValue = item?.total || item?.line_total || (Number(item?.quantity || item?.qty || 0) * Number(item?.price || item?.selling_price || 0));
       const net = formatReceiptAmount(netValue);
-      const nameLines = wrapText(name, 20);
+      const nameLines = wrapText(name, itemWidth);
       nameLines.forEach((line, index) => {
         if (index === 0) {
-          lines.push(`${padRight(line, 20)}${padLeft(qty, 4)}${padLeft(rate, 6)}${padLeft(net, 8)}`);
+          lines.push(`${padRight(line, itemWidth)}${padLeft(qty, qtyWidth)}${padLeft(rate, rateWidth)}${padLeft(net, netWidth)}`);
         } else {
-          lines.push(`${padRight(line, 20)}${padRight('', 4)}${padRight('', 6)}${padRight('', 8)}`);
+          lines.push(`${padRight(line, itemWidth)}${padRight('', qtyWidth)}${padRight('', rateWidth)}${padRight('', netWidth)}`);
         }
       });
     });
@@ -1170,6 +1357,12 @@ const OrdersPage = ({ navigate }) => {
           discount,
           total,
           shopName: shopDetails?.shop_name || shopDetails?.name || shopDetails?.business_name || 'Your Shop',
+          printConfig: {
+            paperWidth: 80,
+            fontStyle: 'A',
+            fontScale: 1,
+            rateWidth: 10,
+          },
         }),
         signal: controller.signal,
       });
@@ -1239,7 +1432,7 @@ const OrdersPage = ({ navigate }) => {
         maximumFractionDigits: 2,
       })}`;
 
-      const shop = shopDetails || {};
+      const shop = shopDetails || tenantConfig || {};
       const shopName = shop.shop_name || shop.name || shop.business_name || 'Your Shop Name';
       const shopGST = shop.gst_number || shop.gstin || shop.gstin_number || 'GSTIN NOT PROVIDED';
       const addressLine = shop.address_line || shop.address || shop.shop_address || shop.address1 || '';
@@ -1469,6 +1662,14 @@ const OrdersPage = ({ navigate }) => {
     return [];
   };
 
+  const handleOpenPaymentDetails = (event, order) => {
+    if (event) {
+      event.stopPropagation();
+    }
+    if (!order?.id) return;
+    openDrawer(order.id);
+  };
+
   const getDrawerProductItems = (order) => {
     if (!order) return [];
 
@@ -1564,7 +1765,7 @@ const OrdersPage = ({ navigate }) => {
           {returnBadge}
           <button
             className="payment-btn warning"
-            onClick={(event) => handlePaymentAction(event, order)}
+            onClick={(event) => handleOpenPaymentDetails(event, order)}
             disabled={paymentSubmittingId === order.id}
           >
             {paymentSubmittingId === order.id ? 'Saving...' : 'Pay Balance'}
@@ -1577,7 +1778,7 @@ const OrdersPage = ({ navigate }) => {
         {returnBadge}
         <button
           className="payment-btn danger"
-          onClick={(event) => handlePaymentAction(event, order)}
+          onClick={(event) => handleOpenPaymentDetails(event, order)}
           disabled={paymentSubmittingId === order.id}
         >
           {paymentSubmittingId === order.id ? 'Saving...' : 'Make Payment'}
@@ -1645,6 +1846,7 @@ const OrdersPage = ({ navigate }) => {
               onChange={(event) => handleRangeChange(event.target.value)}
               aria-label="Filter orders by date range"
             >
+              <option value="all">All Time</option>
               <option value="today">Today</option>
               <option value="this_week">This Week</option>
               <option value="this_month">This Month</option>
@@ -1668,6 +1870,17 @@ const OrdersPage = ({ navigate }) => {
             >
               Refresh from server
             </button>
+            <label className="orders-purchase-toggle">
+              <input
+                type="checkbox"
+                checked={showPurchaseOrders}
+                onChange={(event) => {
+                  setShowPurchaseOrders(event.target.checked);
+                  setPagination((prev) => ({ ...prev, page: 1 }));
+                }}
+              />
+              Show Purchase Orders
+            </label>
             {selectedRange === 'custom' && (
               <div className="range-custom">
                 <input
@@ -1742,8 +1955,10 @@ const OrdersPage = ({ navigate }) => {
                   typeof orderIdRaw === 'string' && orderIdRaw.startsWith('local:')
                     ? 'LOCAL'
                     : orderIdRaw;
+                const orderKind = getOrderKind(order);
+                const isPurchaseOrder = orderKind === 'purchase';
                 const billingType = getBillingType(order);
-                const isWholesale = billingType === 'wholesale';
+                const isWholesale = !isPurchaseOrder && billingType === 'wholesale';
                 return (
                 <tr
                   key={order.id}
@@ -1760,6 +1975,11 @@ const OrdersPage = ({ navigate }) => {
                   <td>
                     <span className="order-id-cell">
                       #{orderIdText}
+                      {showPurchaseOrders && (
+                        <span className={`order-type-tag ${isPurchaseOrder ? 'purchase' : 'billing'}`}>
+                          {isPurchaseOrder ? 'Purchase' : 'Billing'}
+                        </span>
+                      )}
                       {isWholesale && (
                         <span className="order-type-tag wholesale">Wholesale</span>
                       )}
@@ -2043,6 +2263,15 @@ const OrdersPage = ({ navigate }) => {
                       >
                         {paymentSubmittingId === drawerOrder?.id ? 'Saving...' : 'Add Payment'}
                       </button>
+                      {receiptModuleEnabled && (
+                        <button
+                          className="btn btn-outline-info"
+                          type="button"
+                          onClick={() => openReceiptEntryPrefill(drawerOrder)}
+                        >
+                          Collect in Receipt
+                        </button>
+                      )}
                     </>
                   ) : (
                     <span className="payment-badge paid">Fully Paid</span>

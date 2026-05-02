@@ -6,6 +6,14 @@ import { getLocalStaff, upsertLocalExpense } from '../../core/db';
 import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './StaffExpenses.css';
 
+const getLocalDateValue = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
 const ExpenseAdd = () => {
   const { showPopup } = usePopup();
   const [staff, setStaff] = useState([]);
@@ -52,7 +60,7 @@ const ExpenseAdd = () => {
       type: form.type,
       category: form.category.trim(),
       amount,
-      date: form.date || new Date().toISOString().slice(0, 10),
+      date: form.date || getLocalDateValue(),
       staffId: form.type === 'staff' ? form.staffId : null,
       paymentMethod: form.paymentMethod,
       notes: form.notes.trim(),
@@ -61,7 +69,8 @@ const ExpenseAdd = () => {
       updatedAt: new Date().toISOString(),
     };
     await upsertLocalExpense(payload);
-    showPopup('Saved Offline', 'Offline');
+    window.dispatchEvent(new CustomEvent('staff-expenses-sync-updated'));
+    showPopup('Saved Successfully', 'Success');
     setErrors({});
     setForm((prev) => ({
       ...prev,

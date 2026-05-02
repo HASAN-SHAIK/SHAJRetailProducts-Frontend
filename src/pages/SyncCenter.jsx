@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
-import { getSyncQueueItems } from '../core/db';
+import { getOfflineImports, getSyncQueueItems, updateSyncQueueItem } from '../core/db';
 import { getOfflineOrderQueue, processOfflineQueue } from '../utils/offlineOrders';
 import { syncAllCustomers } from '../utils/customersSync';
 import { syncAllImports } from '../utils/importSync';
@@ -37,6 +37,8 @@ const SyncCenter = () => {
   const { showPopup } = usePopup();
   const userDetails = useSelector((state) => state.user.userDetails);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
+  const selectedBranchName = useBranchStore((state) => state.selectedBranchName);
+  const branches = useBranchStore((state) => state.branches);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
@@ -54,6 +56,8 @@ const SyncCenter = () => {
   const [mergingKey, setMergingKey] = useState('');
   const [consistencyRun, setConsistencyRun] = useState(null);
   const [consistencyBusy, setConsistencyBusy] = useState(false);
+  const [importHistory, setImportHistory] = useState([]);
+  const [importHistoryLoading, setImportHistoryLoading] = useState(false);
 
   const loadQueues = useCallback(async (silent = false) => {
     if (silent) {
@@ -76,6 +80,24 @@ const SyncCenter = () => {
   useEffect(() => {
     loadQueues();
   }, [loadQueues]);
+
+  const loadImportHistory = useCallback(async () => {
+    setImportHistoryLoading(true);
+    try {
+      const list = await getOfflineImports();
+      const safe = Array.isArray(list) ? list : [];
+      safe.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      setImportHistory(safe);
+    } catch {
+      setImportHistory([]);
+    } finally {
+      setImportHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadImportHistory();
+  }, [loadImportHistory]);
 
   const loadDuplicates = useCallback(async (entity = duplicateEntity) => {
     setDuplicatesLoading(true);
@@ -136,6 +158,28 @@ const SyncCenter = () => {
       queueFailed: failedQueue,
     };
   }, [offlineOrders, syncQueue]);
+
+  const getBranchLabel = useCallback((entry) => {
+    const rawBranchId = entry?.branch_id ?? entry?.branchId ?? entry?.payload?.branch_id ?? entry?.payload?.branchId;
+    const branchId = rawBranchId !== null && rawBranchId !== undefined ? String(rawBranchId) : '';
+    if (!branchId) return '-';
+    if (branchId === 'all') return 'All';
+    if (String(selectedBranchId || '') === branchId && selectedBranchName) return selectedBranchName;
+    const match = (Array.isArray(branches) ? branches : []).find((branch) => String(branch?.id) === branchId);
+    return String(match?.name || match?.branch_name || match?.title || branchId);
+  }, [branches, selectedBranchId, selectedBranchName]);
+
+  const purchaseSyncNotes = useMemo(() => {
+    return (Array.isArray(syncQueue) ? syncQueue : [])
+      .filter((entry) => String(entry?.type || '').toLowerCase() === 'purchase')
+      .filter((entry) => isQueuePending(entry?.status))
+      .sort((a, b) => {
+        const aTime = new Date(a?.updated_at || a?.updatedAt || a?.createdAt || 0).getTime();
+        const bTime = new Date(b?.updated_at || b?.updatedAt || b?.createdAt || 0).getTime();
+        return bTime - aTime;
+      })
+      .slice(0, 20);
+  }, [syncQueue]);
 
   const runModuleSync = useCallback(async (moduleKey, runner, label) => {
     setRunningModule(moduleKey);
@@ -205,6 +249,9 @@ const SyncCenter = () => {
     if (syncingAll || runningModule) return;
     const result = await runModuleSync(module.key, module.run, module.label);
     await loadQueues(true);
+    if (module.key === 'imports') {
+      await loadImportHistory();
+    }
     if (!result.ok) {
       showPopup(result.message || `${module.label} sync failed`, 'Sync Center');
     }
@@ -221,6 +268,7 @@ const SyncCenter = () => {
       }
     }
     await loadQueues(true);
+    await loadImportHistory();
     setSyncingAll(false);
     if (failures > 0) {
       showPopup(`Retry all finished with ${failures} module error(s).`, 'Sync Center');
@@ -374,8 +422,31 @@ const SyncCenter = () => {
     }
   };
 
+  const handleRetryImport = async (importId) => {
+    if (!importId) return;
+    try {
+      const queue = await getSyncQueueItems({ type: 'import' });
+      const entry = queue.find((item) => item.refId === importId || item.importId === importId);
+      if (entry) {
+        await updateSyncQueueItem({
+          ...entry,
+          status: 'pending',
+          retryCount: Number(entry.retryCount || 0),
+        });
+      }
+      await loadImportHistory();
+      await loadQueues(true);
+      if (navigator.onLine) {
+        await syncAllImports().catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   return (
-    <div className="sync-center-page wow-page">
+    <div className="wow-page">
+      <div className="wow-content container-fluid p-0 sync-center-page">
       <div className="sync-center-head">
         <div>
           <h3>Sync Center</h3>
@@ -576,6 +647,110 @@ const SyncCenter = () => {
       </div>
 
       <div className="sync-table-wrap mt-3">
+        <h5>Import History</h5>
+        <div className="sync-center-actions mb-2">
+          <button
+            type="button"
+            className="btn btn-outline-primary btn-sm"
+            onClick={() => syncAllImports().then(() => loadImportHistory())}
+            disabled={!navigator.onLine}
+          >
+            Sync Now
+          </button>
+        </div>
+        <div className="table-responsive">
+          <table className="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Items</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {importHistoryLoading ? (
+                <tr>
+                  <td colSpan={4} className="text-secondary">Loading imports...</td>
+                </tr>
+              ) : importHistory.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="text-secondary">No imports yet.</td>
+                </tr>
+              ) : importHistory.map((entry) => {
+                const status = humanizeStatus(entry?.status);
+                return (
+                  <tr key={entry.id}>
+                    <td>{formatDateTime(entry.createdAt)}</td>
+                    <td>{entry.totalItems || 0}</td>
+                    <td>
+                      <span className={`sync-status-badge status-${status}`}>{status}</span>
+                    </td>
+                    <td>
+                      {status === 'failed' && (
+                        <button
+                          type="button"
+                          className="btn btn-outline-warning btn-sm"
+                          onClick={() => handleRetryImport(entry.id)}
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="sync-table-wrap mt-3">
+        <h5>Purchase Sync Notes</h5>
+        <div className="table-responsive">
+          <table className="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Purchase Ref</th>
+                <th>Branch</th>
+                <th>Status</th>
+                <th>Retries</th>
+                <th>Reason</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="text-secondary">Loading notes...</td>
+                </tr>
+              ) : purchaseSyncNotes.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-secondary">No purchase sync notes.</td>
+                </tr>
+              ) : purchaseSyncNotes.map((entry, index) => {
+                const status = humanizeStatus(entry?.status);
+                return (
+                  <tr key={entry?.id || `purchase-note-${index}`}>
+                    <td>{index + 1}</td>
+                    <td>{entry?.entityId || entry?.refId || '-'}</td>
+                    <td>{getBranchLabel(entry)}</td>
+                    <td>
+                      <span className={`sync-status-badge status-${status}`}>{status}</span>
+                    </td>
+                    <td>{Number(entry?.retryCount || entry?.retries || 0)}</td>
+                    <td>{entry?.last_error || '-'}</td>
+                    <td>{formatDateTime(entry?.updated_at || entry?.updatedAt || entry?.createdAt)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="sync-table-wrap mt-3">
         <h5>Offline Orders Queue</h5>
         <div className="table-responsive">
           <table className="table table-sm align-middle">
@@ -619,6 +794,7 @@ const SyncCenter = () => {
                 <th>Type</th>
                 <th>Action</th>
                 <th>Entity</th>
+                <th>Branch</th>
                 <th>Status</th>
                 <th>Retries</th>
                 <th>Updated</th>
@@ -627,11 +803,11 @@ const SyncCenter = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="text-secondary">Loading queue...</td>
+                  <td colSpan={8} className="text-secondary">Loading queue...</td>
                 </tr>
               ) : syncQueue.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-secondary">No sync queue entries found.</td>
+                  <td colSpan={8} className="text-secondary">No sync queue entries found.</td>
                 </tr>
               ) : syncQueue.map((entry, index) => {
                 const status = humanizeStatus(entry?.status);
@@ -641,6 +817,7 @@ const SyncCenter = () => {
                     <td>{entry?.type || '-'}</td>
                     <td>{entry?.action || '-'}</td>
                     <td>{entry?.entityId || entry?.refId || '-'}</td>
+                    <td>{getBranchLabel(entry)}</td>
                     <td>
                       <span className={`sync-status-badge status-${status}`}>{status}</span>
                     </td>
@@ -652,6 +829,7 @@ const SyncCenter = () => {
             </tbody>
           </table>
         </div>
+      </div>
       </div>
     </div>
   );

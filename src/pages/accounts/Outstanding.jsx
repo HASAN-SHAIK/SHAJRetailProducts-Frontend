@@ -1,69 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import api from '../../utils/axios';
 import { fetchOutstanding } from '../../services/accountingService';
-import { getAllCustomers, getAllSuppliersCache, upsertCustomersBulk, updateSuppliersCacheBulk } from '../../core/db';
 import './Accounts.css';
 
 const Outstanding = () => {
   const [tab, setTab] = useState('customers');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
-
-  const loadOffline = async () => {
-    if (tab === 'customers') {
-      const cached = await getAllCustomers();
-      return (Array.isArray(cached) ? cached : []).map((customer) => {
-        const outstanding = Number(customer.current_balance || 0);
-        return {
-          party_id: customer.id,
-          party_name: customer.name || '-',
-          total_debit: outstanding,
-          total_credit: 0,
-          outstanding,
-        };
-      });
-    }
-    const cached = await getAllSuppliersCache();
-    return (Array.isArray(cached) ? cached : []).map((supplier) => {
-      const outstanding = Number(supplier.current_balance || 0);
-      return {
-        party_id: supplier.id,
-        party_name: supplier.name || '-',
-        total_debit: 0,
-        total_credit: outstanding,
-        outstanding,
-      };
-    });
-  };
+  const [sortDir, setSortDir] = useState('desc');
+  const [search, setSearch] = useState('');
 
   const loadOnline = async () => {
-    const payload = await fetchOutstanding({ party_type: tab === 'customers' ? 'customer' : 'supplier' });
+    const payload = await fetchOutstanding({ type: tab === 'customers' ? 'customer' : 'supplier' });
     return Array.isArray(payload.rows) ? payload.rows : [];
-  };
-
-  const hydrateCaches = async () => {
-    if (!navigator.onLine) return;
-    if (tab === 'customers') {
-      const res = await api.get('/customers', { params: { limit: 500 } });
-      const list = res?.data?.data?.customers || res?.data?.customers || [];
-      if (Array.isArray(list) && list.length) {
-        upsertCustomersBulk(list).catch(() => {});
-      }
-    } else {
-      const res = await api.get('/suppliers', { params: { limit: 500 } });
-      const list = res?.data?.data?.suppliers || res?.data?.suppliers || [];
-      if (Array.isArray(list) && list.length) {
-        updateSuppliersCacheBulk(list).catch(() => {});
-      }
-    }
   };
 
   const load = async () => {
     setLoading(true);
     try {
-      const data = navigator.onLine ? await loadOnline() : await loadOffline();
+      if (!navigator.onLine) {
+        setRows([]);
+        return;
+      }
+      const data = await loadOnline();
       setRows(data);
-      hydrateCaches().catch(() => {});
     } catch {
       setRows([]);
     } finally {
@@ -74,6 +33,24 @@ const Outstanding = () => {
   useEffect(() => {
     load();
   }, [tab]);
+
+  const filteredRows = rows.filter((row) => {
+    const needle = String(search || '').trim().toLowerCase();
+    if (!needle) return true;
+    return String(row.name || '').toLowerCase().includes(needle);
+  });
+
+  const sortedRows = [...filteredRows].sort((a, b) => {
+    const left = Number(a.outstanding || 0);
+    const right = Number(b.outstanding || 0);
+    return sortDir === 'desc' ? right - left : left - right;
+  });
+
+  const outstandingClass = (value) => {
+    if (!Number.isFinite(value) || value === 0) return '';
+    if (tab === 'customers') return value > 0 ? 'text-success' : 'text-danger';
+    return value > 0 ? 'text-danger' : 'text-success';
+  };
 
   return (
     <div className="billing-page accounts-page">
@@ -97,9 +74,23 @@ const Outstanding = () => {
             Suppliers
           </button>
         </div>
-        <button className="btn btn-outline-secondary" type="button" onClick={load}>
-          Refresh
+        <button
+          className="btn btn-outline-secondary"
+          type="button"
+          onClick={() => setSortDir((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
+        >
+          Sort Outstanding: {sortDir === 'desc' ? 'High to Low' : 'Low to High'}
         </button>
+        <button className="btn btn-outline-secondary" type="button" onClick={load}>
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
+        <input
+          className="form-control billing-input"
+          style={{ maxWidth: 280 }}
+          placeholder={tab === 'customers' ? 'Search customer' : 'Search supplier'}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
       </div>
       <div className="billing-table-wrapper">
         <table className="billing-table">
@@ -119,17 +110,19 @@ const Outstanding = () => {
             )}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan="4" className="billing-empty">No data.</td>
+                <td colSpan="4" className="billing-empty">
+                  {navigator.onLine ? 'No data.' : 'Outstanding requires online ledger sync.'}
+                </td>
               </tr>
             )}
-            {!loading && rows.map((row) => {
+            {!loading && sortedRows.map((row) => {
               const outstanding = Number(row.outstanding || 0);
               return (
-                <tr key={row.party_id}>
-                  <td>{row.party_name || '-'}</td>
+                <tr key={row.id}>
+                  <td>{row.name || '-'}</td>
                   <td>INR {Number(row.total_debit || 0).toFixed(2)}</td>
                   <td>INR {Number(row.total_credit || 0).toFixed(2)}</td>
-                  <td className={outstanding > 0 ? 'text-success' : outstanding < 0 ? 'text-danger' : ''}>
+                  <td className={outstandingClass(outstanding)}>
                     INR {outstanding.toFixed(2)}
                   </td>
                 </tr>

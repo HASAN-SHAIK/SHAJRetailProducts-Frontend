@@ -14,6 +14,39 @@ const sorters = {
   priceLow: (a, b) => Number(a?.price ?? a?.selling_price ?? 0) - Number(b?.price ?? b?.selling_price ?? 0),
 };
 
+const searchRemoteProducts = async (query) => {
+  const text = String(query || '').trim();
+  if (!text) return [];
+  try {
+    const saleResponse = await api.get('/products/search/sale', {
+      params: { name: text },
+    });
+    const saleList =
+      saleResponse?.data?.data?.products ||
+      saleResponse?.data?.products ||
+      saleResponse?.data?.data ||
+      [];
+    if (Array.isArray(saleList) && saleList.length) {
+      return saleList;
+    }
+  } catch {
+    // fall through to generic endpoint
+  }
+  try {
+    const fallbackResponse = await api.get('/products/search', {
+      params: { view: 'mobile', q: text, name: text },
+    });
+    const fallbackList =
+      fallbackResponse?.data?.data?.products ||
+      fallbackResponse?.data?.products ||
+      fallbackResponse?.data?.data ||
+      [];
+    return Array.isArray(fallbackList) ? fallbackList : [];
+  } catch {
+    return [];
+  }
+};
+
 const ProductsMobile = () => {
   const [query, setQuery] = useState('');
   const [products, setProducts] = useState([]);
@@ -42,13 +75,8 @@ const ProductsMobile = () => {
           return;
         }
 
-        const res = await api.get('/products/search', {
-          params: {
-            view: 'mobile',
-            q: query.trim(),
-          },
-        });
-        setProducts(res.data?.products || []);
+        const remoteList = await searchRemoteProducts(query.trim());
+        setProducts(Array.isArray(remoteList) ? remoteList : []);
       } catch {
         setProducts([]);
       } finally {

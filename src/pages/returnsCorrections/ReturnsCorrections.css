@@ -1,6 +1,7 @@
 .returns-page {
   display: grid;
   gap: 20px;
+  color: #e2e8f0;
 }
 
 .returns-page .form-label {
@@ -55,6 +56,10 @@
 .returns-table td {
   padding: 10px 8px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.returns-table td {
+  color: #e2e8f0;
 }
 
 .returns-table th {

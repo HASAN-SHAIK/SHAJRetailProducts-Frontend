@@ -115,6 +115,17 @@ const SalaryTracking = () => {
     };
   }, [form.staffId, form.month]);
 
+  useEffect(() => {
+    if (!form.staffId) return;
+    const selectedStaff = staff.find((item) => String(item.staffId) === String(form.staffId));
+    if (!selectedStaff) return;
+    const staffSalary = Number(selectedStaff.salary ?? 0);
+    setForm((prev) => ({
+      ...prev,
+      baseSalary: Number.isFinite(staffSalary) ? String(staffSalary) : prev.baseSalary,
+    }));
+  }, [form.staffId, staff]);
+
   const calculations = useMemo(() => {
     const base = Number(form.baseSalary || 0);
     const bonus = Number(form.bonus || 0);
@@ -158,7 +169,8 @@ const SalaryTracking = () => {
       month: form.month,
       baseSalary: Number(form.baseSalary || 0),
       bonus: Number(form.bonus || 0),
-      deductions: Number(form.deductions || 0),
+      deductions: calculations.totalDeductions,
+      manualDeductions: Number(form.deductions || 0),
       autoDeductStaffExpenses,
       staffExpenseDeduction: calculations.staffExpenseDeduction,
       totalDeductions: calculations.totalDeductions,
@@ -171,7 +183,7 @@ const SalaryTracking = () => {
       updatedAt: new Date().toISOString(),
     };
     await upsertLocalSalary(payload);
-    showPopup('Saved Offline', 'Offline');
+    showPopup('Saved Successfully', 'Success');
     setForm((prev) => ({ ...prev, baseSalary: '', bonus: '', deductions: '', paidAmount: '' }));
     loadSalaries();
   };
@@ -226,7 +238,7 @@ const SalaryTracking = () => {
               <input type="number" className="form-control" name="bonus" value={form.bonus} onChange={handleChange} />
             </div>
             <div className="col-md-4">
-              <label className="form-label">Deductions</label>
+              <label className="form-label">Deductions (Manual)</label>
               <input
                 type="number"
                 className="form-control"
@@ -252,7 +264,7 @@ const SalaryTracking = () => {
             </span>
             {autoDeductStaffExpenses && (
               <span className="pill-badge">
-                Staff Expenses Deduction: {Number(linkedStaffExpenseTotal || 0).toFixed(2)}
+                Staff Expenses Deduction: {Number(linkedStaffExpenseTotal || 0).toFixed(2)} | Total Deductions: {Number(calculations.totalDeductions || 0).toFixed(2)}
               </span>
             )}
             <button className="btn btn-primary" type="submit">

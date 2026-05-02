@@ -11,8 +11,6 @@ const CustomerDetail = () => {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('orders');
   const [loading, setLoading] = useState(true);
-  const [payment, setPayment] = useState({ amount: '', payment_mode: 'cash', notes: '' });
-  const [error, setError] = useState('');
 
   const resolveCustomerId = (value) => {
     const numeric = Number(value);
@@ -21,7 +19,6 @@ const CustomerDetail = () => {
 
   const fetchDetail = async ({ forceRemote = false } = {}) => {
     setLoading(true);
-    setError('');
     const cached = await getCustomerById(resolveCustomerId(id));
     if (cached) {
       const cachedOrders = await getCachedOrdersByCustomer(cached);
@@ -53,18 +50,6 @@ const CustomerDetail = () => {
   useEffect(() => {
     fetchDetail();
   }, [id]);
-
-  const handlePayment = async () => {
-    if (!payment.amount) return;
-    try {
-      await api.post(`/customers/${id}/payments`, payment);
-      setPayment({ amount: '', payment_mode: 'cash', notes: '' });
-      fetchDetail();
-      setTab('payments');
-    } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to add payment');
-    }
-  };
 
   if (loading) {
     return (
@@ -189,43 +174,13 @@ const CustomerDetail = () => {
 
       {tab === 'payments' && (
         <div className="customer-card">
-          <div className="customer-form-grid">
-            <label className="billing-label">
-              Amount
-              <input
-                className="form-control form-control-sm billing-input"
-                type="number"
-                value={payment.amount}
-                onChange={(event) => setPayment((prev) => ({ ...prev, amount: event.target.value }))}
-              />
-            </label>
-            <label className="billing-label">
-              Mode
-              <select
-                className="form-select form-select-sm"
-                value={payment.payment_mode}
-                onChange={(event) => setPayment((prev) => ({ ...prev, payment_mode: event.target.value }))}
-              >
-                <option value="cash">Cash</option>
-                <option value="upi">UPI</option>
-                <option value="bank">Bank</option>
-              </select>
-            </label>
-            <label className="billing-label">
-              Notes
-              <input
-                className="form-control form-control-sm billing-input"
-                value={payment.notes}
-                onChange={(event) => setPayment((prev) => ({ ...prev, notes: event.target.value }))}
-              />
-            </label>
-            <div style={{ alignSelf: 'end' }}>
-              <button className="btn btn-success" type="button" onClick={handlePayment}>
-                Add Payment
-              </button>
-            </div>
-            {error && <div className="billing-message">{error}</div>}
-          </div>
+          <button
+            className="btn btn-success"
+            type="button"
+            onClick={() => navigate(`/accounts/receipt?party_type=customer&party_id=${id}`)}
+          >
+            Add Receipt
+          </button>
 
           <div className="billing-table-wrapper" style={{ marginTop: '16px' }}>
             <table className="billing-table">

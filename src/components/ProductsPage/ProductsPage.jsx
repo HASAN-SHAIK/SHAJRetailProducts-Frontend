@@ -7,24 +7,18 @@ import AddProductModalComponent from './AddModalComponent/AddProductModalCompone
 import { useSelector } from 'react-redux';
 import { preloadAllCaches, preloadProductsToIndexedDb } from '../../utils/indexedDb';
 import {
-  addOfflineImport,
-  addSyncQueueItem,
   getAllBatches,
   getAllProducts,
   getProductByBarcode,
-  getOfflineImports,
-  getSyncQueueItems,
   updateBatchesBulk,
   updateProductsBulk,
-  updateSyncQueueItem,
 } from '../../core/db';
 import { runDeltaSync } from '../../utils/deltaSync';
 import { usePopup } from '../common/PopUp/PopupProvider';
 import { useBranchStore } from '../../store/branchStore';
 import { createOfflineProduct, deleteOfflineProduct, updateOfflineProduct } from '../../utils/offlineProducts';
-import { syncAllInventory } from '../../utils/inventorySync';
-import { syncAllImports } from '../../utils/importSync';
 import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
+import { getSettings } from '../../services/settingsService';
 
 const ProductsPage = ({ navigate }) => {
 //Modal data
@@ -255,40 +249,24 @@ const ProductsPage = ({ navigate }) => {
  const [batchRowsByProductKey, setBatchRowsByProductKey] = useState({});
  const [batchLoadingByProductKey, setBatchLoadingByProductKey] = useState({});
  const [batchAvailableByProductKey, setBatchAvailableByProductKey] = useState({});
+ const [batchExpiryByProductKey, setBatchExpiryByProductKey] = useState({});
+ const [batchEditMap, setBatchEditMap] = useState({});
+ const [batchSavingMap, setBatchSavingMap] = useState({});
  const [importModalOpen, setImportModalOpen] = useState(false);
  const [importFile, setImportFile] = useState(null);
- const [importResult, setImportResult] = useState(null);
+  const [importResult, setImportResult] = useState(null);
+  const [isOpeningCompleted, setIsOpeningCompleted] = useState(true);
  const [importError, setImportError] = useState('');
  const [importing, setImporting] = useState(false);
   const [importPreviewRows, setImportPreviewRows] = useState([]);
   const [importPreviewError, setImportPreviewError] = useState('');
   const [importParsing, setImportParsing] = useState(false);
   const [autoCategoryEnabled, setAutoCategoryEnabled] = useState(true);
-  const [syncingInventory, setSyncingInventory] = useState(false);
-  const [importHistory, setImportHistory] = useState([]);
-  const [importHistoryLoading, setImportHistoryLoading] = useState(false);
 
   useEffect(() => {
     fetchCategories();
   }, []);
 
-  const loadImportHistory = useCallback(async () => {
-    setImportHistoryLoading(true);
-    try {
-      const list = await getOfflineImports();
-      const safe = Array.isArray(list) ? list : [];
-      safe.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-      setImportHistory(safe);
-    } catch {
-      setImportHistory([]);
-    } finally {
-      setImportHistoryLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadImportHistory();
-  }, [loadImportHistory]);
 
   useEffect(() => {
     if (!formData.product_name) {
@@ -377,6 +355,67 @@ const ProductsPage = ({ navigate }) => {
   }, [selectedBranchId]);
 
   const normalizeValue = (value) => String(value ?? '').toLowerCase();
+  const isLocalProductId = (value) => {
+    const text = String(value || '').toLowerCase();
+    return (
+      text.startsWith('temp_') ||
+      text.startsWith('temp:') ||
+      text.startsWith('local_') ||
+      text.startsWith('local:') ||
+      text.startsWith('tmp:')
+    );
+  };
+  const asNumberOrZero = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const productIdentityKey = (product) => {
+    const barcode = String(product?.barcode || '').trim();
+    if (barcode && !barcode.startsWith('id:')) {
+      return `barcode:${barcode.toLowerCase()}`;
+    }
+    const name = String(product?.name ?? product?.product_name ?? '').trim().toLowerCase();
+    const company = String(product?.company ?? product?.company_name ?? '').trim().toLowerCase();
+    const branch = String(product?.branch_id ?? '').trim().toLowerCase();
+    if (name) return `name:${name}|company:${company}|branch:${branch}`;
+    return `id:${String(product?.id ?? product?.product_id ?? product?.productId ?? '')}`;
+  };
+  const pickPreferredProduct = (current, candidate) => {
+    if (!current) return candidate;
+    const score = (item) => {
+      const id = item?.id ?? item?.product_id ?? item?.productId ?? '';
+      const synced = String(item?.sync_status ?? item?.syncStatus ?? '').toLowerCase() === 'synced';
+      const mrp = asNumberOrZero(item?.mrp ?? item?.mrp_price);
+      const selling = asNumberOrZero(item?.selling_price ?? item?.sellingPrice);
+      const purchase = asNumberOrZero(item?.purchase_price);
+      const stock = asNumberOrZero(item?.stock_quantity ?? item?.stock ?? item?.quantity);
+      const updatedAt = new Date(item?.updated_at ?? item?.updatedAt ?? item?.created_at ?? 0).getTime() || 0;
+      return {
+        rank:
+          (isLocalProductId(id) ? 0 : 50) +
+          (synced ? 30 : 0) +
+          (mrp > 0 ? 8 : 0) +
+          (selling > 0 ? 5 : 0) +
+          (purchase > 0 ? 5 : 0) +
+          (stock >= 0 ? 1 : 0),
+        updatedAt,
+      };
+    };
+    const a = score(current);
+    const b = score(candidate);
+    if (b.rank > a.rank) return candidate;
+    if (b.rank < a.rank) return current;
+    return b.updatedAt >= a.updatedAt ? candidate : current;
+  };
+  const dedupeProducts = (list = []) => {
+    const map = new Map();
+    (Array.isArray(list) ? list : []).forEach((item) => {
+      const key = productIdentityKey(item);
+      const existing = map.get(key);
+      map.set(key, pickPreferredProduct(existing, item));
+    });
+    return Array.from(map.values());
+  };
   const normalizeNumericInput = (value) => {
     const trimmed = String(value ?? '').trim();
     if (!trimmed) return null;
@@ -534,16 +573,16 @@ const ProductsPage = ({ navigate }) => {
     setErrorMessage('');
     try {
       let localAll = await getAllProducts();
-      let localList = (Array.isArray(localAll) ? localAll : []).filter(
+      let localList = dedupeProducts((Array.isArray(localAll) ? localAll : []).filter(
         (item) => !item?.is_deleted
-      );
+      ));
 
       if (navigator.onLine && (forceApiFetch || localList.length === 0)) {
         await runDeltaSync({ branchId: effectiveBranchId });
         localAll = await getAllProducts();
-        localList = (Array.isArray(localAll) ? localAll : []).filter(
+        localList = dedupeProducts((Array.isArray(localAll) ? localAll : []).filter(
           (item) => !item?.is_deleted
-        );
+        ));
       }
 
       const localFiltered = applyLocalFilters(localList);
@@ -635,6 +674,120 @@ const ProductsPage = ({ navigate }) => {
     return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
+  const getBatchRowKey = (productKey, batch, index) =>
+    `${productKey || 'product'}::${String(batch?.id || batch?.batch_number || index || '')}`;
+
+  const getBatchDraftValue = (productKey, batch, index, field) => {
+    const rowKey = getBatchRowKey(productKey, batch, index);
+    if (batchEditMap[rowKey] && Object.prototype.hasOwnProperty.call(batchEditMap[rowKey], field)) {
+      return batchEditMap[rowKey][field];
+    }
+    return batch?.[field] ?? '';
+  };
+
+  const updateBatchDraftField = (productKey, batch, index, field, value) => {
+    const rowKey = getBatchRowKey(productKey, batch, index);
+    const originalValue = batch?.[field] ?? '';
+    const normalizedIncoming = field === 'expiry_date'
+      ? String(value || '').trim()
+      : normalizeNumericInput(value);
+    const normalizedOriginal = field === 'expiry_date'
+      ? String(originalValue || '').trim()
+      : normalizeNumericInput(originalValue);
+    setBatchEditMap((prev) => {
+      const next = { ...prev };
+      const rowDraft = { ...(next[rowKey] || {}) };
+      if (normalizedIncoming === normalizedOriginal) {
+        delete rowDraft[field];
+      } else {
+        rowDraft[field] = value;
+      }
+      if (Object.keys(rowDraft).length === 0) {
+        delete next[rowKey];
+      } else {
+        next[rowKey] = rowDraft;
+      }
+      return next;
+    });
+  };
+
+  const saveBatchRowChanges = async (productKey, batch, index) => {
+    if (userDetails.role !== 'admin') return;
+    const rowKey = getBatchRowKey(productKey, batch, index);
+    const draft = batchEditMap[rowKey];
+    if (!draft || !batch?.id) return;
+    if (batchSavingMap[rowKey]) return;
+    const toNumberOrExisting = (raw, existing) => {
+      if (raw === undefined) return existing;
+      const normalized = normalizeNumericInput(raw);
+      const parsed = Number(normalized);
+      return Number.isFinite(parsed) ? parsed : Number(existing || 0);
+    };
+    const expiryFromDraft = Object.prototype.hasOwnProperty.call(draft, 'expiry_date')
+      ? String(draft.expiry_date || '').trim()
+      : batch?.expiry_date ?? null;
+    const payload = {
+      ...batch,
+      purchase_price: toNumberOrExisting(draft.purchase_price, batch?.purchase_price),
+      selling_price: toNumberOrExisting(draft.selling_price, batch?.selling_price),
+      mrp: toNumberOrExisting(draft.mrp, batch?.mrp),
+      expiry_date: expiryFromDraft || null,
+      sync_status: 'pending',
+      sync_version: Number(batch?.sync_version ?? 0) + 1,
+      updated_at: new Date().toISOString(),
+    };
+    setBatchSavingMap((prev) => ({ ...prev, [rowKey]: true }));
+    try {
+      await updateBatchesBulk([payload]);
+      setBatchRowsByProductKey((prev) => {
+        const next = { ...prev };
+        const list = Array.isArray(next[productKey]) ? [...next[productKey]] : [];
+        const current = list[index];
+        if (current) {
+          list[index] = { ...current, ...payload };
+          next[productKey] = list;
+        }
+        return next;
+      });
+      setBatchEditMap((prev) => {
+        const next = { ...prev };
+        delete next[rowKey];
+        return next;
+      });
+      setBatchAvailableByProductKey((prev) => {
+        const next = { ...prev };
+        const list = batchRowsByProductKey[productKey] || [];
+        const total = list.reduce(
+          (sum, entry, idx) =>
+            sum +
+            Number(
+              idx === index
+                ? payload.quantity_remaining ?? payload.quantity ?? 0
+                : entry?.quantity_remaining ?? entry?.quantity ?? 0
+            ),
+          0
+        );
+        next[productKey] = Number.isFinite(total) ? total : 0;
+        return next;
+      });
+      const refreshed = await loadProductBatches({ id: batch.product_id, product_id: batch.product_id });
+      const validDates = refreshed
+        .map((entry) => (entry?.expiry_date ? new Date(entry.expiry_date) : null))
+        .filter((entry) => entry && !Number.isNaN(entry.getTime()));
+      validDates.sort((a, b) => a.getTime() - b.getTime());
+      setBatchExpiryByProductKey((prev) => ({
+        ...prev,
+        [productKey]: validDates[0] ? validDates[0].toISOString().slice(0, 10) : null,
+      }));
+      showPopup('Batch details saved offline. Will sync in background.', 'Offline');
+    } catch (err) {
+      console.error('Failed to save batch changes', err);
+      showPopup('Failed to save batch changes.', 'Error');
+    } finally {
+      setBatchSavingMap((prev) => ({ ...prev, [rowKey]: false }));
+    }
+  };
+
   const isLocalPlaceholderBatch = (batch) => {
     const id = String(batch?.id || '').toLowerCase();
     const batchNumber = String(batch?.batch_number || '').toLowerCase();
@@ -664,19 +817,26 @@ const ProductsPage = ({ navigate }) => {
       if (effectiveBranchId && batch?.branch_id && String(batch.branch_id) !== String(effectiveBranchId)) return false;
       return true;
     });
-    const hasServerBatch = scoped.some((batch) => !isLocalPlaceholderBatch(batch));
-    const cleaned = hasServerBatch
-      ? scoped.filter((batch) => !isLocalPlaceholderBatch(batch))
-      : scoped;
+    const signatureForBatch = (batch) => [
+      String(batch?.batch_number || '').trim().toLowerCase(),
+      String(batch?.expiry_date || ''),
+      String(batch?.purchase_price ?? ''),
+      String(batch?.selling_price ?? ''),
+      String(batch?.mrp ?? ''),
+    ].join('|');
+    const serverSignatures = new Set(
+      scoped
+        .filter((batch) => !isLocalPlaceholderBatch(batch))
+        .map((batch) => signatureForBatch(batch))
+    );
+    const cleaned = scoped.filter((batch) => {
+      if (!isLocalPlaceholderBatch(batch)) return true;
+      const signature = signatureForBatch(batch);
+      return !serverSignatures.has(signature);
+    });
     const mergedMap = new Map();
     cleaned.forEach((batch) => {
-      const signature = [
-        String(batch.batch_number || '').trim().toLowerCase(),
-        String(batch.expiry_date || ''),
-        String(batch.purchase_price ?? ''),
-        String(batch.selling_price ?? ''),
-        String(batch.mrp ?? ''),
-      ].join('|');
+      const signature = signatureForBatch(batch);
       const available = Number(batch.quantity_remaining ?? batch.quantity ?? 0);
       const existing = mergedMap.get(signature);
       if (!existing) {
@@ -704,6 +864,7 @@ const ProductsPage = ({ navigate }) => {
       try {
         const allBatches = await getAllBatches();
         const nextMap = {};
+        const nextExpiryMap = {};
         (Array.isArray(products) ? products : []).forEach((product) => {
           const key = getProductKey(product);
           if (!key || !isBatchEnabledProduct(product)) return;
@@ -715,18 +876,41 @@ const ProductsPage = ({ navigate }) => {
             0
           );
           nextMap[key] = Number.isFinite(totalAvailable) ? totalAvailable : 0;
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const validDates = merged
+            .map((batch) => {
+              const raw = batch?.expiry_date;
+              if (!raw) return null;
+              const date = new Date(raw);
+              if (Number.isNaN(date.getTime())) return null;
+              return date;
+            })
+            .filter(Boolean);
+          const upcoming = validDates
+            .filter((date) => date >= today)
+            .sort((a, b) => a.getTime() - b.getTime());
+          const fallbackAny = validDates.sort((a, b) => a.getTime() - b.getTime());
+          const chosen = upcoming[0] || fallbackAny[0] || null;
+          nextExpiryMap[key] = chosen ? chosen.toISOString().slice(0, 10) : null;
         });
         if (!active) return;
         setBatchAvailableByProductKey(nextMap);
+        setBatchExpiryByProductKey(nextExpiryMap);
       } catch {
         if (!active) return;
         setBatchAvailableByProductKey({});
+        setBatchExpiryByProductKey({});
       }
     };
     computeBatchAvailable();
     return () => {
       active = false;
     };
+  }, [products, effectiveBranchId]);
+
+  useEffect(() => {
+    setBatchRowsByProductKey({});
   }, [products, effectiveBranchId]);
 
   const loadProductBatches = useCallback(async (product) => {
@@ -746,7 +930,6 @@ const ProductsPage = ({ navigate }) => {
       return;
     }
     setExpandedProductKey(key);
-    if (batchRowsByProductKey[key]) return;
     setBatchLoadingByProductKey((prev) => ({ ...prev, [key]: true }));
     try {
       const rows = await loadProductBatches(product);
@@ -850,18 +1033,6 @@ const ProductsPage = ({ navigate }) => {
       showPopup('Failed to save product updates.', 'Error');
     } finally {
       setSavingBulk(false);
-    }
-  };
-
-  const handleSyncNow = async () => {
-    if (syncingInventory) return;
-    setSyncingInventory(true);
-    try {
-      await syncAllInventory();
-      setForceApiFetch(true);
-      setProductUpdateFlag((prev) => !prev);
-    } finally {
-      setSyncingInventory(false);
     }
   };
 
@@ -991,6 +1162,10 @@ const ProductsPage = ({ navigate }) => {
     batch_number: 'batch_number',
     batchno: 'batch_number',
     'batch no': 'batch_number',
+    'is weight based': 'is_weight_based',
+    is_weight_based: 'is_weight_based',
+    weight_based: 'is_weight_based',
+    type: 'is_weight_based',
     expiry: 'expiry_date',
     'expiry date': 'expiry_date',
     expiry_date: 'expiry_date',
@@ -1232,6 +1407,7 @@ const ProductsPage = ({ navigate }) => {
         const gst_percentage = toNumber(row.gst_percentage);
         const batch_number = row.batch_number ? String(row.batch_number).trim() : '';
         const expiry_date = toDateInput(row.expiry_date);
+        const is_weight_based = toFlagValue(row.is_weight_based, '0');
         return {
           id,
           name,
@@ -1245,7 +1421,8 @@ const ProductsPage = ({ navigate }) => {
           gst_percentage,
           batch_number,
           expiry_date,
-          selling_price
+          selling_price,
+          is_weight_based
         };
       })
       .filter((row) =>
@@ -1383,202 +1560,42 @@ const ProductsPage = ({ navigate }) => {
       gst_percentage: toNumber(row.gst_percentage),
       batch_number: row.batch_number ? String(row.batch_number).trim() : null,
       expiry_date: row.expiry_date ? String(row.expiry_date).trim() : null,
+      is_weight_based: Number(toFlagValue(row.is_weight_based, '0')),
       selling_price: resolveImportSellingPrice(row),
       sellingPrice: resolveImportSellingPrice(row),
       sale_price: resolveImportSellingPrice(row),
       rate: resolveImportSellingPrice(row)
     }));
 
-    const makeUuid = () => {
-      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-        return crypto.randomUUID();
-      }
-      return `import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    };
-
     setImporting(true);
     setImportError('');
     try {
-      const importId = makeUuid();
-      const createdAt = new Date().toISOString();
-      const localProducts = await getAllProducts();
-      const productsList = Array.isArray(localProducts) ? localProducts : [];
-      const barcodeMap = new Map(
-        productsList
-          .filter((item) => item?.barcode)
-          .map((item) => [String(item.barcode), item])
-      );
-      const nameMap = new Map(
-        productsList
-          .filter((item) => item?.name || item?.product_name)
-          .map((item) => [String(item.name || item.product_name).toLowerCase(), item])
-      );
-
-      const items = [];
-      const batchesMap = new Map();
-      const productsToUpsert = new Map();
-
-      payloadRows.forEach((row) => {
-        const qty = Number(row.stock_quantity || 0);
-        const name = String(row.name || '').trim();
-        const barcode = row.barcode ? String(row.barcode).trim() : null;
-        let existing =
-          (barcode && barcodeMap.get(barcode)) ||
-          (name && nameMap.get(name.toLowerCase())) ||
-          null;
-
-        if (!existing) {
-          const tempId = `temp:${makeUuid()}`;
-          existing = {
-            id: tempId,
-            name,
-            product_name: name,
-            barcode: barcode || `id:${tempId}`,
-            company: row.company || null,
-            category: row.category || null,
-            hsn_code: row.hsn_code || null,
-            gst_percentage: row.gst_percentage ?? null,
-            selling_price: row.selling_price ?? null,
-            purchase_price: row.purchase_price ?? null,
-            mrp: row.mrp ?? null,
-            stock_quantity: 0,
-            branch_id: effectiveBranchId || null,
-            is_batch_enabled: row.batch_number ? 1 : 0,
-          };
-        }
-
-        const updated = {
-          ...existing,
-          name: name || existing.name,
-          product_name: name || existing.product_name,
-          company: row.company ?? existing.company ?? null,
-          category: row.category ?? existing.category ?? null,
-          hsn_code: row.hsn_code ?? existing.hsn_code ?? null,
-          gst_percentage: row.gst_percentage ?? existing.gst_percentage ?? null,
-          selling_price: row.selling_price ?? existing.selling_price ?? null,
-          purchase_price: row.purchase_price ?? existing.purchase_price ?? null,
-          mrp: row.mrp ?? existing.mrp ?? null,
-          stock_quantity: Number(existing.stock_quantity || 0) + qty,
-          branch_id: existing.branch_id ?? effectiveBranchId ?? null,
-          is_batch_enabled: row.batch_number ? 1 : existing.is_batch_enabled ?? 0,
-        };
-
-        productsToUpsert.set(updated.id, updated);
-
-        items.push({
-          id: makeUuid(),
-          importId,
-          productId: updated.id,
-          productName: updated.name || updated.product_name || name,
-          qty: qty,
-          costPrice: row.purchase_price ?? null,
-          mrp: row.mrp ?? null,
-          batchNo: row.batch_number || null,
-          expiryDate: row.expiry_date || null,
-          barcode: barcode || updated.barcode || null,
-          company: row.company || updated.company || null,
-          category: row.category || updated.category || null,
-          hsnCode: row.hsn_code || updated.hsn_code || null,
-          gstPercent: row.gst_percentage ?? updated.gst_percentage ?? null,
-          sellingPrice: row.selling_price ?? updated.selling_price ?? null,
-        });
-
-        const batchKey = `${updated.id}::${row.batch_number || 'no-batch'}::${row.expiry_date || ''}`;
-        const existingBatch = batchesMap.get(batchKey);
-        const nextBatch = {
-          id: existingBatch?.id || `local:import-batch:${makeUuid()}`,
-          productId: updated.id,
-          batchNo: row.batch_number || null,
-          qty: (existingBatch?.qty || 0) + qty,
-          costPrice: row.purchase_price ?? existingBatch?.costPrice ?? null,
-          sellingPrice: row.selling_price ?? existingBatch?.sellingPrice ?? null,
-          mrp: row.mrp ?? existingBatch?.mrp ?? null,
-          expiryDate: row.expiry_date || existingBatch?.expiryDate || null,
-          branchId: updated.branch_id ?? effectiveBranchId ?? null,
-        };
-        batchesMap.set(batchKey, nextBatch);
-      });
-
-      const importEntry = {
-        id: importId,
-        createdAt,
-        totalItems: items.length,
-        status: 'pending',
-      };
-
-      await addOfflineImport({
-        importEntry,
-        items,
-        batches: Array.from(batchesMap.values()),
-      });
-
-      if (productsToUpsert.size > 0) {
-        await updateProductsBulk(Array.from(productsToUpsert.values()));
-      }
-
-      if (batchesMap.size > 0) {
-        const batchesForCache = Array.from(batchesMap.values()).map((batch) => ({
-          id: batch.id,
-          product_id: batch.productId,
-          branch_id: batch.branchId ?? effectiveBranchId ?? null,
-          batch_number: batch.batchNo || null,
-          expiry_date: batch.expiryDate || null,
-          purchase_price: batch.costPrice ?? null,
-          selling_price: batch.sellingPrice ?? null,
-          quantity: Number(batch.qty || 0),
-          quantity_remaining: Number(batch.qty || 0),
-          sync_version: 1,
-          updated_at: createdAt,
-          created_at: createdAt,
-          sync_status: 'pending',
-          is_deleted: false,
-        }));
-        await updateBatchesBulk(batchesForCache);
-      }
-
-      await addSyncQueueItem({
-        type: 'import',
-        refId: importId,
-        payload: {
-          importId,
-          createdAt,
-          items: items.map((item) => ({
-            productId: item.productId,
-            name: item.productName,
-            qty: item.qty,
-            costPrice: item.costPrice,
-            mrp: item.mrp,
-            batchNo: item.batchNo,
-            expiryDate: item.expiryDate,
-            barcode: item.barcode,
-            company: item.company,
-            category: item.category,
-            hsnCode: item.hsnCode,
-            gstPercent: item.gstPercent,
-            sellingPrice: item.sellingPrice,
-          })),
-          branchId: effectiveBranchId || undefined,
-        },
-        status: 'pending',
-        retryCount: 0,
-      });
+      const response = await api.post('/products/import-rows', { rows: payloadRows });
+      const summary = response?.data?.summary || response?.data?.data || response?.data || {};
 
       setImportResult({
-        total: items.length,
-        inserted: items.length,
-        updated: 0,
-        skipped: 0,
-        errors: [],
+        total: Number(summary.total || payloadRows.length),
+        inserted: Number(summary.inserted || 0),
+        updated: Number(summary.updated || 0),
+        skipped: Number(summary.skipped || 0),
+        errors: Array.isArray(summary.errors) ? summary.errors : [],
       });
-      showPopup('Imported Successfully', 'Offline');
+      try {
+        const settings = await getSettings();
+        setIsOpeningCompleted(settings?.is_opening_completed === true);
+      } catch {
+        setIsOpeningCompleted(true);
+      }
+      showPopup('Imported Successfully', 'Success');
       setForceApiFetch(true);
       setProductUpdateFlag((prev) => !prev);
-      loadImportHistory();
-      if (navigator.onLine) {
-        syncAllImports().catch(() => {});
-      }
+      setImportPreviewRows([]);
+      setImportFile(null);
     } catch (err) {
-      const message = err?.message || 'Import failed.';
+      const message =
+        err?.response?.data?.message ||
+        err?.message ||
+        'Import failed.';
       setImportError(message);
       showPopup(message, 'Error');
     } finally {
@@ -1610,88 +1627,26 @@ const ProductsPage = ({ navigate }) => {
       ? `Please fill required fields. Missing in ${importMissingRequired} row(s).`
       : '';
 
-  const handleRetryImport = async (importId) => {
-    if (!importId) return;
-    try {
-      const queue = await getSyncQueueItems({ type: 'import' });
-      const entry = queue.find((item) => item.refId === importId || item.importId === importId);
-      if (entry) {
-        await updateSyncQueueItem({
-          ...entry,
-          status: 'pending',
-          retryCount: Number(entry.retryCount || 0),
-        });
-      }
-      await loadImportHistory();
-      if (navigator.onLine) {
-        syncAllImports().catch(() => {});
-      }
-    } catch {
-      // ignore
-    }
+  const renderEditableCell = (product, field, formatter) => {
+    const readonlyValue = getProductFieldValue(product, field);
+    return <span>{formatter ? formatter(readonlyValue) : readonlyValue ?? '-'}</span>;
   };
 
-  const renderEditableCell = (product, field, formatter) => {
-    const key = getProductKey(product);
-    if (userDetails.role !== 'admin') {
-      const readonlyValue = getDraftValue(product, field);
-      return <span>{formatter ? formatter(readonlyValue) : readonlyValue ?? '-'}</span>;
-    }
-    if (!key) {
-      const readonlyValue = getDraftValue(product, field);
-      return <span>{formatter ? formatter(readonlyValue) : readonlyValue ?? '-'}</span>;
-    }
-    const isEditing =
-      activeEdit &&
-      activeEdit.key === key &&
-      activeEdit.field === field;
-    const value = isEditing ? activeEdit.value : getDraftValue(product, field);
-    const displayValue = formatter ? formatter(value) : value ?? '-';
-    if (!isEditing) {
-      return (
-        <button
-          type="button"
-          className="editable-cell"
-          onClick={() =>
-            setActiveEdit({
-              key,
-              field,
-              value: value ?? '',
-            })
-          }
-        >
-          {displayValue || '-'}
-        </button>
-      );
-    }
-    return (
-      <input
-        className="editable-input"
-        type="number"
-        step="0.01"
-        value={value ?? ''}
-        onChange={(event) =>
-          setActiveEdit((prev) =>
-            prev ? { ...prev, value: event.target.value } : prev
-          )
-        }
-        onBlur={() => {
-          commitEditValue(product, field, value);
-          setActiveEdit(null);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            commitEditValue(product, field, value);
-            setActiveEdit(null);
-          }
-          if (event.key === 'Escape') {
-            setActiveEdit(null);
-          }
-        }}
-        autoFocus
-      />
-    );
-  };
+  useEffect(() => {
+    let active = true;
+    const loadOpeningState = async () => {
+      try {
+        const settings = await getSettings();
+        if (active) setIsOpeningCompleted(settings?.is_opening_completed === true);
+      } catch {
+        if (active) setIsOpeningCompleted(true);
+      }
+    };
+    loadOpeningState();
+    return () => {
+      active = false;
+    };
+  }, []);
   return (
     <div className="wow-page products-page">
       <div className="wow-motion-layer" aria-hidden="true">
@@ -1710,7 +1665,7 @@ const ProductsPage = ({ navigate }) => {
             <p className="products-subtitle">Search, filter, and manage inventory.</p>
           </div>
           <div className="d-flex gap-2">
-            {userDetails.role === 'admin' && (
+            {userDetails.role === 'admin' && dirtyCount > 0 && (
               <button
                 className="btn btn-primary"
                 onClick={handleBulkSave}
@@ -1733,20 +1688,12 @@ const ProductsPage = ({ navigate }) => {
             >
               Refresh from Server
             </button>
-            <button
-              className="btn btn-outline-secondary"
-              onClick={handleSyncNow}
-              type="button"
-              disabled={syncingInventory}
-            >
-              {syncingInventory ? 'Syncing...' : 'Sync Now'}
-            </button>
             {userDetails.role === 'admin' && (
               <button className="btn btn-outline-info" onClick={() => setImportModalOpen(true)}>
                 Import Products
               </button>
             )}
-            {userDetails.role === 'admin' && (
+            {(userDetails.role === 'admin' || userDetails.role === 'staff') && (
               <button className="btn btn-success" onClick={handleOpenModal}>
                 Add Product
               </button>
@@ -1833,7 +1780,6 @@ const ProductsPage = ({ navigate }) => {
                   </th>
                   <th>Expiry Date</th>
                   <th>Status</th>
-                  <th>Sync</th>
                   {userDetails.role === 'admin' && <th>Actions</th>}
                 </tr>
               </thead>
@@ -1850,20 +1796,19 @@ const ProductsPage = ({ navigate }) => {
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
                     <td><span className="skeleton-block" /></td>
-                    <td><span className="skeleton-block" /></td>
                     {userDetails.role === 'admin' && <td><span className="skeleton-block" /></td>}
                   </tr>
                 ))}
                 {!isLoading && errorMessage && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 12 : 11} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 11 : 10} className="empty-state">
                       {errorMessage}
                     </td>
                   </tr>
                 )}
                 {!isLoading && !errorMessage && products.length === 0 && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 12 : 11} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 11 : 10} className="empty-state">
                       No products found.
                     </td>
                   </tr>
@@ -1875,15 +1820,31 @@ const ProductsPage = ({ navigate }) => {
                   const isExpanded = expandedProductKey === rowKey;
                   const batchRows = batchRowsByProductKey[rowKey] || [];
                   const batchLoading = Boolean(batchLoadingByProductKey[rowKey]);
-                  const rowColSpan = userDetails.role === 'admin' ? 12 : 11;
-                  const baseStock = Number(displayProduct.stock_quantity ?? displayProduct.quantity ?? 0);
+                  const rowColSpan = userDetails.role === 'admin' ? 11 : 10;
+                  const baseStock = Number(
+                    displayProduct.quantity_remaining ??
+                    displayProduct.quantityRemaining ??
+                    displayProduct.available_quantity ??
+                    displayProduct.availableQuantity ??
+                    displayProduct.stock_quantity ??
+                    displayProduct.quantity ??
+                    0
+                  );
                   const derivedBatchStock =
                     rowKey && Object.prototype.hasOwnProperty.call(batchAvailableByProductKey, rowKey)
                       ? Number(batchAvailableByProductKey[rowKey] || 0)
                       : null;
-                  const stock = isBatchEnabledProduct(displayProduct) && Number.isFinite(derivedBatchStock)
-                    ? derivedBatchStock
-                    : baseStock;
+                  const visibleBatchAvailable = Array.isArray(batchRows) && batchRows.length > 0
+                    ? batchRows.reduce(
+                        (sum, batch) => sum + Number(batch?.quantity_remaining ?? batch?.quantity ?? 0),
+                        0
+                      )
+                    : null;
+                  const stock = Number.isFinite(visibleBatchAvailable)
+                    ? visibleBatchAvailable
+                    : Number.isFinite(derivedBatchStock)
+                      ? derivedBatchStock
+                      : baseStock;
                   const minStock = Number(displayProduct.min_stock_level ?? 0);
                   const lowStock = minStock > 0 && stock <= minStock;
                   return (
@@ -1914,19 +1875,11 @@ const ProductsPage = ({ navigate }) => {
                       <td>{renderEditableCell(displayProduct, 'selling_price', formatMoney)}</td>
                       <td>{renderEditableCell(displayProduct, 'gst_percent', formatPercent)}</td>
                       <td>{stock}</td>
-                      <td>{formatDate(displayProduct.expiry_date || displayProduct.expiryDate)}</td>
+                      <td>{formatDate(batchExpiryByProductKey[rowKey] || displayProduct.expiry_date || displayProduct.expiryDate)}</td>
                       <td>
                         <span className={`stock-badge ${lowStock ? 'low' : 'ok'}`}>
                           {lowStock ? 'Low Stock' : 'In Stock'}
                         </span>
-                      </td>
-                      <td>
-                        {(() => {
-                          const status = (displayProduct.sync_status || displayProduct.syncStatus || 'synced').toLowerCase();
-                          if (status === 'pending') return '🟡 Pending';
-                          if (status === 'failed') return '🔴 Failed';
-                          return '🟢 Synced';
-                        })()}
                       </td>
                       {userDetails.role === 'admin' && (
                         <td className="actions-cell">
@@ -1957,17 +1910,18 @@ const ProductsPage = ({ navigate }) => {
                                     <th>Selling Price</th>
                                     <th>MRP</th>
                                     <th>Expiry</th>
+                                    {userDetails.role === 'admin' && <th>Save</th>}
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {batchLoading && (
                                     <tr>
-                                      <td colSpan={7} className="empty-state">Loading batch details...</td>
+                                      <td colSpan={userDetails.role === 'admin' ? 8 : 7} className="empty-state">Loading batch details...</td>
                                     </tr>
                                   )}
                                   {!batchLoading && batchRows.length === 0 && (
                                     <tr>
-                                      <td colSpan={7} className="empty-state">No batches found for this product.</td>
+                                      <td colSpan={userDetails.role === 'admin' ? 8 : 7} className="empty-state">No batches found for this product.</td>
                                     </tr>
                                   )}
                                   {!batchLoading && batchRows.map((batch, index) => (
@@ -1975,10 +1929,69 @@ const ProductsPage = ({ navigate }) => {
                                       <td>{batch.batch_number || '-'}</td>
                                       <td>{Number(batch.quantity_remaining ?? batch.quantity ?? 0)}</td>
                                       <td>{Number(batch.quantity ?? batch.quantity_remaining ?? 0)}</td>
-                                      <td>{formatMoney(batch.purchase_price ?? 0)}</td>
-                                      <td>{formatMoney(batch.selling_price ?? 0)}</td>
-                                      <td>{formatMoney(batch.mrp ?? 0)}</td>
-                                      <td>{formatBatchDate(batch.expiry_date)}</td>
+                                      <td>
+                                        {userDetails.role === 'admin' ? (
+                                          <input
+                                            className="products-batch-input"
+                                            type="number"
+                                            step="0.01"
+                                            value={getBatchDraftValue(rowKey, batch, index, 'purchase_price')}
+                                            onChange={(event) => updateBatchDraftField(rowKey, batch, index, 'purchase_price', event.target.value)}
+                                          />
+                                        ) : (
+                                          formatMoney(batch.purchase_price ?? 0)
+                                        )}
+                                      </td>
+                                      <td>
+                                        {userDetails.role === 'admin' ? (
+                                          <input
+                                            className="products-batch-input"
+                                            type="number"
+                                            step="0.01"
+                                            value={getBatchDraftValue(rowKey, batch, index, 'selling_price')}
+                                            onChange={(event) => updateBatchDraftField(rowKey, batch, index, 'selling_price', event.target.value)}
+                                          />
+                                        ) : (
+                                          formatMoney(batch.selling_price ?? 0)
+                                        )}
+                                      </td>
+                                      <td>
+                                        {userDetails.role === 'admin' ? (
+                                          <input
+                                            className="products-batch-input"
+                                            type="number"
+                                            step="0.01"
+                                            value={getBatchDraftValue(rowKey, batch, index, 'mrp')}
+                                            onChange={(event) => updateBatchDraftField(rowKey, batch, index, 'mrp', event.target.value)}
+                                          />
+                                        ) : (
+                                          formatMoney(batch.mrp ?? 0)
+                                        )}
+                                      </td>
+                                      <td>
+                                        {userDetails.role === 'admin' ? (
+                                          <input
+                                            className="products-batch-input"
+                                            type="date"
+                                            value={String(getBatchDraftValue(rowKey, batch, index, 'expiry_date') || '').slice(0, 10)}
+                                            onChange={(event) => updateBatchDraftField(rowKey, batch, index, 'expiry_date', event.target.value)}
+                                          />
+                                        ) : (
+                                          formatBatchDate(batch.expiry_date)
+                                        )}
+                                      </td>
+                                      {userDetails.role === 'admin' && (
+                                        <td>
+                                          <button
+                                            type="button"
+                                            className="btn btn-outline-primary btn-sm products-batch-save-btn"
+                                            disabled={!batchEditMap[getBatchRowKey(rowKey, batch, index)] || !batch?.id || batchSavingMap[getBatchRowKey(rowKey, batch, index)]}
+                                            onClick={() => saveBatchRowChanges(rowKey, batch, index)}
+                                          >
+                                            {batchSavingMap[getBatchRowKey(rowKey, batch, index)] ? 'Saving...' : 'Save'}
+                                          </button>
+                                        </td>
+                                      )}
                                     </tr>
                                   ))}
                                 </tbody>
@@ -2024,74 +2037,7 @@ const ProductsPage = ({ navigate }) => {
           </div>
         </div>
 
-        <div className="products-card import-history-card">
-          <div className="import-history-header">
-            <div>
-              <h4>Import History</h4>
-              <p className="import-history-subtitle">Offline-first imports with sync status.</p>
-            </div>
-            <button
-              className="btn btn-outline-primary btn-sm"
-              type="button"
-              onClick={() => syncAllImports().then(loadImportHistory)}
-              disabled={!navigator.onLine}
-            >
-              Sync Now
-            </button>
-          </div>
-          <div className="products-table-wrapper">
-            <table className="products-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Items</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {importHistoryLoading && (
-                  <tr>
-                    <td colSpan={4} className="empty-state">Loading...</td>
-                  </tr>
-                )}
-                {!importHistoryLoading && importHistory.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="empty-state">No imports yet.</td>
-                  </tr>
-                )}
-                {!importHistoryLoading && importHistory.map((entry) => {
-                  const status = String(entry.status || 'pending').toLowerCase();
-                  return (
-                    <tr key={entry.id}>
-                      <td>{formatDate(entry.createdAt)}</td>
-                      <td>{entry.totalItems || 0}</td>
-                      <td>
-                        {status === 'synced' && <span className="import-status synced">🟢 Synced</span>}
-                        {status === 'failed' && <span className="import-status failed">🔴 Failed</span>}
-                        {status !== 'synced' && status !== 'failed' && (
-                          <span className="import-status pending">🟡 Pending Sync</span>
-                        )}
-                      </td>
-                      <td>
-                        {status === 'failed' && (
-                          <button
-                            className="btn btn-outline-warning btn-sm"
-                            onClick={() => handleRetryImport(entry.id)}
-                          >
-                            Retry
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {userDetails.role === 'admin' && (
+        {(userDetails.role === 'admin' || userDetails.role === 'staff') && (
           <AddProductModalComponent
             navigate={navigate}
             setProductUpdateFlag={setProductUpdateFlag}
@@ -2268,6 +2214,7 @@ const ProductsPage = ({ navigate }) => {
                           <th className="text-end">GST %</th>
                           <th>Batch No.</th>
                           <th>Expiry</th>
+                          <th className="text-end">Is Weight Based</th>
                           <th className="text-end">Selling Price</th>
                           <th>Validation</th>
                         </tr>
@@ -2386,6 +2333,17 @@ const ProductsPage = ({ navigate }) => {
                               />
                             </td>
                             <td>
+                              <select
+                                className="form-control form-control-sm text-end"
+                                value={toFlagValue(row.is_weight_based, '0')}
+                                title={String(row.is_weight_based ?? '0')}
+                                onChange={(event) => updatePreviewRow(idx, 'is_weight_based', event.target.value)}
+                              >
+                                <option value="0">No</option>
+                                <option value="1">Yes</option>
+                              </select>
+                            </td>
+                            <td>
                               <input
                                 className="form-control form-control-sm text-end"
                                 type="number"
@@ -2412,9 +2370,22 @@ const ProductsPage = ({ navigate }) => {
               )}
               {importResult && (
                 <div className="mb-2">
+                  <div className="alert alert-success py-2">Products imported successfully</div>
                   <p className="mb-1">Total: {importResult.total ?? 0}</p>
                   <p className="mb-1">Inserted: {importResult.inserted ?? 0}</p>
                   <p className="mb-1">Skipped: {importResult.skipped ?? 0}</p>
+                  {!isOpeningCompleted && (
+                    <div className="alert alert-warning mt-2 mb-2">
+                      <p className="mb-2">Complete Opening Setup to start billing</p>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-primary"
+                        onClick={() => navigate('/accounts/opening-setup')}
+                      >
+                        Go to Opening Setup
+                      </button>
+                    </div>
+                  )}
                   {Array.isArray(importResult.errors) && importResult.errors.length > 0 && (
                     <div>
                       <p className="mb-1">Errors:</p>
@@ -2441,6 +2412,7 @@ const ProductsPage = ({ navigate }) => {
 };
 
 export default ProductsPage;
+
 
 
 

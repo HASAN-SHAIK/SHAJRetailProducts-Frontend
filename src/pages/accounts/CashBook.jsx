@@ -2,15 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { fetchCashBook } from '../../services/accountingService';
 import './Accounts.css';
 
-const normalizeEntryAmount = (entry) => Number(entry.amount ?? entry.total_price ?? 0);
+const normalizeEntryAmount = (entry) => Number(entry.amount ?? entry.total_price ?? entry.debit ?? entry.credit ?? 0);
+const normalizeInAmount = (entry) => Number(entry.debit ?? (String(entry.direction || '').toLowerCase() === 'in' ? normalizeEntryAmount(entry) : 0));
+const normalizeOutAmount = (entry) => Number(entry.credit ?? (String(entry.direction || '').toLowerCase() === 'out' ? normalizeEntryAmount(entry) : 0));
 
 const applyRunningBalance = (entries = []) => {
-  const sorted = [...entries].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  const sorted = [...entries].sort((a, b) => new Date(a.date || a.created_at || 0) - new Date(b.date || b.created_at || 0));
   let running = 0;
   const withBalance = sorted.map((entry) => {
-    const amount = normalizeEntryAmount(entry);
-    const direction = String(entry.direction || '').toLowerCase();
-    running += direction === 'out' ? -amount : amount;
+    const inAmount = normalizeInAmount(entry);
+    const outAmount = normalizeOutAmount(entry);
+    running += inAmount - outAmount;
     return { ...entry, running_balance: running };
   });
   return withBalance;
@@ -24,7 +26,10 @@ const CashBook = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const payload = await fetchCashBook(filters);
+      const payload = await fetchCashBook({
+        ...filters,
+        range: filters.start_date && filters.end_date ? 'custom' : 'all',
+      });
       const list = Array.isArray(payload.entries) ? payload.entries : [];
       const withBalance = list.some((entry) => entry.running_balance !== undefined)
         ? list
@@ -43,7 +48,7 @@ const CashBook = () => {
 
   const rows = useMemo(() => {
     const list = entries || [];
-    return [...list].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    return [...list].sort((a, b) => new Date(b.date || b.created_at || 0) - new Date(a.date || a.created_at || 0));
   }, [entries]);
 
   return (
@@ -92,15 +97,18 @@ const CashBook = () => {
               </tr>
             )}
             {!loading && rows.map((entry) => {
-              const amount = normalizeEntryAmount(entry);
-              const direction = String(entry.direction || '').toLowerCase();
+              const inAmount = normalizeInAmount(entry);
+              const outAmount = normalizeOutAmount(entry);
+              const type = entry.txn_type || entry.reference_type || (entry.description ? 'ledger' : '-');
+              const party = entry.party_name || entry.party_id || entry.description || '-';
+              const rowDate = entry.date || entry.created_at;
               return (
-                <tr key={entry.id}>
-                  <td>{entry.created_at ? new Date(entry.created_at).toLocaleDateString() : '-'}</td>
-                  <td>{entry.txn_type || '-'}</td>
-                  <td>{entry.party_name || entry.party_id || '-'}</td>
-                  <td>{direction === 'in' ? `INR ${amount.toFixed(2)}` : '-'}</td>
-                  <td>{direction === 'out' ? `INR ${amount.toFixed(2)}` : '-'}</td>
+                <tr key={entry.id || `${rowDate || ''}-${entry.ledger_id || ''}-${entry.reference_id || ''}`}>
+                  <td>{rowDate ? new Date(rowDate).toLocaleDateString() : '-'}</td>
+                  <td>{type}</td>
+                  <td>{party}</td>
+                  <td>{inAmount > 0 ? `INR ${inAmount.toFixed(2)}` : '-'}</td>
+                  <td>{outAmount > 0 ? `INR ${outAmount.toFixed(2)}` : '-'}</td>
                   <td>INR {Number(entry.running_balance || 0).toFixed(2)}</td>
                 </tr>
               );

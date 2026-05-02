@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api from '../../utils/axios';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import { useBillingStore } from '../../store/billingStore';
@@ -38,6 +38,7 @@ import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 import '../BillingPage.css';
 
 const DRAFT_STORAGE_KEY = 'billing_drafts_v1';
+const PURCHASE_ORDER_TOGGLE_KEY = 'billing_purchase_orders_enabled_v1';
 const DEFAULT_BILLING_UPI_ID = 'shajretail@upi';
 const DESKTOP_UPI_PROMPT_KEY = 'desktop_billing_upi_prompted_v1';
 
@@ -74,6 +75,15 @@ const saveDraftsToStorage = (drafts) => {
   }
 };
 
+const loadPurchaseOrdersToggle = () => {
+  try {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem(PURCHASE_ORDER_TOGGLE_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
 const buildSearchUrl = (text, mode) => {
   if (mode === 'purchase') {
     return `/products/search/purchase?name=${encodeURIComponent(text)}`;
@@ -90,6 +100,10 @@ const buildBarcodeUrl = (barcode, mode) => {
 
 const getStockCount = (product) => {
   const raw =
+    product?.quantity_remaining ??
+    product?.quantityRemaining ??
+    product?.available_quantity ??
+    product?.availableQuantity ??
     product?.stock_quantity ??
     product?.stockQuantity ??
     product?.quantity ??
@@ -122,6 +136,18 @@ const isLikelyLocalBatchId = (value) => {
   );
 };
 
+const isLikelyLocalEntityId = (value) => {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return false;
+  return (
+    text.startsWith('local:') ||
+    text.startsWith('temp:') ||
+    text.startsWith('tmp:') ||
+    text.startsWith('local_') ||
+    text.startsWith('temp_')
+  );
+};
+
 const isLocalPlaceholderBatch = (batch) => {
   const idLocal = isLikelyLocalBatchId(batch?.id);
   if (idLocal) return true;
@@ -142,6 +168,42 @@ const toDateOnlyText = (value) => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const normalizePhoneForCompare = (value) => String(value || '').replace(/\D+/g, '');
+
+const dedupeCustomersByIdentity = (list = []) => {
+  const preferredByKey = new Map();
+  const scoreCustomer = (customer) => {
+    const id = String(customer?.id || '');
+    const isTemp =
+      id.startsWith('temp:') ||
+      id.startsWith('local:') ||
+      id.startsWith('tmp:') ||
+      id.startsWith('temp_') ||
+      id.startsWith('local_');
+    const hasName = Boolean(String(customer?.name || '').trim());
+    const hasPhone = Boolean(normalizePhoneForCompare(customer?.phone || customer?.mobile));
+    return (isTemp ? 0 : 2) + (hasName ? 1 : 0) + (hasPhone ? 1 : 0);
+  };
+
+  (Array.isArray(list) ? list : []).forEach((customer) => {
+    const phone = normalizePhoneForCompare(customer?.phone || customer?.mobile);
+    const name = String(customer?.name || '').trim().toLowerCase();
+    const fallbackId = String(customer?.id || '').trim().toLowerCase();
+    const key = phone ? `p:${phone}` : name ? `n:${name}` : fallbackId ? `i:${fallbackId}` : '';
+    if (!key) return;
+    const existing = preferredByKey.get(key);
+    if (!existing) {
+      preferredByKey.set(key, customer);
+      return;
+    }
+    if (scoreCustomer(customer) > scoreCustomer(existing)) {
+      preferredByKey.set(key, customer);
+    }
+  });
+
+  return Array.from(preferredByKey.values());
 };
 
 const getCartItemKey = (product) => {
@@ -177,6 +239,10 @@ const getCartItemKey = (product) => {
 
 const STOCK_CHECK_TIMEOUT_MS = 8000;
 const OFFLINE_SYNC_TIMEOUT_MS = 12000;
+const ORDER_CREATE_TIMEOUT_MS = 15000;
+const CUSTOMER_SYNC_TIMEOUT_MS = 10000;
+const CUSTOMER_QUEUE_TIMEOUT_MS = 6000;
+const OFFLINE_ENQUEUE_TIMEOUT_MS = 8000;
 const withTimeout = (promise, timeoutMs, fallbackValue = null) =>
   Promise.race([
     promise,
@@ -186,6 +252,7 @@ const withTimeout = (promise, timeoutMs, fallbackValue = null) =>
 const RetailBilling = () => {
   const { showPopup } = usePopup();
   const navigate = useNavigate();
+  const location = useLocation();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const userDetails = useSelector((state) => state.user.userDetails);
   const planFeatures = getTenantFeatures(tenantConfig);
@@ -286,6 +353,8 @@ const RetailBilling = () => {
   const [lastOrderId, setLastOrderId] = useState(null);
   const [selectedItemBatchDetails, setSelectedItemBatchDetails] = useState([]);
   const [batchDetailsLoading, setBatchDetailsLoading] = useState(false);
+  const [purchaseOrdersEnabled, setPurchaseOrdersEnabled] = useState(loadPurchaseOrdersToggle);
+  const normalizedTransactionType = purchaseOrdersEnabled ? 'purchase' : 'sale';
 
   const buildCustomerPayload = (details, fallbackName, fallbackMobile) => {
     const name = String(details?.name || fallbackName || '').trim();
@@ -353,6 +422,7 @@ const RetailBilling = () => {
   ];
 
   const barcodeRef = useRef(null);
+  const appliedReorderRef = useRef('');
   const gstInitRef = useRef(false);
   const gstEnabledRef = useRef(isGSTEnabled);
   const gstModeInitRef = useRef(false);
@@ -511,6 +581,142 @@ const RetailBilling = () => {
   }, [activeDraftId]);
 
   useEffect(() => {
+    let cancelled = false;
+    const reorderPrefill = location?.state?.reorderPrefill;
+    if (!reorderPrefill || !Array.isArray(reorderPrefill.products) || !reorderPrefill.products.length) {
+      return;
+    }
+    const prefillKey = [
+      String(reorderPrefill?.prefillId || ''),
+      String(reorderPrefill?.sourceOrderId || ''),
+      String(reorderPrefill?.customer?.id || ''),
+      String(reorderPrefill.products.length),
+    ].join('|');
+    if (appliedReorderRef.current === prefillKey) return;
+
+    const applyReorderPrefill = async () => {
+      const customer = reorderPrefill.customer || {};
+      setCustomerDetails((prev) => ({
+        ...prev,
+        id: customer.id || null,
+        name: customer.name || '',
+        mobile: customer.phone || customer.mobile || '',
+        location: customer.location || '',
+        address: customer.address || '',
+        type: customer.type || 'retail',
+        credit_limit: Number(customer.credit_limit ?? prev.credit_limit ?? 0),
+        current_balance: Number(customer.current_balance ?? prev.current_balance ?? 0),
+      }));
+
+      const cacheMissingProducts = [];
+      const noStockProducts = [];
+      const lowStockAdjusted = [];
+
+      const resolvedItems = await Promise.all(
+        reorderPrefill.products.map(async (entry) => {
+          const requestedQtyRaw = Number(entry?.quantity ?? 1);
+          const requestedQty = Number.isFinite(requestedQtyRaw) && requestedQtyRaw > 0 ? requestedQtyRaw : 1;
+          const product = {
+            id: entry?.id ?? entry?.product_id,
+            product_id: entry?.product_id ?? entry?.id,
+            name: entry?.name ?? entry?.product_name ?? '-',
+            product_name: entry?.product_name ?? entry?.name ?? '-',
+            selling_price: Number(entry?.selling_price ?? entry?.price ?? 0),
+            purchase_price: Number(entry?.purchase_price ?? entry?.actual_price ?? 0),
+            gst_percentage: Number(entry?.gst_percentage ?? entry?.gst_percent ?? 0),
+            is_weight_based: entry?.is_weight_based ? 1 : 0,
+            batch_id: entry?.batch_id ?? null,
+            batch_number: entry?.batch_number ?? null,
+            barcode: entry?.barcode ?? null,
+          };
+          const productId = product.id ?? product.product_id ?? null;
+          if (!productId) {
+            cacheMissingProducts.push(product.name || 'Unknown product');
+            return null;
+          }
+
+          const cached = await getProductCacheById(productId).catch(() => null);
+          const stock = cached ? getStockCount(cached) : null;
+          if (!cached) {
+            cacheMissingProducts.push(product.name || `Product ${productId}`);
+          }
+
+          if (Number.isFinite(stock) && stock <= 0) {
+            noStockProducts.push(product.name || cached?.name || `Product ${productId}`);
+            return null;
+          }
+
+          let finalQty = requestedQty;
+          if (Number.isFinite(stock) && stock > 0 && requestedQty > stock) {
+            finalQty = stock;
+            lowStockAdjusted.push(
+              `${product.name || cached?.name || `Product ${productId}`} (requested ${requestedQty}, added ${stock})`
+            );
+          }
+
+          const pricedProduct = {
+            ...(cached || {}),
+            ...product,
+            selling_price: Number(product.selling_price || cached?.selling_price || cached?.price || 0),
+            purchase_price: Number(product.purchase_price || cached?.purchase_price || cached?.actual_price || 0),
+            gst_percentage: Number(product.gst_percentage || cached?.gst_percentage || cached?.gst_percent || 0),
+          };
+
+          const key = getCartItemKey(pricedProduct);
+          if (!key) return null;
+
+          return {
+            key,
+            id: pricedProduct.id ?? pricedProduct.product_id ?? null,
+            batch_id: pricedProduct.batch_id ?? null,
+            batch_number: pricedProduct.batch_number ?? null,
+            barcode: pricedProduct.barcode ?? null,
+            name: pricedProduct.name ?? pricedProduct.product_name ?? '-',
+            mrp: Number(pricedProduct?.mrp ?? pricedProduct?.mrp_price ?? 0) || 0,
+            actual_price: Number(pricedProduct.purchase_price ?? pricedProduct.actual_price ?? 0) || 0,
+            purchase_price: Number(pricedProduct.purchase_price ?? pricedProduct.actual_price ?? 0) || 0,
+            price: Number(pricedProduct.selling_price ?? pricedProduct.price ?? 0) || 0,
+            gstPercent: Number(pricedProduct.gst_percentage ?? pricedProduct.gst_percent ?? 0) || 0,
+            qty: finalQty,
+            is_weight_based: pricedProduct.is_weight_based ? 1 : 0,
+            __stock: Number.isFinite(stock) ? stock : null,
+          };
+        })
+      );
+
+      if (cancelled) return;
+      const prefillItems = resolvedItems.filter(Boolean);
+      setItems(prefillItems);
+      setSelectedKey(prefillItems[prefillItems.length - 1]?.key || null);
+      setDrafts((prev) =>
+        prev.map((draft) =>
+          draft.id === activeDraftId
+            ? { ...draft, items: prefillItems, selectedKey: prefillItems[prefillItems.length - 1]?.key || null }
+            : draft
+        )
+      );
+
+      if (!prefillItems.length) {
+        showPopup('No reorder products could be added. Items are missing or out of stock.', 'Reorder Stock Check');
+      } else if (cacheMissingProducts.length || noStockProducts.length || lowStockAdjusted.length) {
+        const parts = [];
+        if (cacheMissingProducts.length) parts.push(`Not in cache (added without stock check): ${cacheMissingProducts.join(', ')}`);
+        if (noStockProducts.length) parts.push(`No stock: ${noStockProducts.join(', ')}`);
+        if (lowStockAdjusted.length) parts.push(`Low stock adjusted: ${lowStockAdjusted.join(', ')}`);
+        showPopup(parts.join('\n'), 'Reorder Stock Check');
+      }
+
+      appliedReorderRef.current = prefillKey;
+      navigate(location.pathname, { replace: true, state: {} });
+    };
+
+    applyReorderPrefill();
+    return () => {
+      cancelled = true;
+    };
+  }, [location, setItems, setSelectedKey, activeDraftId, navigate, showPopup]);
+
+  useEffect(() => {
     const handleShortcut = (event) => {
       if (event.altKey && (event.key.toLowerCase() === 'g' || event.code === 'KeyG')) {
         event.preventDefault();
@@ -536,11 +742,19 @@ const RetailBilling = () => {
   }, [gstToast.visible]);
 
   useEffect(() => {
-    if (userDetails?.role !== 'admin' && transactionType !== 'sale') {
-      setTransactionType('sale');
+    if (transactionType !== normalizedTransactionType) {
+      setTransactionType(normalizedTransactionType);
       setPaymentMethod('cash');
     }
-  }, [transactionType, userDetails?.role]);
+  }, [transactionType, normalizedTransactionType]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PURCHASE_ORDER_TOGGLE_KEY, purchaseOrdersEnabled ? '1' : '0');
+    } catch {
+      // ignore storage errors
+    }
+  }, [purchaseOrdersEnabled]);
 
   useEffect(() => {
     const syncProducts = async () => {
@@ -561,7 +775,7 @@ const RetailBilling = () => {
     const nextItems = active.items || [];
     const nextSelectedKey = active.selectedKey || null;
     const nextGst = Boolean(active.isGSTEnabled);
-    const nextType = active.transactionType || 'sale';
+    const nextType = normalizedTransactionType;
     const nextPayment = active.paymentMethod || 'cash';
     setItems(nextItems);
     setSelectedKey(nextSelectedKey);
@@ -577,7 +791,7 @@ const RetailBilling = () => {
         const sameItems = draft.items === items;
         const sameSelected = draft.selectedKey === selectedKey;
         const sameGst = Boolean(draft.isGSTEnabled) === Boolean(isGSTEnabled);
-        const sameType = (draft.transactionType || 'sale') === transactionType;
+        const sameType = (draft.transactionType || normalizedTransactionType) === transactionType;
         const samePayment = (draft.paymentMethod || 'cash') === paymentMethod;
         if (sameItems && sameSelected && sameGst && sameType && samePayment) {
           return draft;
@@ -587,7 +801,7 @@ const RetailBilling = () => {
           items,
           selectedKey,
           isGSTEnabled,
-          transactionType,
+          transactionType: normalizedTransactionType,
           paymentMethod,
         };
       })
@@ -946,8 +1160,18 @@ const RetailBilling = () => {
       showPopup('Selected batch is not available.', 'Stock');
       return;
     }
+    const editedBatch = selectedItemBatchDetails.find((batch) => String(batch?.id) === String(batchId)) || null;
+    const editedSelling = Number(editedBatch?.selling_price);
+    const editedPurchase = Number(editedBatch?.purchase_price);
+    const editedMrp = Number(editedBatch?.mrp);
+    const pricedProduct = {
+      ...resolvedProduct,
+      ...(Number.isFinite(editedSelling) ? { selling_price: editedSelling, price: editedSelling } : {}),
+      ...(Number.isFinite(editedPurchase) ? { purchase_price: editedPurchase, actual_price: editedPurchase } : {}),
+      ...(Number.isFinite(editedMrp) ? { mrp: editedMrp } : {}),
+    };
     const stock = getStockCount(resolvedProduct);
-    const key = getCartItemKey(resolvedProduct);
+    const key = getCartItemKey(pricedProduct);
     const inCartQty = key
       ? items
           .filter((item) => String(item?.key) === String(key))
@@ -957,10 +1181,23 @@ const RetailBilling = () => {
       showPopup('No more stock left in this batch.', 'Stock');
       return;
     }
-    addItem(resolvedProduct, 1);
+    addItem(pricedProduct, 1);
+    if (key && Number.isFinite(editedSelling) && editedSelling >= 0) {
+      updatePrice(key, editedSelling);
+    }
     if (key) {
       selectItem(key);
     }
+  };
+
+  const handleBatchPriceChange = (batchId, field, value) => {
+    setSelectedItemBatchDetails((prev) =>
+      prev.map((row) =>
+        String(row?.id) === String(batchId)
+          ? { ...row, [field]: value }
+          : row
+      )
+    );
   };
 
   const findProduct = async (barcode) => {
@@ -1192,15 +1429,15 @@ const RetailBilling = () => {
       }
       return;
     }
-    if (!effectiveBranchId || !branchConfirmed) {
+    if (!effectiveBranchId) {
       showPopup('Select a branch before billing.', 'Validation');
       return;
     }
-    if (!transactionType) {
-      showPopup('Select transaction type', 'Validation');
+    if (transactionType !== normalizedTransactionType) {
+      showPopup('Transaction mode changed. Please retry checkout.', 'Validation');
       return;
     }
-    if ((transactionType === 'sale' || transactionType === 'purchase') && !paymentMethod) {
+    if (!paymentMethod) {
       showPopup('Select payment method', 'Validation');
       return;
     }
@@ -1228,9 +1465,10 @@ const RetailBilling = () => {
           const mobile = String(customer?.phone || customer?.mobile || '').toLowerCase();
           return name.includes(query) || mobile.includes(query);
         })
-        .slice(0, 20);
-      if (localMatches.length) {
-        setCustomerSuggestions(localMatches);
+        .slice(0, 80);
+      const dedupedLocal = dedupeCustomersByIdentity(localMatches).slice(0, 20);
+      if (dedupedLocal.length) {
+        setCustomerSuggestions(dedupedLocal);
         return;
       }
       if (!navigator.onLine) {
@@ -1240,7 +1478,7 @@ const RetailBilling = () => {
       const response = await api.get(`/customers`, { params: { search: text, limit: 20 } });
       const results = response?.data?.data?.customers || response?.data?.customers || [];
       const list = Array.isArray(results) ? results : [];
-      setCustomerSuggestions(list);
+      setCustomerSuggestions(dedupeCustomersByIdentity(list).slice(0, 20));
       if (list.length) {
         upsertCustomersBulk(list).catch(() => {});
       }
@@ -1354,7 +1592,9 @@ const RetailBilling = () => {
       requestedByProduct.set(key, (requestedByProduct.get(key) || 0) + qty);
     });
 
-    const productEntries = Array.from(requestedByProduct.entries());
+    const productEntries = Array.from(requestedByProduct.entries()).filter(
+      ([productId]) => !isLikelyLocalEntityId(productId)
+    );
     if (!productEntries.length) return { ok: true, issues: [] };
 
     const checks = await Promise.all(
@@ -1484,7 +1724,8 @@ const RetailBilling = () => {
             printConfig: {
               paperWidth,
               fontStyle: 'A',
-              fontScale: 2,
+              fontScale: 1,
+              rateWidth: 7,
             },
           }),
           signal: controller.signal,
@@ -1501,9 +1742,30 @@ const RetailBilling = () => {
       }
     };
 
+    const resetCheckoutModalState = () => {
+      clearCart();
+      setCustomerModalOpen(false);
+      setCustomerDetails({
+        id: null,
+        name: '',
+        mobile: '',
+        location: '',
+        address: '',
+        type: 'retail',
+        credit_limit: 0,
+        current_balance: 0,
+      });
+      setCustomerFieldErrors({});
+    };
+
     try {
-      const linkedCustomerId =
-        customerDetails.id || (name || mobile ? await queueCustomerSync(customerDetails, name, mobile) : null);
+      const linkedCustomerId = customerDetails.id || (name || mobile
+        ? await withTimeout(
+            queueCustomerSync(customerDetails, name, mobile).catch(() => null),
+            CUSTOMER_QUEUE_TIMEOUT_MS,
+            null
+          )
+        : null);
       if (paymentMethod === 'credit' && !customerDetails.id) {
         showPopup('Select a saved customer for credit billing.', 'Validation');
         return;
@@ -1536,50 +1798,55 @@ const RetailBilling = () => {
       if (normalizedPhone) {
         setWhatsappPhone(normalizedPhone);
       }
-    const totalDue = totals.grandTotal;
-    const amountPaidRaw =
-      (paymentAmount === '' || paymentAmount === null || paymentAmount === undefined) && paymentMethod !== 'credit'
-        ? totalDue
-        : Number(paymentAmount);
-    const amountPaid = Number.isFinite(amountPaidRaw) ? amountPaidRaw : 0;
-    if (amountPaid < 0) {
-      showPopup('Amount paid must be >= 0.', 'Validation');
-      return;
-    }
-    const creditUsed = Math.max(totalDue - amountPaid, 0);
-    if (creditUsed > 0 && !linkedCustomerId) {
-      showPopup('Select a saved customer for partial/credit billing.', 'Validation');
-      return;
-    }
-    if (creditUsed > 0 && linkedCustomerId) {
-      const creditLimit = Number(customerDetails.credit_limit || 0);
-      const currentBalance = Number(customerDetails.current_balance || 0);
-      if (creditLimit <= 0) {
-        showPopup('Credit not allowed for this customer.', 'Validation');
+      const totalDue = totals.grandTotal;
+      const amountPaidRaw =
+        (paymentAmount === '' || paymentAmount === null || paymentAmount === undefined) && paymentMethod !== 'credit'
+          ? totalDue
+          : Number(paymentAmount);
+      const amountPaid = Number.isFinite(amountPaidRaw) ? amountPaidRaw : 0;
+      if (amountPaid < 0) {
+        showPopup('Amount paid must be >= 0.', 'Validation');
         return;
       }
-      if (currentBalance + creditUsed > creditLimit) {
-        showPopup('Customer credit limit exceeded.', 'Validation');
+      const creditUsed = Math.max(totalDue - amountPaid, 0);
+      const requiresServerCredit = String(paymentMethod || '').toLowerCase() === 'credit' || creditUsed > 0;
+      if (creditUsed > 0 && !linkedCustomerId) {
+        showPopup('Select a saved customer for partial/credit billing.', 'Validation');
         return;
       }
-    }
-    const hasPayment = Number.isFinite(amountPaid) && amountPaid > 0;
-    const payments = hasPayment
-      ? [
-            {
-              client_payment_id:
-                typeof crypto !== 'undefined' && crypto.randomUUID
-                  ? crypto.randomUUID()
-                  : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              amount_paid: amountPaid,
-              payment_mode: paymentMethod,
-              created_at: new Date().toISOString(),
-            },
-          ]
-        : [];
+      if (creditUsed > 0 && linkedCustomerId) {
+        const creditLimit = Number(customerDetails.credit_limit || 0);
+        const currentBalance = Number(customerDetails.current_balance || 0);
+        if (creditLimit <= 0) {
+          showPopup('Credit not allowed for this customer.', 'Validation');
+          return;
+        }
+        if (currentBalance + creditUsed > creditLimit) {
+          showPopup('Customer credit limit exceeded.', 'Validation');
+          return;
+        }
+      }
+      if (requiresServerCredit && stockValidation.degraded) {
+        showPopup('Credit transactions require live server validation. Please retry once connection is stable.', 'Validation');
+        return;
+      }
+      const hasPayment = Number.isFinite(amountPaid) && amountPaid > 0;
+      const payments = hasPayment
+        ? [
+              {
+                client_payment_id:
+                  typeof crypto !== 'undefined' && crypto.randomUUID
+                    ? crypto.randomUUID()
+                    : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                amount_paid: amountPaid,
+                payment_mode: paymentMethod,
+                created_at: new Date().toISOString(),
+              },
+            ]
+          : [];
       const payload = {
-        type: transactionType,
-        transaction_type: transactionType,
+        type: normalizedTransactionType,
+        transaction_type: normalizedTransactionType,
         billing_type: 'retail',
         customer_id: linkedCustomerId || undefined,
         payment_method: paymentMethod,
@@ -1608,7 +1875,63 @@ const RetailBilling = () => {
           is_weight_based: item.is_weight_based,
         })),
       };
-      const offlineEntry = await enqueueOfflineOrder({ type: 'create', payload });
+      if (requiresServerCredit) {
+        if (!navigator.onLine) {
+          showPopup('Credit transactions require server connection. Please go online and retry.', 'Validation');
+          return;
+        }
+        const response = await withTimeout(
+          api.post('/orders', payload, { timeout: ORDER_CREATE_TIMEOUT_MS }).catch(() => null),
+          ORDER_CREATE_TIMEOUT_MS,
+          null
+        );
+        if (!response) {
+          showPopup('Order request timed out. Please retry checkout.', 'Error');
+          return;
+        }
+        const serverOrderId = response?.data?.order_id || response?.data?.order?.id || response?.data?.id || null;
+        resetCheckoutModalState();
+        setLastOrderId(serverOrderId);
+        printReceipt(serverOrderId).catch(() => {});
+        if (whatsappEnabled) {
+          if (serverOrderId) {
+            setSelectedOrderId(serverOrderId);
+            const phoneReady = normalizedPhone.length === 10;
+            if (phoneReady) {
+              try {
+                setWhatsappSending(true);
+                await sendBillViaWhatsApp({ order_id: serverOrderId, phone: normalizedPhone });
+                showPopup('Bill sent via WhatsApp.', 'Success');
+                resetWhatsappState();
+                setLastOrderId(null);
+              } catch (err) {
+                const waMessage =
+                  err?.response?.data?.error ||
+                  err?.response?.data?.message ||
+                  err?.message ||
+                  'Failed to send WhatsApp bill';
+                showOnlinePopup(waMessage, 'Error');
+              } finally {
+                setWhatsappSending(false);
+              }
+            } else {
+              setWhatsappModalOpen(true);
+            }
+          } else {
+            showPopup('Order created. Send WhatsApp from Orders.', 'Info');
+          }
+        }
+        return;
+      }
+      const offlineEntry = await withTimeout(
+        enqueueOfflineOrder({ type: 'create', payload }).catch(() => null),
+        OFFLINE_ENQUEUE_TIMEOUT_MS,
+        null
+      );
+      if (!offlineEntry) {
+        showPopup('Unable to save order locally right now. Please retry.', 'Error');
+        return;
+      }
       if (linkedCustomerId) {
         try {
           const nextBalance =
@@ -1648,14 +1971,11 @@ const RetailBilling = () => {
         }
       }
       // showPopup('Order saved locally. Syncing in background.', 'Success');
-      clearCart();
-      setCustomerModalOpen(false);
-      setCustomerDetails({ id: null, name: '', mobile: '', location: '', address: '' });
-      setCustomerFieldErrors({});
+      resetCheckoutModalState();
 
       const fallbackOrderId = offlineEntry?.payload?.client_order_id || null;
       if (navigator.onLine) {
-        await syncAllCustomers().catch(() => {});
+        await withTimeout(syncAllCustomers().catch(() => null), CUSTOMER_SYNC_TIMEOUT_MS, null);
         const syncResult = await withTimeout(
           processOfflineQueue(api).catch(() => null),
           OFFLINE_SYNC_TIMEOUT_MS,
@@ -1881,6 +2201,7 @@ const RetailBilling = () => {
             onPriceChange={updatePrice}
             onRemove={removeItem}
             canRevealActualPrice={canRevealActualPrice}
+            canEditPrice={isAdminUser}
           />
 
           {selectedCartItem && (
@@ -1920,9 +2241,42 @@ const RetailBilling = () => {
                             <td>{batch.batch_number || '-'}</td>
                             <td>{Number(batch.available || 0)}</td>
                             <td>{Number(batch.inCartQty || 0)}</td>
-                            <td>INR {Number(batch.selling_price || 0).toFixed(2)}</td>
-                            <td>INR {Number(batch.purchase_price || 0).toFixed(2)}</td>
-                            <td>INR {Number(batch.mrp || 0).toFixed(2)}</td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                className="form-control form-control-sm"
+                                value={batch.selling_price ?? ''}
+                                onChange={(event) => handleBatchPriceChange(batch.id, 'selling_price', event.target.value)}
+                                disabled={!isAdminUser}
+                                style={{ minWidth: 110 }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                className="form-control form-control-sm"
+                                value={batch.purchase_price ?? ''}
+                                onChange={(event) => handleBatchPriceChange(batch.id, 'purchase_price', event.target.value)}
+                                disabled={!isAdminUser}
+                                style={{ minWidth: 110 }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                className="form-control form-control-sm"
+                                value={batch.mrp ?? ''}
+                                onChange={(event) => handleBatchPriceChange(batch.id, 'mrp', event.target.value)}
+                                disabled={!isAdminUser}
+                                style={{ minWidth: 110 }}
+                              />
+                            </td>
                             <td>{batch.expiry_date ? new Date(batch.expiry_date).toLocaleDateString() : '-'}</td>
                             <td>
                               <button
@@ -1995,9 +2349,25 @@ const RetailBilling = () => {
               </div>
             </div>
             <div className="billing-option-group">
+              <span className="billing-option-title">Purchase Orders</span>
+              <div className="billing-option-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={purchaseOrdersEnabled}
+                    onChange={(event) => setPurchaseOrdersEnabled(event.target.checked)}
+                  />
+                  Enable Purchase Orders
+                </label>
+              </div>
+              <small className="text-secondary d-block">
+                Mode: {purchaseOrdersEnabled ? 'Purchase' : 'Sale'}
+              </small>
+            </div>
+            <div className="billing-option-group">
               <span className="billing-option-title">Payment Method</span>
               <div className="billing-option-row">
-                {['cash', 'online', ...(creditEnabled ? ['credit'] : [])].map((method) => (
+                {['cash', 'bank', 'online', ...(creditEnabled ? ['credit'] : [])].map((method) => (
                   <label key={method}>
                     <input
                       type="radio"

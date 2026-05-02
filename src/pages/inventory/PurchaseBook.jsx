@@ -51,6 +51,10 @@ const PurchaseBook = () => {
         return date.toISOString().slice(0, 10);
       };
       const normalizeTextKey = (value) => String(value || '').trim().toLowerCase();
+      const normalizeIdKey = (value) => {
+        if (value === null || value === undefined || value === '') return '';
+        return String(value).trim();
+      };
       const buildFingerprint = (purchase) => {
         const supplierId = String(purchase.supplierId ?? purchase.supplier_id ?? '');
         const invoice = normalizeTextKey(purchase.invoiceNumber ?? purchase.invoice_number ?? '');
@@ -68,20 +72,50 @@ const PurchaseBook = () => {
       };
 
       const deduplicatePurchases = (list) => {
+        const choosePreferred = (a, b) => {
+          if (!a) return b;
+          const score = (entry) => {
+            const hasServer = Boolean(normalizeIdKey(entry?.serverId));
+            const idLooksServer = /^\d+$/.test(normalizeIdKey(entry?.id));
+            const synced = String(entry?.syncStatus || entry?.sync_status || '').toLowerCase() === 'synced';
+            const updatedAt = new Date(entry?.updatedAt || entry?.updated_at || entry?.createdAt || entry?.created_at || 0).getTime() || 0;
+            return (hasServer ? 40 : 0) + (idLooksServer ? 20 : 0) + (synced ? 10 : 0) + (updatedAt / 1e13);
+          };
+          return score(b) >= score(a) ? b : a;
+        };
+
         const unique = new Map();
         list.forEach((purchase) => {
+          const idKey = normalizeIdKey(purchase?.id);
+          const serverId = normalizeIdKey(purchase?.serverId);
+          const serverKey = serverId || (/^\d+$/.test(idKey) ? idKey : '');
           const fingerprint = buildFingerprint(purchase);
-          const key = fingerprint || purchase.serverId || purchase.id;
-          if (unique.has(key)) {
-            const existing = unique.get(key);
-            if (purchase.serverId && !existing.serverId) {
-              unique.set(key, purchase);
-            }
-          } else {
-            unique.set(key, purchase);
-          }
+          const invoiceDateKey = (() => {
+            const invoice = normalizeTextKey(purchase?.invoiceNumber ?? purchase?.invoice_number ?? '');
+            const dateKey = normalizeDateKey(purchase?.date ?? purchase?.createdAt ?? purchase?.created_at ?? '');
+            const supplierId = String(purchase?.supplierId ?? purchase?.supplier_id ?? '').trim();
+            const branchId = String(purchase?.branchId ?? purchase?.branch_id ?? '').trim();
+            if (!invoice || !dateKey) return '';
+            return `${supplierId}|${branchId}|${invoice}|${dateKey}`;
+          })();
+
+          const aliasKeys = [
+            serverKey ? `server:${serverKey}` : '',
+            invoiceDateKey ? `inv:${invoiceDateKey}` : '',
+            fingerprint ? `fp:${fingerprint}` : '',
+            idKey ? `id:${idKey}` : '',
+          ].filter(Boolean);
+          if (!aliasKeys.length) return;
+
+          const existing = aliasKeys
+            .map((key) => unique.get(key))
+            .find(Boolean);
+          const winner = choosePreferred(existing, purchase);
+          aliasKeys.forEach((key) => unique.set(key, winner));
         });
-        return Array.from(unique.values());
+
+        const final = Array.from(new Set(Array.from(unique.values())));
+        return final;
       };
 
       const matchesFilters = (purchase) => {

@@ -69,11 +69,13 @@ import CashBook from './pages/accounts/CashBook';
 import BankBook from './pages/accounts/BankBook';
 import Ledger from './pages/accounts/Ledger';
 import Outstanding from './pages/accounts/Outstanding';
+import OpeningSetup from './pages/accounts/OpeningSetup';
 // import BillingModule from './modules/billing';
 import BranchDevices from './pages/BranchDevices';
 import SetupScreen from './pages/SetupScreen';
 import { startDefaultOfflineSync, stopDefaultOfflineSync } from './offline-sync';
 import SyncCenter from './pages/SyncCenter';
+import BusinessSetup from './pages/settings/BusinessSetup';
 import { hasFeature, isFeatureEnabled } from './utils/entitlements';
 import { runAppSyncCycle } from './utils/appSyncOrchestrator';
 
@@ -98,6 +100,7 @@ function App() {
   const [setupInProgress, setSetupInProgress] = useState(false);
   const [setupReady, setSetupReady] = useState(false);
   const [tenantBanner, setTenantBanner] = useState(null);
+  const [isOpeningCompleted, setIsOpeningCompleted] = useState(true);
   const bannerFetchRef = useRef({ userId: null, inFlight: false });
   const preloadOnceRef = useRef(false);
   const setupInProgressRef = useRef(false);
@@ -126,6 +129,8 @@ function App() {
   const reportsEnabled = isFeatureEnabled(tenantConfig, 'reports_enabled', true);
   const mobileAccessEnabled = isFeatureEnabled(tenantConfig, 'mobile_access', false);
   const canUseMobileRoutes = tenantConfigStatus === 'loaded' ? mobileAccessEnabled : true;
+  const isStaffUser = String(userDetails?.role || '').toLowerCase() === 'staff';
+  const isAdminUser = String(userDetails?.role || '').toLowerCase() === 'admin';
   useEffect(() => {
     const runSetup = async () => {
       if (!userDetails) {
@@ -393,12 +398,42 @@ useEffect(() => {
     try {
       const payload = await getSettings();
       setWhatsappEnabled(hasFeature(payload, 'whatsapp_bill_enabled'));
+      setIsOpeningCompleted(payload?.is_opening_completed === true);
     } catch (err) {
       setWhatsappEnabled(false);
+      setIsOpeningCompleted(true);
     }
   };
   fetchSettings();
 }, [userDetails, setWhatsappEnabled]);
+
+useEffect(() => {
+  const handleOpeningCompleted = () => {
+    setIsOpeningCompleted(true);
+  };
+  window.addEventListener('opening-setup-completed', handleOpeningCompleted);
+  return () => {
+    window.removeEventListener('opening-setup-completed', handleOpeningCompleted);
+  };
+}, []);
+
+const OpeningRequired = ({ children }) => {
+  if (isOpeningCompleted) return children;
+  return (
+    <div className="billing-page">
+      <div className="billing-empty">
+        Complete Opening Setup to start business.
+        {isAdminUser && (
+          <div className="mt-3">
+            <button className="btn btn-primary" onClick={() => navigate('/accounts/opening-setup')}>
+              Go to Opening Setup
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 useEffect(() => {
   const fetchBranches = async () => {
@@ -601,6 +636,13 @@ useEffect(() => {
 
 const showServerDownBanner = !isOnline || serverOffline;
 const showTenantBanner = tenantBanner?.enabled === true && location.pathname === '/dashboard';
+const showBusinessSetupBanner =
+  !!userDetails &&
+  !AUTH_PAGES.includes(location.pathname) &&
+  !isMobileRoute &&
+  !setupInProgress &&
+  location.pathname !== '/setup' &&
+  isOpeningCompleted === false;
 const tenantBannerDays = Number.isFinite(tenantBanner?.daysLeft) ? tenantBanner.daysLeft : null;
 const tenantBannerColor = (() => {
   if (tenantBannerDays !== null) {
@@ -616,7 +658,11 @@ const tenantBannerColor = (() => {
       {userDetails && !AUTH_PAGES.includes(location.pathname) && 
       !isMobileRoute && !setupInProgress && location.pathname !== '/setup' && (
         <div className='sticky-top'>
-          <Navbar user_name={userDetails && userDetails.user_name} />
+          <Navbar
+            user_name={userDetails && userDetails.user_name}
+            isOpeningCompleted={isOpeningCompleted}
+            canManageOpeningSetup={isAdminUser}
+          />
         </div>
       )}
       <div
@@ -645,6 +691,11 @@ const tenantBannerColor = (() => {
               : `Your subscription will expire in ${tenantBannerDays} day${tenantBannerDays === 1 ? '' : 's'}.`}
           </div>
         )}
+        {showBusinessSetupBanner && (
+          <div className="tenant-status-banner">
+            Complete your business setup to start operations
+          </div>
+        )}
         <Routes>
           <Route path="/" element={<LoginPage navigate={navigate} />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
@@ -665,7 +716,9 @@ const tenantBannerColor = (() => {
             path="/m/dashboard"
             element={
               <ProtectedRoute>
-                {canUseMobileRoutes ? <DashboardMobile /> : <Navigate to="/dashboard" replace />}
+                {canUseMobileRoutes
+                  ? (isOpeningCompleted ? <DashboardMobile /> : <Navigate to="/inventory/catalog" replace />)
+                  : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -673,7 +726,7 @@ const tenantBannerColor = (() => {
             path="/m/orders"
             element={
               <ProtectedRoute>
-                {canUseMobileRoutes ? <OrdersMobile /> : <Navigate to="/dashboard" replace />}
+                {canUseMobileRoutes ? <OpeningRequired><OrdersMobile /></OpeningRequired> : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -697,7 +750,7 @@ const tenantBannerColor = (() => {
             path="/m/neworder"
             element={
               <ProtectedRoute>
-                {canUseMobileRoutes ? <BillingMobile /> : <Navigate to="/dashboard" replace />}
+                {canUseMobileRoutes ? <OpeningRequired><BillingMobile /></OpeningRequired> : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -713,7 +766,9 @@ const tenantBannerColor = (() => {
             path="/m/reports"
             element={
               <ProtectedRoute>
-                {canUseMobileRoutes ? <ReportsMobile /> : <Navigate to="/dashboard" replace />}
+                {canUseMobileRoutes
+                  ? (isOpeningCompleted ? <ReportsMobile /> : <Navigate to="/inventory/catalog" replace />)
+                  : <Navigate to="/dashboard" replace />}
               </ProtectedRoute>
             }
           />
@@ -729,7 +784,9 @@ const tenantBannerColor = (() => {
             path="/dashboard"
             element={
               <ProtectedRoute>
-                {reportsEnabled ? <Dashboard navigate={navigate} /> : <Navigate to="/billing/retail" replace />}
+                {isOpeningCompleted
+                  ? (reportsEnabled ? <Dashboard navigate={navigate} /> : <Navigate to="/billing/retail" replace />)
+                  : <Navigate to={isAdminUser ? '/accounts/opening-setup' : '/inventory/catalog'} replace />}
               </ProtectedRoute>
             }
           />
@@ -737,7 +794,9 @@ const tenantBannerColor = (() => {
             path='/orders'
             element={
               <ProtectedRoute>
-                <Orders navigate={navigate} userRole={userDetails && userDetails.role} />
+                <OpeningRequired>
+                  <Orders navigate={navigate} userRole={userDetails && userDetails.role} />
+                </OpeningRequired>
               </ProtectedRoute>
             }
           />
@@ -765,52 +824,69 @@ const tenantBannerColor = (() => {
             }
           >
             <Route path="/billing" element={<Navigate to="/billing/retail" replace />} />
-            <Route path="/billing/retail" element={<RetailBilling />} />
-            <Route path="/billing/wholesale" element={<WholesaleBilling />} />
+            <Route path="/billing/retail" element={<OpeningRequired><RetailBilling /></OpeningRequired>} />
+            <Route path="/billing/wholesale" element={<OpeningRequired><WholesaleBilling /></OpeningRequired>} />
             <Route path="/inventory" element={<Navigate to="/inventory/catalog" replace />} />
-            <Route path="/staff-expenses" element={<Navigate to="/staff-expenses/staff/list" replace />} />
-            <Route path="/returns-corrections" element={<Navigate to="/returns-corrections/returns/new" replace />} />
-            <Route path="/accounts" element={<Navigate to="/accounts/receipt" replace />} />
+            <Route
+              path="/staff-expenses"
+              element={<Navigate to={isStaffUser ? '/billing/retail' : '/staff-expenses/staff/list'} replace />}
+            />
+            <Route
+              path="/returns-corrections"
+              element={<Navigate to={isStaffUser ? '/billing/retail' : '/returns-corrections/returns/new'} replace />}
+            />
+            <Route
+              path="/accounts"
+              element={<Navigate to={isStaffUser ? '/billing/retail' : '/accounts/receipt'} replace />}
+            />
             <Route
               path="/inventory/catalog"
               element={<ProductCatalog navigate={navigate} userRole={userDetails && userDetails.role} />}
             />
-            <Route path="/staff-expenses/staff/list" element={<StaffList />} />
-            <Route path="/staff-expenses/staff/add" element={<StaffForm />} />
-            <Route path="/staff-expenses/staff/edit/:staffId" element={<StaffForm />} />
-            <Route path="/staff-expenses/staff/salary" element={<SalaryTracking />} />
-            <Route path="/staff-expenses/expenses/add" element={<ExpenseAdd />} />
-            <Route path="/staff-expenses/expenses/daily" element={<ExpenseDailyReport />} />
-            <Route path="/staff-expenses/expenses/monthly" element={<ExpenseMonthlyReport />} />
-            <Route path="/staff-expenses/expenses/staff-wise" element={<ExpenseStaffReport />} />
-            <Route path="/returns-corrections/returns/new" element={<SalesReturn />} />
-            <Route path="/returns-corrections/returns/history" element={<ReturnHistory />} />
-            <Route path="/returns-corrections/corrections/edit" element={<EditBill />} />
-            <Route path="/returns-corrections/corrections/history" element={<CorrectionHistory />} />
-            <Route path="/returns-corrections/gst/reports" element={<TaxReports />} />
-            <Route path="/returns-corrections/gst/summary" element={<GstSummary />} />
-            <Route path="/returns-corrections/gst/eway" element={<EwayBill />} />
-            <Route path="/returns-corrections/gst/filing" element={<GstFilingData />} />
-            <Route path="/inventory/purchase" element={<Purchase />} />
-            <Route path="/inventory/purchases" element={<PurchaseBook />} />
-            <Route path="/inventory/purchases/:id" element={<PurchaseDetail />} />
-            <Route path="/inventory/purchase-returns" element={<PurchaseReturn />} />
-            <Route path="/inventory/suppliers" element={<Suppliers />} />
-            <Route path="/inventory/suppliers/new" element={<SupplierForm />} />
-            <Route path="/inventory/suppliers/:id" element={<SupplierDetail />} />
-            <Route path="/inventory/suppliers/:id/edit" element={<SupplierForm />} />
-            <Route path="/accounts/receipt" element={<ReceiptEntry />} />
-            <Route path="/accounts/payment" element={<PaymentEntry />} />
-            <Route path="/accounts/cashbook" element={<CashBook />} />
-            <Route path="/accounts/bankbook" element={<BankBook />} />
-            <Route path="/accounts/ledger" element={<Ledger />} />
-            <Route path="/accounts/outstanding" element={<Outstanding />} />
+            <Route path="/staff-expenses/staff/list" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <StaffList />} />
+            <Route path="/staff-expenses/staff/add" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <StaffForm />} />
+            <Route path="/staff-expenses/staff/edit/:staffId" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <StaffForm />} />
+            <Route path="/staff-expenses/staff/salary" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <SalaryTracking />} />
+            <Route path="/staff-expenses/expenses/add" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <ExpenseAdd />} />
+            <Route path="/staff-expenses/expenses/daily" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <ExpenseDailyReport />} />
+            <Route path="/staff-expenses/expenses/monthly" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <ExpenseMonthlyReport />} />
+            <Route path="/staff-expenses/expenses/staff-wise" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <ExpenseStaffReport />} />
+            <Route path="/returns-corrections/returns/new" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <SalesReturn />} />
+            <Route path="/returns-corrections/returns/history" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <ReturnHistory />} />
+            <Route path="/returns-corrections/corrections/edit" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <EditBill />} />
+            <Route path="/returns-corrections/corrections/history" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <CorrectionHistory />} />
+            <Route path="/returns-corrections/gst/reports" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <TaxReports />} />
+            <Route path="/returns-corrections/gst/summary" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <GstSummary />} />
+            <Route path="/returns-corrections/gst/eway" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <EwayBill />} />
+            <Route path="/returns-corrections/gst/filing" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <GstFilingData />} />
+            <Route path="/inventory/purchase" element={<OpeningRequired><Purchase /></OpeningRequired>} />
+            <Route path="/inventory/purchases" element={<OpeningRequired><PurchaseBook /></OpeningRequired>} />
+            <Route path="/inventory/purchases/:id" element={<OpeningRequired><PurchaseDetail /></OpeningRequired>} />
+            <Route path="/inventory/purchase-returns" element={<OpeningRequired><PurchaseReturn /></OpeningRequired>} />
+            <Route path="/inventory/suppliers" element={<OpeningRequired><Suppliers /></OpeningRequired>} />
+            <Route path="/inventory/suppliers/new" element={<OpeningRequired><SupplierForm /></OpeningRequired>} />
+            <Route path="/inventory/suppliers/:id" element={<OpeningRequired><SupplierDetail /></OpeningRequired>} />
+            <Route path="/inventory/suppliers/:id/edit" element={<OpeningRequired><SupplierForm /></OpeningRequired>} />
+            <Route path="/accounts/receipt" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <ReceiptEntry />} />
+            <Route path="/accounts/payment" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <PaymentEntry />} />
+            <Route path="/accounts/cashbook" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <CashBook />} />
+            <Route path="/accounts/bankbook" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <BankBook />} />
+            <Route path="/accounts/ledger" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <Ledger />} />
+            <Route path="/accounts/outstanding" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <Outstanding />} />
+            <Route
+              path="/accounts/opening-setup"
+              element={isStaffUser ? <Navigate to="/billing/retail" replace /> : (isOpeningCompleted ? <Navigate to="/dashboard" replace /> : <OpeningSetup />)}
+            />
             <Route path="/customers" element={<CustomerList />} />
             <Route path="/customers/reorder" element={<CustomerReorder />} />
             <Route path="/customers/new" element={<CustomerForm />} />
             <Route path="/customers/:id" element={<CustomerDetail />} />
             <Route path="/customers/:id/edit" element={<CustomerForm />} />
             <Route path="/sync-center" element={<SyncCenter />} />
+            <Route
+              path="/settings/business-setup"
+              element={isStaffUser || !isOpeningCompleted ? <Navigate to={isOpeningCompleted ? '/billing/retail' : '/inventory/catalog'} replace /> : <BusinessSetup />}
+            />
           </Route>
           {/* <Route
             path="/billing-new"
