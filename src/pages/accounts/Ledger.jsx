@@ -4,22 +4,11 @@ import { fetchLedger } from '../../services/accountingService';
 import { getAllCustomers, getAllSuppliersCache, updateSuppliersCacheBulk, upsertCustomersBulk } from '../../core/db';
 import './Accounts.css';
 
-const computeLedgerBalance = (entries = [], partyType = 'customer') => {
-  const sorted = [...entries].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-  let running = 0;
-  return sorted.map((entry) => {
-    const amount = Number(entry.amount ?? entry.total_price ?? 0);
-    if (partyType === 'customer') {
-      const debit = entry.txn_type === 'sale' ? amount : 0;
-      const credit = entry.txn_type === 'receipt' || entry.txn_type === 'refund' ? amount : 0;
-      running += debit - credit;
-      return { ...entry, debit, credit, balance: running };
-    }
-    const credit = entry.txn_type === 'purchase' ? amount : 0;
-    const debit = entry.txn_type === 'payment' || entry.txn_type === 'refund' ? amount : 0;
-    running += credit - debit;
-    return { ...entry, debit, credit, balance: running };
-  });
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '-';
+  return dt.toLocaleString();
 };
 
 const Ledger = () => {
@@ -66,10 +55,7 @@ const Ledger = () => {
     try {
       const payload = await fetchLedger({ party_type: partyType, party_id: partyId });
       const list = Array.isArray(payload.entries) ? payload.entries : [];
-      const normalized = list.some((entry) => entry.balance !== undefined)
-        ? list
-        : computeLedgerBalance(list, partyType);
-      setEntries(normalized);
+      setEntries(list);
     } catch {
       setEntries([]);
     } finally {
@@ -85,10 +71,7 @@ const Ledger = () => {
     loadLedger();
   }, [partyType, partyId]);
 
-  const rows = useMemo(() => {
-    const list = entries || [];
-    return [...list].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-  }, [entries]);
+  const rows = useMemo(() => entries || [], [entries]);
 
   return (
     <div className="billing-page accounts-page">
@@ -147,7 +130,7 @@ const Ledger = () => {
             )}
             {!loading && rows.map((entry) => (
               <tr key={entry.id}>
-                <td>{entry.created_at ? new Date(entry.created_at).toLocaleDateString() : '-'}</td>
+                <td>{formatDateTime(entry.created_at)}</td>
                 <td>{entry.txn_type || '-'}</td>
                 <td>{entry.debit ? `INR ${Number(entry.debit).toFixed(2)}` : '-'}</td>
                 <td>{entry.credit ? `INR ${Number(entry.credit).toFixed(2)}` : '-'}</td>

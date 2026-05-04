@@ -13,6 +13,7 @@ import {
 } from '../../core/db';
 import { searchLocalProducts } from '../../utils/localProductSearch';
 import { enqueueOfflineOrder, processOfflineQueue } from '../../utils/offlineOrders';
+import { enqueueReceipt } from '../../utils/accountingOffline';
 import { syncAllCustomers } from '../../utils/customersSync';
 import api from '../../utils/axios';
 import CartList from '../../components/Billing/CartList';
@@ -271,7 +272,18 @@ const WholesaleBilling = () => {
           is_weight_based: item.is_weight_based,
         })),
       };
-      await enqueueOfflineOrder({ type: 'create', payload });
+      const offlineEntry = await enqueueOfflineOrder({ type: 'create', payload });
+      if (!isCredit && linkedCustomerId && (paymentMethod === 'cash' || paymentMethod === 'bank')) {
+        await enqueueReceipt({
+          customer_id: linkedCustomerId,
+          order_id: offlineEntry?.payload?.client_order_id || null,
+          reference_type: 'order',
+          reference_id: offlineEntry?.payload?.client_order_id || null,
+          amount: Number(totals.grandTotal || 0),
+          payment_mode: paymentMethod,
+          notes: 'Offline wholesale order receipt',
+        }).catch(() => null);
+      }
       if (creditUsed > 0 && linkedCustomerId) {
         try {
           await upsertCustomersBulk([

@@ -33,6 +33,8 @@ import { Modal } from 'bootstrap';
 import WhatsAppModal from '../../components/WhatsApp/WhatsAppModal';
 import SendWhatsAppButton from '../../components/WhatsApp/SendWhatsAppButton';
 import { sendBillViaWhatsApp } from '../../services/whatsappService';
+import { createReceipt } from '../../services/accountingService';
+import { enqueueReceipt } from '../../utils/accountingOffline';
 import { GST_MODES, resolveGstModeFromConfig } from '../../services/gstService';
 import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 import '../BillingPage.css';
@@ -82,6 +84,10 @@ const loadPurchaseOrdersToggle = () => {
   } catch {
     return false;
   }
+};
+const isCashOrBankMode = (mode) => {
+  const normalized = String(mode || '').toLowerCase();
+  return normalized === 'cash' || normalized === 'bank';
 };
 
 const buildSearchUrl = (text, mode) => {
@@ -1960,12 +1966,31 @@ const RetailBilling = () => {
         try {
           await upsertTransaction({
             id: localPayment.client_payment_id,
+            txn_type: 'receipt',
+            direction: 'in',
+            party_type: 'customer',
+            party_id: linkedCustomerId || null,
+            order_id: offlineEntry?.payload?.client_order_id || null,
+            reference_type: 'order',
+            reference_id: offlineEntry?.payload?.client_order_id || null,
             client_order_id: offlineEntry?.payload?.client_order_id || null,
             total_price: localPayment.amount_paid,
+            amount: localPayment.amount_paid,
             payment_mode: localPayment.payment_mode,
             created_at: localPayment.created_at,
             status: 'pending_sync',
           });
+          if (linkedCustomerId && isCashOrBankMode(localPayment.payment_mode)) {
+            await enqueueReceipt({
+              customer_id: linkedCustomerId,
+              order_id: offlineEntry?.payload?.client_order_id || null,
+              reference_type: 'order',
+              reference_id: offlineEntry?.payload?.client_order_id || null,
+              amount: localPayment.amount_paid,
+              payment_mode: localPayment.payment_mode,
+              notes: 'Offline order receipt',
+            }).catch(() => null);
+          }
         } catch {
           // ignore local transaction cache errors
         }
@@ -1990,6 +2015,26 @@ const RetailBilling = () => {
           saveTransactionsBulk(matched.transactions).catch(() => {});
         }
         const syncedOrderId = matched?.order_id || null;
+        if (
+          syncedOrderId &&
+          linkedCustomerId &&
+          isCashOrBankMode(paymentMethod) &&
+          Number(amountPaid) > 0 &&
+          !(Array.isArray(matched?.transactions) && matched.transactions.some((txn) => {
+            const t = String(txn?.txn_type || txn?.txnType || '').toLowerCase();
+            return t === 'receipt' && String(txn?.order_id || txn?.orderId || '') === String(syncedOrderId);
+          }))
+        ) {
+          await createReceipt({
+            customer_id: linkedCustomerId,
+            order_id: syncedOrderId,
+            reference_type: 'order',
+            reference_id: syncedOrderId,
+            amount: Number(amountPaid),
+            payment_mode: paymentMethod,
+            notes: 'Order receipt',
+          }).catch(() => null);
+        }
         setLastOrderId(syncedOrderId);
         // Do not block checkout completion on printer response.
         // Printing still updates print status/error asynchronously.

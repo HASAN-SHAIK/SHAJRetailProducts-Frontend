@@ -6,6 +6,7 @@ import CustomerSidebar from '../sidebar/CustomerSidebar';
 import AccountsSidebar from '../sidebar/AccountsSidebar';
 import StaffExpensesSidebar from '../sidebar/StaffExpensesSidebar';
 import ReturnsCorrectionsSidebar from '../sidebar/ReturnsCorrectionsSidebar';
+import OrdersSidebar from '../sidebar/OrdersSidebar';
 import './ContextSidebar.css';
 
 const ContextSidebar = ({ collapsed, onToggle }) => {
@@ -18,6 +19,7 @@ const ContextSidebar = ({ collapsed, onToggle }) => {
   if (module === 'inventory') return <InventorySidebar {...sidebarProps} />;
   if (module === 'customers') return <CustomerSidebar {...sidebarProps} />;
   if (module === 'accounts') return <AccountsSidebar {...sidebarProps} />;
+  if (module === 'orders') return <OrdersSidebar {...sidebarProps} />;
   if (module === 'staff-expenses') return <StaffExpensesSidebar {...sidebarProps} />;
   if (module === 'returns-corrections') return <ReturnsCorrectionsSidebar {...sidebarProps} />;
   return null;

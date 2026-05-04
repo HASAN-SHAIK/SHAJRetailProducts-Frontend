@@ -12,6 +12,7 @@ import { runAppSyncCycle } from '../utils/appSyncOrchestrator';
 import { useBranchStore } from '../store/branchStore';
 import api from '../utils/axios';
 import { buildFullBackup, restoreLocalFromBackup, verifyBackup } from '../utils/backupRestore';
+import { backfillPurchasePayments } from '../services/accountingService';
 import './SyncCenter.css';
 
 const isQueuePending = (status) => {
@@ -58,6 +59,9 @@ const SyncCenter = () => {
   const [consistencyBusy, setConsistencyBusy] = useState(false);
   const [importHistory, setImportHistory] = useState([]);
   const [importHistoryLoading, setImportHistoryLoading] = useState(false);
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillPreviewBusy, setBackfillPreviewBusy] = useState(false);
+  const [backfillOrderIdsInput, setBackfillOrderIdsInput] = useState('');
 
   const loadQueues = useCallback(async (silent = false) => {
     if (silent) {
@@ -444,6 +448,72 @@ const SyncCenter = () => {
     }
   };
 
+  const handleBackfillPurchasePayments = async () => {
+    if (backfillBusy) return;
+    if (!navigator.onLine) {
+      showPopup('Backfill needs online server access.', 'Sync Center');
+      return;
+    }
+    const ok = window.confirm('Backfill missing purchase payment records now? Ledger entries will NOT be recreated.');
+    if (!ok) return;
+    setBackfillBusy(true);
+    try {
+      const onlyOrderIds = String(backfillOrderIdsInput || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const summary = await backfillPurchasePayments({ onlyOrderIds });
+      const created = Number(summary?.created || 0);
+      const affected = Number(summary?.affected_orders || 0);
+      const failed = Number(summary?.failed || 0);
+      showPopup(
+        `Backfill complete. Created ${created}/${affected} missing payment record(s)${failed ? `, failed ${failed}` : ''}.`,
+        'Sync Center'
+      );
+      if (failed) {
+        console.warn('[BackfillPurchasePayments] Partial failure', summary);
+      } else {
+        console.log('[BackfillPurchasePayments] Success', summary);
+      }
+    } catch (err) {
+      showPopup(err?.response?.data?.message || err?.message || 'Backfill failed.', 'Sync Center');
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
+
+  const handlePreviewBackfillPurchasePayments = async () => {
+    if (backfillPreviewBusy) return;
+    if (!navigator.onLine) {
+      showPopup('Preview needs online server access.', 'Sync Center');
+      return;
+    }
+    setBackfillPreviewBusy(true);
+    try {
+      const onlyOrderIds = String(backfillOrderIdsInput || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const summary = await backfillPurchasePayments({ dryRun: true, onlyOrderIds });
+      const affected = Number(summary?.affected_orders || 0);
+      const ids = Array.isArray(summary?.affected_order_ids) ? summary.affected_order_ids : [];
+      const previewIds = ids.slice(0, 15).join(', ');
+      if (affected === 0) {
+        showPopup('Preview complete. No missing purchase payments found.', 'Sync Center');
+      } else {
+        const msg = previewIds
+          ? `Preview: ${affected} order(s) missing payment records. Sample IDs: ${previewIds}${ids.length > 15 ? ' ...' : ''}`
+          : `Preview: ${affected} order(s) missing payment records.`;
+        showPopup(msg, 'Sync Center');
+      }
+      console.log('[BackfillPurchasePayments][DryRun]', summary);
+    } catch (err) {
+      showPopup(err?.response?.data?.message || err?.message || 'Backfill preview failed.', 'Sync Center');
+    } finally {
+      setBackfillPreviewBusy(false);
+    }
+  };
+
   return (
     <div className="wow-page">
       <div className="wow-content container-fluid p-0 sync-center-page">
@@ -453,6 +523,14 @@ const SyncCenter = () => {
           <small className="text-secondary">Track pending records and trigger retries.</small>
         </div>
         <div className="sync-center-actions">
+          <input
+            type="text"
+            className="form-control form-control-sm"
+            placeholder="Order IDs (optional): 1,2,4,7"
+            value={backfillOrderIdsInput}
+            onChange={(event) => setBackfillOrderIdsInput(event.target.value)}
+            style={{ maxWidth: 260 }}
+          />
           <button
             type="button"
             className="btn btn-outline-primary btn-sm"
@@ -476,6 +554,22 @@ const SyncCenter = () => {
             disabled={loading || refreshing || syncingAll || Boolean(runningModule) || forceFullSyncing}
           >
             {forceFullSyncing ? 'Full Syncing...' : 'Force Full Sync'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            onClick={handlePreviewBackfillPurchasePayments}
+            disabled={loading || refreshing || syncingAll || Boolean(runningModule) || backfillBusy || backfillPreviewBusy}
+          >
+            {backfillPreviewBusy ? 'Previewing...' : 'Preview Backfill'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-danger btn-sm"
+            onClick={handleBackfillPurchasePayments}
+            disabled={loading || refreshing || syncingAll || Boolean(runningModule) || backfillBusy || backfillPreviewBusy}
+          >
+            {backfillBusy ? 'Backfilling...' : 'Backfill Purchase Payments'}
           </button>
         </div>
       </div>

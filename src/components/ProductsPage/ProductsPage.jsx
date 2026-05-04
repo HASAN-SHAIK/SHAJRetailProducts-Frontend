@@ -525,6 +525,13 @@ const ProductsPage = ({ navigate }) => {
   const applyLocalFilters = useCallback((items) => {
     let filtered = Array.isArray(items) ? items : [];
 
+    if (effectiveBranchId) {
+      filtered = filtered.filter((item) => {
+        const productBranchId = item?.branch_id ?? item?.branchId ?? null;
+        return String(productBranchId || '') === String(effectiveBranchId);
+      });
+    }
+
     if (searchQuery) {
       const query = normalizeValue(searchQuery);
       filtered = filtered.filter((item) => {
@@ -557,7 +564,7 @@ const ProductsPage = ({ navigate }) => {
     });
 
     return sorted;
-  }, [searchQuery, selectedCategory, sortBy, sortOrder]);
+  }, [effectiveBranchId, searchQuery, selectedCategory, sortBy, sortOrder]);
 
   const paginateItems = (items) => {
     const totalRecords = items.length;
@@ -583,6 +590,29 @@ const ProductsPage = ({ navigate }) => {
         localList = dedupeProducts((Array.isArray(localAll) ? localAll : []).filter(
           (item) => !item?.is_deleted
         ));
+      }
+
+      if (effectiveBranchId) {
+        const allBatches = await getAllBatches();
+        const productIdsWithBranchStock = new Set(
+          (Array.isArray(allBatches) ? allBatches : [])
+            .filter((batch) => {
+              if (!batch || batch.is_deleted) return false;
+              if (String(batch?.branch_id || '') !== String(effectiveBranchId)) return false;
+              return Number(batch?.quantity_remaining ?? batch?.quantity ?? 0) > 0;
+            })
+            .map((batch) => String(batch?.product_id || ''))
+            .filter(Boolean)
+        );
+
+        localList = localList.filter((item) => {
+          const productBranchId = item?.branch_id ?? item?.branchId ?? null;
+          const productId = item?.id ?? item?.product_id ?? item?.productId ?? null;
+          return (
+            String(productBranchId || '') === String(effectiveBranchId) ||
+            productIdsWithBranchStock.has(String(productId || ''))
+          );
+        });
       }
 
       const localFiltered = applyLocalFilters(localList);

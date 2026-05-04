@@ -5,16 +5,18 @@ import { usePopup } from '../common/PopUp/PopupProvider';
 import { enqueueOfflineOrder } from '../../utils/offlineOrders';
 import {
   clearOrdersCache,
-  getAllCachedOrders,
+  clearCachedOrdersByType,
+  deleteOrdersByIds,
   getCachedOrderDetails,
   getCachedOrderById,
   getCachedOrderTransactions,
-  replaceAllOrders,
   upsertOrderDetailsCache,
   upsertOrders,
 } from '../../db/ordersDb';
-import { getOfflineOrders, getSessionValue, saveSessionValue, saveTransactionsBulk } from '../../core/db';
+import { preloadOrdersToIndexedDb } from '../../utils/indexedDb';
+import { db, getSessionValue, saveSessionValue, saveTransactionsBulk } from '../../core/db';
 import { useSelector } from 'react-redux';
+import { useLocation } from 'react-router-dom';
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import WhatsAppModal from '../WhatsApp/WhatsAppModal';
@@ -23,10 +25,10 @@ import { sendBillViaWhatsApp } from '../../services/whatsappService';
 import { useWhatsappStore } from '../../store/whatsappStore';
 import { useBranchStore } from '../../store/branchStore';
 import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
+import { createReceipt, fetchPaymentEntries, fetchReceiptEntries } from '../../services/accountingService';
+import { enqueueReceipt } from '../../utils/accountingOffline';
 
 const OrdersPage = ({ navigate }) => {
-  const ORDER_CACHE_FULL_SYNC_LIMIT = 2000;
-  const ORDER_CACHE_PAGE_SIZE = 100;
   const { showPopup } = usePopup();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const planFeatures = getTenantFeatures(tenantConfig);
@@ -38,7 +40,8 @@ const OrdersPage = ({ navigate }) => {
     tenantConfig?.receipt_module_enabled,
     tenantConfig?.features?.receipt_module,
   ].some((value) => value === true || value === 1 || value === '1' || String(value || '').toLowerCase() === 'true');
-  const [orders, setOrders] = useState([]);
+  const [salesOrders, setSalesOrders] = useState([]);
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 10,
@@ -48,18 +51,21 @@ const OrdersPage = ({ navigate }) => {
   const [selectedRange, setSelectedRange] = useState('all');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
-  const [customRangeKey, setCustomRangeKey] = useState(0);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showPurchaseOrders, setShowPurchaseOrders] = useState(false);
+  const location = useLocation();
+  const routeType = location.pathname.includes('sales') ? 'sale' : 'purchase';
+  const normalizedMode = routeType === 'purchase' ? 'purchase' : 'sales';
   const [sortBy, setSortBy] = useState('id');
   const [sortOrder, setSortOrder] = useState('desc');
   const [isLoading, setIsLoading] = useState(true);
+  const [isServerRefreshing, setIsServerRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [drawerError, setDrawerError] = useState('');
   const [drawerOrder, setDrawerOrder] = useState(null);
+  const [drawerLinkedPayments, setDrawerLinkedPayments] = useState([]);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentSubmittingId, setPaymentSubmittingId] = useState(null);
@@ -91,7 +97,6 @@ const OrdersPage = ({ navigate }) => {
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappSending, setWhatsappSending] = useState(false);
   const [whatsappTarget, setWhatsappTarget] = useState(null);
-  const cacheSyncRef = useRef(false);
   const whatsappEnabled = useWhatsappStore((state) => state.whatsappEnabled);
   const selectedOrderId = useWhatsappStore((state) => state.selectedOrderId);
   const setSelectedOrderId = useWhatsappStore((state) => state.setSelectedOrderId);
@@ -99,7 +104,11 @@ const OrdersPage = ({ navigate }) => {
   const setWhatsappPhone = useWhatsappStore((state) => state.setPhone);
   const resetWhatsappState = useWhatsappStore((state) => state.resetWhatsappState);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
-  const effectiveBranchId = selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : null;
+  const requestIdRef = useRef(0);
+  const pageMountedAtRef = useRef(Date.now());
+  const refreshClickArmedRef = useRef(false);
+  const resyncClickArmedRef = useRef(false);
+  const syncRequestedRef = useRef(false);
 
   const RETURN_REASONS = [
     'Damaged',
@@ -111,6 +120,82 @@ const OrdersPage = ({ navigate }) => {
   ];
   const REFUND_MODES = ['cash', 'upi', 'bank', 'wallet', 'exchange'];
   const PAYMENT_METHOD_OPTIONS = ['cash', 'upi', 'card', 'bank', 'wallet'];
+  const isCreditMode = (mode) => String(mode || '').trim().toLowerCase() === 'credit';
+  const isCashOrBankMode = (mode) => {
+    const normalized = String(mode || '').trim().toLowerCase();
+    return normalized === 'cash' || normalized === 'bank' || normalized === 'upi' || normalized === 'online';
+  };
+  const getValidPaymentRows = (order = {}) => {
+    const history = Array.isArray(order?.payment_history)
+      ? order.payment_history
+      : Array.isArray(order?.payments)
+        ? order.payments
+        : [];
+    return history.filter((payment) => {
+      const amount = Number(payment?.amount ?? payment?.total_price ?? payment?.amount_paid);
+      return Number.isFinite(amount) && amount > 0;
+    });
+  };
+  const sumPayments = (payments = []) =>
+    (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
+      const amount = Number(payment?.amount ?? payment?.total_price ?? payment?.amount_paid ?? 0);
+      return sum + (Number.isFinite(amount) ? amount : 0);
+    }, 0);
+  const getActualPaidFromHistory = (order = {}) => {
+    const validPayments = getValidPaymentRows(order);
+    return validPayments.length ? sumPayments(validPayments) : 0;
+  };
+  const round2 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+  const computeReturnSplit = ({ totalAmount = 0, totalPaid = 0, returnAmount = 0 }) => {
+    const paid = Math.max(Number(totalPaid || 0), 0);
+    const ret = Math.max(Number(returnAmount || 0), 0);
+    if (ret <= 0) {
+      return { paid_ratio: 0, paid_portion: 0, unpaid_portion: 0 };
+    }
+    if (paid <= 0) {
+      return { paid_ratio: 0, paid_portion: 0, unpaid_portion: round2(ret) };
+    }
+    const paidPortion = round2(Math.min(ret, paid));
+    const unpaidPortion = round2(Math.max(ret - paidPortion, 0));
+    const paidRatio = ret > 0 ? Math.max(0, Math.min(paidPortion / ret, 1)) : 0;
+    return {
+      paid_ratio: paidRatio,
+      paid_portion: paidPortion,
+      unpaid_portion: unpaidPortion,
+    };
+  };
+
+  const getOrderPaymentSummaryStatus = (order = {}) => {
+    const isPresentValue = (value) => value !== undefined && value !== null && !(typeof value === 'string' && value.trim() === '');
+    const toOptionalNumber = (value) => {
+      if (!isPresentValue(value)) return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    };
+    const totalAmount = Number(
+      order?.total_amount ??
+      order?.totalAmount ??
+      order?.total_price ??
+      order?.totalPrice ??
+      order?.total ??
+      0
+    );
+    const paymentHistory = getValidPaymentRows(order);
+    const paidFromHistory = getActualPaidFromHistory(order);
+    const paidFromOrder = toOptionalNumber(order?.total_paid ?? order?.paid_amount) ?? 0;
+    const totalPaid = Math.max(paidFromHistory, paidFromOrder);
+    const orderKind = getOrderKind(order);
+    const rawBalance = toOptionalNumber(order?.balance);
+    const balance = rawBalance !== null
+      ? Math.max(rawBalance, 0)
+      : Math.max(totalAmount - totalPaid, 0);
+    if (orderKind === 'purchase' && isCreditMode(order?.payment_mode ?? order?.paymentMode)) {
+      return balance > 0 ? 'pending' : totalPaid > 0 ? 'paid' : 'pending';
+    }
+    if (balance > 0) return totalPaid > 0 ? 'partial' : 'pending';
+    if (balance === 0) return 'paid';
+    return 'pending';
+  };
 
   const formatDate = useCallback((value) => {
     if (!value) return '-';
@@ -209,6 +294,11 @@ const OrdersPage = ({ navigate }) => {
     return 'billing';
   }, []);
 
+  const isModeMatch = useCallback((order = {}) => {
+    const kind = getOrderKind(order);
+    return normalizedMode === 'purchase' ? kind === 'purchase' : kind !== 'purchase';
+  }, [getOrderKind, normalizedMode]);
+
   const generateLocalTxnId = () => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return crypto.randomUUID();
@@ -216,412 +306,402 @@ const OrdersPage = ({ navigate }) => {
     return `local-pay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   };
 
-  const buildRangeParams = useCallback(() => {
-    const params = {
-      page: pagination.page,
-      limit: pagination.limit,
-      range: selectedRange,
-      search: searchQuery || undefined,
-      sort_by: sortBy,
-      sort_order: sortOrder,
-    };
-    if (selectedRange === 'custom') {
-      params.start_date = customStartDate;
-      params.end_date = customEndDate;
-    }
-    return params;
-  }, [pagination.page, pagination.limit, selectedRange, customStartDate, customEndDate, searchQuery, sortBy, sortOrder]);
 
-  const buildPendingOrderFromQueueEntry = useCallback((entry = {}) => {
-    const payload = entry?.payload || {};
-    if (entry?.type !== 'create') return null;
-    const clientOrderId = payload.client_order_id || entry.client_order_id || entry.id;
-    const localId = clientOrderId ? `local:${clientOrderId}` : `local:${entry.id}`;
-    const products = Array.isArray(payload.products) ? payload.products : [];
-    const productNames = products
-      .map((item) => item?.name || item?.product_name || item?.product || '')
-      .filter(Boolean);
-    const computedSubtotal = products.reduce((sum, item) => {
-      const qty = Number(item.quantity || item.qty || 0);
-      const price = Number(item.price || item.selling_price || 0);
-      return sum + qty * price;
-    }, 0);
-    const computedGst = payload.is_gst_enabled
-      ? products.reduce((sum, item) => {
-          const qty = Number(item.quantity || item.qty || 0);
-          const price = Number(item.price || item.selling_price || 0);
-          const gst = Number(item.gst_percent || item.gst || 0);
-          return sum + (qty * price * gst) / 100;
-        }, 0)
-      : 0;
-    const totalAmount = payload.total_amount ?? payload.total_price ?? (computedSubtotal + computedGst);
-    return {
-      id: localId,
-      local_id: entry.id || null,
-      client_order_id: clientOrderId || null,
-      sync_status: 'pending',
-      is_offline: true,
-      branch_id: payload.branch_id || null,
-      products_summary: productNames.slice(0, 3).join(', '),
-      product_names: productNames,
-      product_count: products.length,
-      customer_name: payload.customer_name || null,
-      customer_phone: payload.customer_phone || null,
-      customer_id: payload.customer_id || null,
-      total_amount: totalAmount,
-      total_paid: 0,
-      returned_amount: 0,
-      balance: null,
-      payment_status: null,
-      billing_type: payload.billing_type || payload.billingType || 'retail',
-      payment_mode: payload.payment_mode || payload.payment_method || payload.payment || null,
-      order_status: payload.order_status || 'pending',
-      is_gst_enabled: payload.is_gst_enabled === true,
-      created_at: payload.client_created_at || entry.createdAt || new Date().toISOString(),
-      products,
-    };
+  const setOrdersByType = useCallback((type, valueOrUpdater) => {
+    const apply = (prev) => (typeof valueOrUpdater === 'function' ? valueOrUpdater(prev) : valueOrUpdater);
+    if (type === 'sale') {
+      setSalesOrders((prev) => apply(prev));
+    } else {
+      setPurchaseOrders((prev) => apply(prev));
+    }
   }, []);
 
-  const loadCachedOrders = useCallback(async () => {
-    try {
-      const allOrders = await getAllCachedOrders();
-      const queuedEntries = await getOfflineOrders().catch(() => []);
-      const pendingQueueOrders = (Array.isArray(queuedEntries) ? queuedEntries : [])
-        .map((entry) => buildPendingOrderFromQueueEntry(entry))
-        .filter(Boolean);
-      const merged = new Map();
-      (Array.isArray(allOrders) ? allOrders : []).forEach((order) => {
-        if (!order?.id) return;
-        merged.set(String(order.id), order);
-      });
-      pendingQueueOrders.forEach((order) => {
-        if (!order?.id) return;
-        if (!merged.has(String(order.id))) {
-          merged.set(String(order.id), order);
-        }
-      });
-      let filtered = Array.from(merged.values());
-      if (!showPurchaseOrders) {
-        filtered = filtered.filter((order) => getOrderKind(order) !== 'purchase');
-      }
+  const getOrdersByType = useCallback((type) => {
+    return type === 'sale' ? salesOrders : purchaseOrders;
+  }, [salesOrders, purchaseOrders]);
 
-      if (effectiveBranchId) {
-        filtered = filtered.filter((order) => String(order.branch_id || '') === String(effectiveBranchId));
+  const projectOrdersForView = useCallback((inputOrders = []) => {
+    let filtered = (Array.isArray(inputOrders) ? inputOrders : []).filter(isModeMatch);
+    if (selectedBranchId && selectedBranchId !== 'all') {
+      filtered = filtered.filter((order) => String(order?.branch_id || '') === String(selectedBranchId));
+    }
+    if (searchQuery) {
+      const term = searchQuery.toLowerCase();
+      filtered = filtered.filter((order) =>
+        String(order?.id || '').toLowerCase().includes(term) ||
+        String(order?.customer_name || '').toLowerCase().includes(term) ||
+        String(order?.customer_phone || '').toLowerCase().includes(term) ||
+        String(order?.supplier_name || '').toLowerCase().includes(term) ||
+        String(order?.products_summary || '').toLowerCase().includes(term)
+      );
+    }
+    if (selectedRange) {
+      const now = new Date();
+      let rangeStart = null;
+      let rangeEnd = null;
+      if (selectedRange === 'today') {
+        rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        rangeEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      } else if (selectedRange === 'this_week') {
+        const day = now.getDay();
+        const diff = now.getDate() - day;
+        rangeStart = new Date(now.getFullYear(), now.getMonth(), diff);
+        rangeEnd = new Date(rangeStart);
+        rangeEnd.setDate(rangeStart.getDate() + 6);
+        rangeEnd.setHours(23, 59, 59, 999);
+      } else if (selectedRange === 'this_month') {
+        rangeStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      } else if (selectedRange === 'custom' && customStartDate && customEndDate) {
+        rangeStart = new Date(customStartDate);
+        rangeEnd = new Date(customEndDate);
+        rangeEnd.setHours(23, 59, 59, 999);
       }
-
-      if (searchQuery) {
-        const term = searchQuery.toLowerCase();
+      if (rangeStart && rangeEnd) {
         filtered = filtered.filter((order) => {
-          const idMatch = String(order.id || '').toLowerCase().includes(term);
-          const customerMatch =
-            String(order.customer_name || '').toLowerCase().includes(term) ||
-            String(order.customer_phone || '').toLowerCase().includes(term);
-          const productMatch =
-            String(order.products_summary || '').toLowerCase().includes(term) ||
-            (Array.isArray(order.product_names) &&
-              order.product_names.join(' ').toLowerCase().includes(term));
-          return idMatch || customerMatch || productMatch;
+          const createdAt = new Date(order?.created_at);
+          if (Number.isNaN(createdAt.getTime())) return false;
+          return createdAt >= rangeStart && createdAt <= rangeEnd;
         });
       }
-
-      if (selectedRange) {
-        const now = new Date();
-        let rangeStart = null;
-        let rangeEnd = null;
-        if (selectedRange === 'today') {
-          rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          rangeEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        } else if (selectedRange === 'this_week') {
-          const day = now.getDay();
-          const diff = now.getDate() - day;
-          rangeStart = new Date(now.getFullYear(), now.getMonth(), diff);
-          rangeEnd = new Date(rangeStart);
-          rangeEnd.setDate(rangeStart.getDate() + 6);
-          rangeEnd.setHours(23, 59, 59, 999);
-        } else if (selectedRange === 'this_month') {
-          rangeStart = new Date(now.getFullYear(), now.getMonth(), 1);
-          rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-        } else if (selectedRange === 'custom' && customStartDate && customEndDate) {
-          rangeStart = new Date(customStartDate);
-          rangeEnd = new Date(customEndDate);
-          rangeEnd.setHours(23, 59, 59, 999);
-        }
-        if (rangeStart && rangeEnd) {
-          filtered = filtered.filter((order) => {
-            const createdAt = new Date(order.created_at);
-            if (Number.isNaN(createdAt.getTime())) return false;
-            return createdAt >= rangeStart && createdAt <= rangeEnd;
-          });
-        }
-      }
-
-      const direction = sortOrder === 'asc' ? 1 : -1;
-      filtered.sort((a, b) => {
-        if (sortBy === 'total_amount') {
-          return (Number(a.total_amount || 0) - Number(b.total_amount || 0)) * direction;
-        }
-        if (sortBy === 'created_at') {
-          return String(a.created_at || '').localeCompare(String(b.created_at || '')) * direction;
-        }
-        const aId = Number(a.id);
-        const bId = Number(b.id);
-        if (Number.isFinite(aId) && Number.isFinite(bId)) {
-          return (aId - bId) * direction;
-        }
-        return String(a.created_at || '').localeCompare(String(b.created_at || '')) * direction;
-      });
-
-      const total = filtered.length;
-      const startIndex = (pagination.page - 1) * pagination.limit;
-      const pageOrders = filtered.slice(startIndex, startIndex + pagination.limit);
-      setOrders(pageOrders);
-      setErrorMessage('');
-      setPagination((prev) => ({
-        ...prev,
-        total_records: total,
-        total_pages: total ? Math.max(Math.ceil(total / prev.limit), 1) : 1,
-      }));
-    } catch {
-      // ignore cache errors
     }
-  }, [
-    buildPendingOrderFromQueueEntry,
-    pagination.page,
-    pagination.limit,
-    searchQuery,
-    selectedRange,
-    customStartDate,
-    customEndDate,
-    sortBy,
-    sortOrder,
-    effectiveBranchId,
-    showPurchaseOrders,
-    getOrderKind,
-  ]);
-
-  const syncOrdersSince = useCallback(async () => {
-    if (!navigator.onLine) return;
-    const since = (await getSessionValue('orders_last_sync')) || null;
-    let nextSince = since || new Date(0).toISOString();
-    let receivedTotal = 0;
-    try {
-      while (true) {
-        const res = await api.get('/orders', {
-          params: { since: nextSince, limit: ORDER_CACHE_PAGE_SIZE, sort_by: 'created_at', sort_order: 'asc' },
-        });
-        const payload = res?.data || {};
-        const list = Array.isArray(payload.orders) ? payload.orders : [];
-        if (list.length === 0) break;
-        await upsertOrders(list);
-        receivedTotal += list.length;
-        if (payload.sync?.next_since) {
-          nextSince = payload.sync.next_since;
-        } else {
-          nextSince = list[list.length - 1]?.created_at || nextSince;
-        }
-        if (list.length < ORDER_CACHE_PAGE_SIZE) break;
-      }
-    } catch {
-      // ignore sync errors
-    } finally {
-      if (receivedTotal > 0) {
-        await saveSessionValue('orders_last_sync', nextSince);
-      } else if (!since) {
-        await saveSessionValue('orders_last_sync', nextSince);
-      }
-    }
-  }, [ORDER_CACHE_PAGE_SIZE]);
-
-  const cacheOrderDetailsFromList = useCallback((orderList = []) => {
-    const candidates = (Array.isArray(orderList) ? orderList : []).filter((order) => {
-      const hasItems = Array.isArray(order?.items) || Array.isArray(order?.products);
-      const hasPayments = Array.isArray(order?.payment_history) || Array.isArray(order?.payments);
-      return hasItems || hasPayments;
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    filtered.sort((a, b) => {
+      if (sortBy === 'total_amount') return (Number(a?.total_amount || 0) - Number(b?.total_amount || 0)) * direction;
+      if (sortBy === 'total_paid') return (Number(a?.total_paid || 0) - Number(b?.total_paid || 0)) * direction;
+      if (sortBy === 'balance') return (Number(a?.balance || 0) - Number(b?.balance || 0)) * direction;
+      if (sortBy === 'created_at') return String(a?.created_at || '').localeCompare(String(b?.created_at || '')) * direction;
+      const aId = Number(a?.id);
+      const bId = Number(b?.id);
+      if (Number.isFinite(aId) && Number.isFinite(bId)) return (aId - bId) * direction;
+      return String(a?.created_at || '').localeCompare(String(b?.created_at || '')) * direction;
     });
+    const total = filtered.length;
+    const startIndex = (pagination.page - 1) * pagination.limit;
+    const pageOrders = filtered.slice(startIndex, startIndex + pagination.limit);
+    return { pageOrders, total };
+  }, [isModeMatch, selectedBranchId, searchQuery, selectedRange, customStartDate, customEndDate, sortOrder, sortBy, pagination.page, pagination.limit]);
 
-    if (!candidates.length) return;
-
-    Promise.all(
-      candidates.map((order) => {
-        const items = Array.isArray(order?.items)
-          ? order.items
-          : Array.isArray(order?.products)
-            ? order.products
-            : [];
-        const payments = Array.isArray(order?.payment_history)
-          ? order.payment_history
-          : Array.isArray(order?.payments)
-            ? order.payments
-            : [];
-
-        if (!items.length && !payments.length) {
-          return Promise.resolve();
-        }
-
-        return upsertOrderDetailsCache({
-          order,
-          items: items.length ? items : undefined,
-          payments: payments.length ? payments : undefined,
-        });
-      })
-    ).catch(() => {
-      // ignore cache write failures
-    });
-  }, []);
-
-  const fetchOrdersFromServer = useCallback(async () => {
-    if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
-      return;
-    }
+  const loadOrders = useCallback(async (type, options = {}) => {
+    const forceServer = options?.forceServer === true;
+    const requestId = ++requestIdRef.current;
     setIsLoading(true);
-    setErrorMessage('');
     try {
-      if (!navigator.onLine) {
-        await loadCachedOrders();
+      const isPresentValue = (value) => value !== undefined && value !== null && !(typeof value === 'string' && value.trim() === '');
+      const pickFirstDefined = (...values) => values.find((value) => isPresentValue(value));
+      const toOptionalNumber = (value) => {
+        if (!isPresentValue(value)) return null;
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : null;
+      };
+      const masterOrders = await db.orders.toArray().catch(() => []);
+      const masterById = new Map(
+        (Array.isArray(masterOrders) ? masterOrders : [])
+          .filter((row) => row?.id !== undefined && row?.id !== null)
+          .map((row) => [String(row.id), row])
+      );
+      const mergeRowsWithMasterOrders = (rows = []) =>
+        (Array.isArray(rows) ? rows : []).map((row) => {
+          const master = masterById.get(String(row?.id));
+          if (!master) return row;
+          return {
+            ...row,
+            total_amount: pickFirstDefined(row?.total_amount, master?.total_amount, master?.total_price, row?.total_price),
+            total_price: pickFirstDefined(row?.total_price, master?.total_price, master?.total_amount, row?.total_amount),
+            total_paid: pickFirstDefined(master?.total_paid, master?.paid_amount, row?.total_paid, row?.paid_amount),
+            paid_amount: pickFirstDefined(master?.paid_amount, master?.total_paid, row?.paid_amount, row?.total_paid),
+            balance: pickFirstDefined(master?.balance, row?.balance),
+            payment_status: pickFirstDefined(master?.payment_status, row?.payment_status),
+            payment_mode: pickFirstDefined(master?.payment_mode, row?.payment_mode),
+            payment_history:
+              Array.isArray(row?.payment_history) && row.payment_history.length
+                ? row.payment_history
+                : Array.isArray(master?.payment_history)
+                  ? master.payment_history
+                  : row?.payment_history,
+          };
+        });
+
+      const normalizeRowsPaymentStatus = (rows = []) =>
+        (Array.isArray(rows) ? rows : []).map((row) => {
+          const totalAmount =
+            toOptionalNumber(
+              pickFirstDefined(
+                row?.total_amount,
+                row?.totalAmount,
+                row?.total_price,
+                row?.totalPrice,
+                row?.total
+              )
+            ) ?? 0;
+          const paymentRows = Array.isArray(row?.payment_history)
+            ? row.payment_history
+            : Array.isArray(row?.payments)
+              ? row.payments
+              : [];
+          const validPaymentRows = paymentRows.filter((payment) => {
+            const amount = toOptionalNumber(
+              pickFirstDefined(payment?.amount, payment?.total_price, payment?.amount_paid)
+            );
+            return amount !== null && amount > 0;
+          });
+          const paidFromHistory = validPaymentRows.length ? sumPayments(validPaymentRows) : 0;
+          const paidFromOrder = toOptionalNumber(pickFirstDefined(row?.total_paid, row?.paid_amount));
+          const rawBalance = toOptionalNumber(row?.balance);
+          const hasBalanceFromSource = rawBalance !== null;
+          const balanceFromSource = hasBalanceFromSource ? Math.max(rawBalance, 0) : null;
+          const totalPaidFromBalance =
+            hasBalanceFromSource && Number.isFinite(totalAmount)
+              ? Math.max(totalAmount - balanceFromSource, 0)
+              : 0;
+          const totalPaid = (() => {
+            if (hasBalanceFromSource) return Math.max(paidFromHistory, totalPaidFromBalance);
+            return Math.max(paidFromHistory, Number.isFinite(paidFromOrder) ? paidFromOrder : 0);
+          })();
+          const balance = (() => {
+            if (hasBalanceFromSource) return balanceFromSource;
+            return Math.max(totalAmount - totalPaid, 0);
+          })();
+          return {
+            ...row,
+            total_paid: totalPaid,
+            balance,
+            payment_status:
+              balance <= 0 && totalAmount > 0
+                ? 'paid'
+                : totalPaid > 0
+                  ? 'partial'
+                  : 'pending',
+          };
+        });
+
+      const cached = type === 'sale'
+        ? await db.sales_orders.toArray()
+        : await db.purchase_orders.toArray();
+      if (requestId !== requestIdRef.current) return;
+      if (cached.length) {
+        const mergedCached = mergeRowsWithMasterOrders(cached);
+        const normalizedCached = normalizeRowsPaymentStatus(mergedCached);
+        setOrdersByType(type, normalizedCached);
+        if (type === 'sale') {
+          await db.sales_orders.bulkPut(normalizedCached).catch(() => {});
+        } else {
+          await db.purchase_orders.bulkPut(normalizedCached).catch(() => {});
+        }
+      }
+
+      const lastSync = await getSessionValue('orders_last_sync').catch(() => null);
+      const hasCachedOrders = cached.length > 0;
+      const shouldFetchFromServer =
+        navigator.onLine &&
+        (
+          forceServer ||
+          syncRequestedRef.current ||
+          !hasCachedOrders ||
+          !lastSync
+        );
+
+      if (!shouldFetchFromServer) {
         return;
       }
-      const res = await api.get('/orders', { params: buildRangeParams() });
-      const payload = res?.data || {};
-      const fetchedOrders = Array.isArray(payload.orders) ? payload.orders : [];
-      const visibleOrders = showPurchaseOrders
-        ? fetchedOrders
-        : fetchedOrders.filter((order) => getOrderKind(order) !== 'purchase');
-      setOrders(visibleOrders);
-      setCustomerDetailsEnabled(Boolean(payload.customer_details_enabled));
-      setPagination((prev) => ({
-        ...prev,
-        page: payload.pagination?.page || prev.page,
-        limit: payload.pagination?.limit || prev.limit,
-        total_pages: payload.pagination?.total_pages || 1,
-        total_records: payload.pagination?.total_records || 0,
-      }));
 
-      const totalRecords = Number(payload.pagination?.total_records || 0);
-      const currentPage = Number(payload.pagination?.page || pagination.page);
-      const pageOrders = fetchedOrders;
-      cacheOrderDetailsFromList(pageOrders);
-      (async () => {
-        if (!navigator.onLine) return;
-        for (const pageOrder of pageOrders) {
-          if (!pageOrder?.id) continue;
-          try {
-            const cached = await getCachedOrderDetails(pageOrder.id);
-            const cachedItems = Array.isArray(cached?.items) ? cached.items : [];
-            const cachedPayments = Array.isArray(cached?.payment_history)
-              ? cached.payment_history
-              : [];
-            const hasItems = cachedItems.length > 0;
-            const hasPaymentRows = cachedPayments.some(
-              (payment) => Number(payment?.amount ?? payment?.total_price ?? 0) > 0
-            );
-            const requiresPayments = Number(pageOrder?.total_paid || cached?.total_paid || 0) > 0;
-            if (hasItems && (!requiresPayments || hasPaymentRows)) {
-              continue;
-            }
-            const detailRes = await api.get(`/orders/${pageOrder.id}`);
-            const payloadOrder = detailRes?.data?.order || detailRes?.data || null;
-            if (!payloadOrder) continue;
-            const detailItems = Array.isArray(payloadOrder?.items)
-              ? payloadOrder.items
-              : Array.isArray(payloadOrder?.products)
-                ? payloadOrder.products
-                : Array.isArray(payloadOrder?.order_items)
-                  ? payloadOrder.order_items
-                  : [];
-            const detailPayments = Array.isArray(payloadOrder?.payment_history)
-              ? payloadOrder.payment_history
-              : Array.isArray(payloadOrder?.payments)
-                ? payloadOrder.payments
+      const limit = 200;
+      let page = 1;
+      const all = [];
+      while (true) {
+        const endpoint = '/orders';
+        const res = await api.get(endpoint, {
+          params: {
+            range: 'all',
+            page,
+            limit,
+            sort_by: 'created_at',
+            sort_order: 'asc',
+          },
+        });
+        const payload = res?.data ?? {};
+        const list =
+          (Array.isArray(payload?.orders) && payload.orders) ||
+          (Array.isArray(payload?.data?.orders) && payload.data.orders) ||
+          (Array.isArray(payload?.data) && payload.data) ||
+          [];
+        if (!list.length) break;
+        all.push(...list);
+        if (list.length < limit) break;
+        page += 1;
+      }
+      if (requestId !== requestIdRef.current) return;
+
+      let apiRows = all.filter((order) => {
+        const txType = String(order?.transaction_type || order?.transactionType || '').toLowerCase();
+        if (txType === 'sale' || txType === 'purchase') return txType === type;
+        const hasSupplier = Boolean(order?.supplier_id || order?.supplierId || order?.supplier_name || order?.supplierName);
+        return type === 'purchase' ? hasSupplier : !hasSupplier;
+      });
+
+      // Refresh accounting evidence first so order status can rely on the same
+      // payment rows shown in Payment Entry / Receipt Entry / Cash & Bank books.
+      if (navigator.onLine) {
+        try {
+          if (type === 'purchase') {
+            await fetchPaymentEntries({ limit: 5000, range: 'all', type: 'supplier' });
+          } else {
+            await fetchReceiptEntries({ limit: 5000, range: 'all', type: 'customer' });
+          }
+        } catch {
+          // keep going with whatever is already cached locally
+        }
+      }
+
+      // Map cached accounting transactions to order rows so list status can use
+      // the same payment evidence (receipts/payments) without opening drawer.
+      if (apiRows.length) {
+        try {
+          const txns = await db.transactions.toArray();
+          const grouped = new Map();
+          (Array.isArray(txns) ? txns : []).forEach((txn) => {
+            const txnType = String(txn?.txn_type || txn?.txnType || '').toLowerCase();
+            const referenceType = String(txn?.reference_type ?? txn?.referenceType ?? '').toLowerCase();
+            const orderId =
+              txn?.order_id ??
+              txn?.orderId ??
+              (referenceType === 'order' ? (txn?.reference_id ?? txn?.referenceId ?? null) : null);
+            if (!orderId) return;
+            const key = String(orderId);
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key).push(txn);
+          });
+          apiRows = apiRows.map((row) => {
+            const existingPayments = Array.isArray(row?.payment_history)
+              ? row.payment_history
+              : Array.isArray(row?.payments)
+                ? row.payments
                 : [];
-            await upsertOrderDetailsCache({
-              order: payloadOrder,
-              items: detailItems,
-              payments: detailPayments,
+            if (existingPayments.length > 0) return row;
+            const rowTxns = grouped.get(String(row?.id)) || [];
+            const mapped = rowTxns.filter((txn) => {
+              const txnType = String(txn?.txn_type || txn?.txnType || '').toLowerCase();
+              return type === 'sale' ? txnType === 'receipt' : txnType === 'payment';
             });
-          } catch {
-            // ignore warmup failures for individual orders
+            if (!mapped.length) return row;
+            return {
+              ...row,
+              payment_history: mapped,
+            };
+          });
+        } catch {
+          // ignore local transaction mapping issues
+        }
+      }
+
+      // Rows often get corrected status only after opening drawer because
+      // drawer fetches /orders/:id. Hydrate suspicious rows up-front during list load.
+      if (apiRows.length) {
+        const needsDetailHydration = (order) => {
+          const status = String(order?.payment_status || '').toLowerCase();
+          const hasPayments =
+            (Array.isArray(order?.payment_history) && order.payment_history.length > 0) ||
+            (Array.isArray(order?.payments) && order.payments.length > 0);
+          return status === 'paid' && !hasPayments;
+        };
+
+        const candidates = apiRows.filter(needsDetailHydration).slice(0, 60);
+        if (candidates.length) {
+          const detailResults = await Promise.all(
+            candidates.map(async (row) => {
+              const orderId = row?.id;
+              if (!orderId) return null;
+              try {
+                const detailEndpoint = type === 'purchase' ? `/purchases/${orderId}` : `/orders/${orderId}`;
+                const response = await api.get(detailEndpoint);
+                const payload = response?.data ?? {};
+                const detailOrder =
+                  payload?.order ||
+                  payload?.purchase ||
+                  payload?.data?.order ||
+                  payload?.data?.purchase ||
+                  payload?.data ||
+                  null;
+                if (!detailOrder?.id) return null;
+                const items =
+                  detailOrder?.items ||
+                  detailOrder?.products ||
+                  payload?.data?.items ||
+                  payload?.items ||
+                  payload?.order_items ||
+                  [];
+                const payments =
+                  detailOrder?.payment_history ||
+                  detailOrder?.payments ||
+                  payload?.payments ||
+                  payload?.transactions ||
+                  payload?.data?.payments ||
+                  [];
+                const normalizedPayments = Array.isArray(payments)
+                  ? payments.filter((txn) => {
+                    const txnType = String(txn?.txn_type || txn?.txnType || '').toLowerCase();
+                    if (!txnType) return true;
+                    return type === 'sale' ? txnType === 'receipt' : txnType === 'payment';
+                  })
+                  : [];
+                await upsertOrderDetailsCache({ order: detailOrder, items, payments }).catch(() => {});
+                return {
+                  ...row,
+                  ...detailOrder,
+                  payment_history: normalizedPayments.length
+                    ? normalizedPayments
+                    : (detailOrder?.payment_history || []),
+                };
+              } catch {
+                return null;
+              }
+            })
+          );
+
+          const detailMap = new Map(
+            detailResults
+              .filter((entry) => entry?.id)
+              .map((entry) => [String(entry.id), entry])
+          );
+          if (detailMap.size) {
+            apiRows = apiRows.map((row) => detailMap.get(String(row?.id)) || row);
           }
         }
-      })();
-      if (totalRecords > ORDER_CACHE_FULL_SYNC_LIMIT) {
-        if (currentPage === 1) {
-          replaceAllOrders(pageOrders).catch(() => {});
-          saveSessionValue('orders_last_sync', new Date().toISOString()).catch(() => {});
-        }
+      }
+
+      // Finalize payment status once during list load so payment column is stable.
+      apiRows = normalizeRowsPaymentStatus(mergeRowsWithMasterOrders(apiRows));
+
+      setOrdersByType(type, apiRows);
+      if (type === 'sale') {
+        await db.sales_orders.clear();
+        if (apiRows.length) await db.sales_orders.bulkPut(apiRows);
       } else {
-        upsertOrders(pageOrders).catch(() => {});
-        if (!cacheSyncRef.current && !searchQuery) {
-          cacheSyncRef.current = true;
-          (async () => {
-            try {
-              await syncOrdersSince();
-            } finally {
-              cacheSyncRef.current = false;
-            }
-          })();
-        }
+        await db.purchase_orders.clear();
+        if (apiRows.length) await db.purchase_orders.bulkPut(apiRows);
       }
-    } catch (err) {
-        if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
-          showPopup('Token Expired Please Login Again!', 'Session');
-          navigate('/logout');
-          return;
-        }
-      setErrorMessage('Unable to load orders. Please try again.');
-      setOrders([]);
+      await saveSessionValue('orders_last_sync', new Date().toISOString()).catch(() => {});
+      syncRequestedRef.current = false;
+    } catch (error) {
+      console.error('Failed to load orders:', error);
     } finally {
-      setIsLoading(false);
-    }
-  }, [buildRangeParams, cacheOrderDetailsFromList, customEndDate, customStartDate, navigate, selectedRange, showPopup, loadCachedOrders, pagination.page, ORDER_CACHE_FULL_SYNC_LIMIT, ORDER_CACHE_PAGE_SIZE, searchQuery, syncOrdersSince, showPurchaseOrders, getOrderKind]);
-
-  const fetchOrders = useCallback(async () => {
-    if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
-      return;
-    }
-    setIsLoading(true);
-    setErrorMessage('');
-    try {
-      await loadCachedOrders();
-    } finally {
-      setIsLoading(false);
-    }
-  }, [customEndDate, customStartDate, loadCachedOrders, selectedRange]);
-
-  useEffect(() => {
-    loadCachedOrders();
-  }, [loadCachedOrders, customRangeKey]);
-
-  useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders, customRangeKey]);
-
-  useEffect(() => {
-    if (!navigator.onLine) return;
-    if (cacheSyncRef.current) return;
-    cacheSyncRef.current = true;
-    (async () => {
-      try {
-        await syncOrdersSince();
-      } finally {
-        cacheSyncRef.current = false;
-        loadCachedOrders();
+      if (requestId === requestIdRef.current) {
+        setIsLoading(false);
       }
-    })();
-  }, [syncOrdersSince, loadCachedOrders, selectedBranchId]);
+    }
+  }, [setOrdersByType]);
 
   useEffect(() => {
-    setPagination((prev) => ({ ...prev, page: 1 }));
-  }, [selectedBranchId]);
+    loadOrders(routeType);
+  }, [routeType, loadOrders]);
 
   useEffect(() => {
     const handleOrdersCacheUpdated = () => {
-      loadCachedOrders();
+      loadOrders(routeType);
     };
     const handleOrdersSyncRequired = () => {
-      if (!navigator.onLine) return;
-      syncOrdersSince().finally(() => {
-        loadCachedOrders();
-      });
+      syncRequestedRef.current = true;
+      loadOrders(routeType, { forceServer: true });
     };
     window.addEventListener('orders-cache-updated', handleOrdersCacheUpdated);
     window.addEventListener('orders-sync-required', handleOrdersSyncRequired);
@@ -629,7 +709,27 @@ const OrdersPage = ({ navigate }) => {
       window.removeEventListener('orders-cache-updated', handleOrdersCacheUpdated);
       window.removeEventListener('orders-sync-required', handleOrdersSyncRequired);
     };
-  }, [loadCachedOrders, syncOrdersSince]);
+  }, [routeType, loadOrders]);
+
+  const activeOrders = getOrdersByType(routeType);
+  const projectedOrders = useMemo(
+    () => projectOrdersForView(activeOrders),
+    [projectOrdersForView, activeOrders]
+  );
+  const orders = projectedOrders.pageOrders;
+
+  useEffect(() => {
+    setPagination((prev) => ({
+      ...prev,
+      total_records: projectedOrders.total,
+      total_pages: projectedOrders.total ? Math.max(Math.ceil(projectedOrders.total / prev.limit), 1) : 1,
+    }));
+    setErrorMessage(projectedOrders.total === 0 ? 'No orders found in local cache.' : '');
+  }, [projectedOrders.total]);
+
+  useEffect(() => {
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  }, [selectedBranchId]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -674,40 +774,12 @@ const OrdersPage = ({ navigate }) => {
     });
   };
 
-  const hydrateOrderDetailsFromServer = useCallback(async (orderId) => {
-    if (!orderId || !navigator.onLine) return null;
-    try {
-      const res = await api.get(`/orders/${orderId}`);
-      const payload = res?.data?.order || res?.data || null;
-      if (!payload) return null;
-      const detailItems = Array.isArray(payload?.items)
-        ? payload.items
-        : Array.isArray(payload?.products)
-          ? payload.products
-          : Array.isArray(payload?.order_items)
-            ? payload.order_items
-            : [];
-      const detailPayments = Array.isArray(payload?.payment_history)
-        ? payload.payment_history
-        : Array.isArray(payload?.payments)
-          ? payload.payments
-          : [];
-      await upsertOrderDetailsCache({
-        order: payload,
-        items: detailItems,
-        payments: detailPayments,
-      });
-      return (await getCachedOrderDetails(orderId)) || payload;
-    } catch {
-      return null;
-    }
-  }, []);
-
   const fetchOrderDetails = useCallback(async (orderId) => {
     if (!orderId) return;
     setDrawerLoading(true);
     setDrawerError('');
     setDrawerOrder(null);
+    setDrawerLinkedPayments([]);
     try {
       const cached = await getCachedOrderDetails(orderId);
       let finalOrder = cached;
@@ -719,21 +791,14 @@ const OrdersPage = ({ navigate }) => {
         }
       }
 
-      if (!hasDetailItems(finalOrder)) {
-        const hydrated = await hydrateOrderDetailsFromServer(orderId);
-        if (hydrated) {
-          finalOrder = hydrated;
-        }
-      }
-      if (!hasDetailedPayments(finalOrder) && Number(finalOrder?.total_paid || 0) > 0) {
-        const hydrated = await hydrateOrderDetailsFromServer(orderId);
-        if (hydrated) {
-          finalOrder = hydrated;
-        }
-      }
-
       if (finalOrder) {
         setDrawerOrder(finalOrder);
+        const linkedTxns = await getCachedOrderTransactions(orderId);
+        const receiptTxns = (Array.isArray(linkedTxns) ? linkedTxns : []).filter((txn) => {
+          const type = String(txn?.txn_type || txn?.txnType || '').toLowerCase();
+          return (type === 'receipt' || type === 'payment') && String(txn?.order_id || txn?.orderId || '') === String(orderId);
+        });
+        setDrawerLinkedPayments(receiptTxns);
       }
 
       if (!finalOrder) {
@@ -744,7 +809,7 @@ const OrdersPage = ({ navigate }) => {
     } finally {
       setDrawerLoading(false);
     }
-  }, [orders, hydrateOrderDetailsFromServer]);
+  }, [orders]);
 
   const openDrawer = useCallback((orderId) => {
     setDrawerOpen(true);
@@ -754,6 +819,7 @@ const OrdersPage = ({ navigate }) => {
   const closeDrawer = () => {
     setDrawerOpen(false);
     setDrawerOrder(null);
+    setDrawerLinkedPayments([]);
     setDrawerError('');
     setPaymentAmount('');
     setPaymentMethod('cash');
@@ -762,9 +828,13 @@ const OrdersPage = ({ navigate }) => {
   useEffect(() => {
     if (!drawerOrder?.id) return;
     const total = Number(drawerOrder.total_amount || 0);
-    const paid = Number(drawerOrder.total_paid || 0);
-    const returned = Number(drawerOrder.returned_amount || 0);
-    const balance = Math.max(total - paid - returned, 0);
+    const payments = Array.isArray(drawerOrder?.payment_history)
+      ? drawerOrder.payment_history
+      : Array.isArray(drawerOrder?.payments)
+        ? drawerOrder.payments
+        : [];
+    const paid = sumPayments(payments);
+    const balance = Math.max(total - paid, 0);
     setPaymentAmount(balance > 0 ? balance.toFixed(2) : '');
     setPaymentMethod(
       String(
@@ -774,13 +844,15 @@ const OrdersPage = ({ navigate }) => {
           'cash'
       ).toLowerCase()
     );
-  }, [drawerOrder?.id]);
+  }, [drawerOrder?.id, drawerOrder?.payment_history, drawerOrder?.payments]);
 
   const buildReturnItems = (order) => {
     const items = Array.isArray(order?.items)
       ? order.items
       : Array.isArray(order?.products)
         ? order.products
+        : Array.isArray(order?.order_items)
+          ? order.order_items
         : [];
     return items.map((item, idx) => {
       const soldQty = Number(item?.quantity ?? item?.qty ?? 0);
@@ -826,6 +898,44 @@ const OrdersPage = ({ navigate }) => {
     setReturnLoading(true);
     setReturnError('');
     try {
+      const loadFullOrderDetails = async (targetOrderId) => {
+        const response = await api.get(`/orders/${targetOrderId}`);
+        const payload = response?.data ?? {};
+        const order =
+          payload?.order ||
+          payload?.data?.order ||
+          payload?.data ||
+          null;
+        const items =
+          order?.items ||
+          order?.products ||
+          payload?.items ||
+          payload?.order_items ||
+          payload?.data?.items ||
+          [];
+        const payments =
+          order?.payment_history ||
+          order?.payments ||
+          payload?.payments ||
+          payload?.transactions ||
+          payload?.data?.payments ||
+          [];
+        if (!order?.id) return null;
+        try {
+          await upsertOrderDetailsCache({ order, items, payments });
+        } catch (cacheErr) {
+          console.error('Failed to cache full order details for return flow', cacheErr);
+        }
+        const cached = await getCachedOrderDetails(order.id).catch(() => null);
+        // Always keep server items as source of truth for return modal.
+        return {
+          ...(cached || order),
+          ...order,
+          items: Array.isArray(items) ? items : [],
+          payment_history: Array.isArray(payments) ? payments : [],
+        };
+      };
+
       let orderData = null;
       if (drawerOrder?.id === orderId) {
         orderData = drawerOrder;
@@ -833,24 +943,37 @@ const OrdersPage = ({ navigate }) => {
         orderData = await getCachedOrderDetails(orderId);
       }
 
-      if (!hasDetailItems(orderData)) {
-        const hydrated = await hydrateOrderDetailsFromServer(orderId);
-        if (hydrated) {
-          orderData = hydrated;
-        }
-      }
-
       if (!orderData) {
-        setReturnError('Order details are not available in local cache yet.');
-        return;
+        if (navigator.onLine) {
+          orderData = await loadFullOrderDetails(orderId);
+        }
+        if (!orderData) {
+          setReturnError('Order details are not available in local cache yet.');
+          return;
+        }
       }
       const items = buildReturnItems(orderData);
       if (items.length === 0) {
-        setReturnError(
-          navigator.onLine
-            ? 'Unable to load complete product details for return.'
-            : 'Product details are not available in local cache yet.'
-        );
+        if (navigator.onLine) {
+          orderData = await loadFullOrderDetails(orderId);
+        }
+        const retriedItems = buildReturnItems(orderData || {});
+        if (retriedItems.length === 0) {
+          setReturnError(
+            navigator.onLine
+              ? 'Unable to load complete product details for return.'
+              : 'Product details are not available in local cache yet.'
+          );
+          return;
+        }
+        const hasRemainingRetried = retriedItems.some((item) => Number(item.remaining_qty || 0) > 0);
+        if (!hasRemainingRetried) {
+          showPopup('All items from this order are already returned.', 'Info');
+          resetReturnState();
+          return;
+        }
+        setReturnOrder(orderData);
+        setReturnItems(retriedItems);
         return;
       }
       const hasRemaining = items.some((item) => Number(item.remaining_qty || 0) > 0);
@@ -862,6 +985,7 @@ const OrdersPage = ({ navigate }) => {
       setReturnOrder(orderData);
       setReturnItems(items);
     } catch (err) {
+      console.error('openReturnModal failed', err);
       setReturnError('Unable to load return details.');
     } finally {
       setReturnLoading(false);
@@ -915,6 +1039,27 @@ const OrdersPage = ({ navigate }) => {
     return { itemsRefund, discountAdjust, finalRefund, discountPerUnit };
   }, [returnItems, returnOrder]);
 
+  const returnFinancialSplit = useMemo(() => {
+    const orderPaymentRows = Array.isArray(returnOrder?.payment_history)
+      ? returnOrder.payment_history
+      : Array.isArray(returnOrder?.payments)
+        ? returnOrder.payments
+        : [];
+    const totalAmount = Number(
+      returnOrder?.total_amount ??
+      returnOrder?.totalAmount ??
+      returnOrder?.total_price ??
+      returnOrder?.totalPrice ??
+      0
+    );
+    const totalPaid = orderPaymentRows.length ? sumPayments(orderPaymentRows) : 0;
+    return computeReturnSplit({
+      totalAmount,
+      totalPaid,
+      returnAmount: Number(returnSummary.finalRefund || 0),
+    });
+  }, [returnOrder, returnSummary]);
+
   const handleProcessReturn = async () => {
     if (!returnOrder?.id || returnSubmitting) return;
     if (!returnReason) {
@@ -947,6 +1092,28 @@ const OrdersPage = ({ navigate }) => {
 
     try {
       setReturnSubmitting(true);
+      const finalRefundAmount = Number(returnSummary.finalRefund || 0);
+      const orderPaymentRows = Array.isArray(returnOrder?.payment_history)
+        ? returnOrder.payment_history
+        : Array.isArray(returnOrder?.payments)
+          ? returnOrder.payments
+          : [];
+      const totalAmount = Number(
+        returnOrder?.total_amount ??
+        returnOrder?.totalAmount ??
+        returnOrder?.total_price ??
+        returnOrder?.totalPrice ??
+        0
+      );
+      const totalPaid = orderPaymentRows.length ? sumPayments(orderPaymentRows) : 0;
+      const split = computeReturnSplit({ totalAmount, totalPaid, returnAmount: finalRefundAmount });
+      const originalPaymentMode = String(
+        returnOrder?.payment_mode ||
+        returnOrder?.paymentMode ||
+        refundMode ||
+        'cash'
+      ).trim().toLowerCase();
+      const customerId = returnOrder?.customer_id || returnOrder?.customer?.id || null;
       await api.post(`/orders/${returnOrder.id}/returns`, {
         items: payloadItems.map((item) => ({
           productId: item.productId,
@@ -955,15 +1122,43 @@ const OrdersPage = ({ navigate }) => {
         })),
         reason: returnReason,
         refundMode: refundMode,
+        return_amount: round2(finalRefundAmount),
+        paid_ratio: split.paid_ratio,
+        paid_portion: split.paid_portion,
+        unpaid_portion: split.unpaid_portion,
       });
+
+      const shouldCreateRefundReceipt =
+        split.paid_portion > 0 &&
+        Boolean(customerId) &&
+        !isCreditMode(originalPaymentMode) &&
+        isCashOrBankMode(originalPaymentMode);
+      if (shouldCreateRefundReceipt) {
+        const refundPayload = {
+          customer_id: customerId,
+          order_id: returnOrder.id,
+          amount: -Math.abs(split.paid_portion),
+          payment_mode: originalPaymentMode,
+          reference_type: 'order',
+          reference_id: returnOrder.id,
+          notes: `Sales return refund (${returnReason || 'return'}) paid=${split.paid_portion} unpaid=${split.unpaid_portion}`,
+          type: 'refund',
+        };
+        if (navigator.onLine) {
+          await createReceipt(refundPayload);
+        } else {
+          await enqueueReceipt(refundPayload);
+        }
+      }
+
       showPopup('Return processed successfully.', 'Success');
       closeReturnModal();
-      fetchOrdersFromServer();
+      loadOrders(routeType);
       if (drawerOpen && drawerOrder?.id === returnOrder.id) {
         fetchOrderDetails(returnOrder.id);
       }
     } catch (err) {
-      const message = err?.response?.data?.message || 'Failed to process return.';
+      const message = err?.response?.data?.error || err?.response?.data?.message || 'Failed to process return.';
       setReturnError(message);
       showPopup(message, 'Error');
     } finally {
@@ -976,28 +1171,63 @@ const OrdersPage = ({ navigate }) => {
     setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
-  const handleForceResync = async () => {
+  const handleForceResync = async (event) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.isTrusted !== true) {
+        return;
+      }
+    } else {
+      return;
+    }
+    if (Date.now() - pageMountedAtRef.current < 800) {
+      return;
+    }
+    if (!resyncClickArmedRef.current) {
+      return;
+    }
+    resyncClickArmedRef.current = false;
     try {
       await clearOrdersCache();
+      await clearCachedOrdersByType(normalizedMode === 'purchase' ? 'purchase' : 'sale');
       await saveSessionValue('orders_last_sync', new Date(0).toISOString());
-      await loadCachedOrders();
-      await fetchOrdersFromServer();
-      showPopup('Orders resync started.', 'Success');
+      syncRequestedRef.current = true;
+      await loadOrders(routeType, { forceServer: true });
+      showPopup('Local order cache cleared.', 'Success');
     } catch {
-      showPopup('Unable to start resync.', 'Error');
+      showPopup('Unable to clear local cache.', 'Error');
     }
   };
 
-  const handleRefreshFromServer = async () => {
-    if (!navigator.onLine) {
-      showPopup('You are offline. Please connect to refresh from server.', 'Offline');
+  const handleRefreshFromServer = async (event) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.isTrusted !== true) {
+        return;
+      }
+    } else {
       return;
     }
+    // Ignore accidental ghost click right after route navigation/mount.
+    if (Date.now() - pageMountedAtRef.current < 800) {
+      return;
+    }
+    if (!refreshClickArmedRef.current) {
+      return;
+    }
+    refreshClickArmedRef.current = false;
     try {
-      await fetchOrdersFromServer();
-      showPopup('Orders refreshed from server.', 'Success');
-    } catch {
-      showPopup('Unable to refresh orders.', 'Error');
+      setIsServerRefreshing(true);
+      const total = await preloadOrdersToIndexedDb();
+      syncRequestedRef.current = false;
+      await loadOrders(routeType);
+      showPopup(`Orders refreshed from server. Cached ${Number(total || 0)} order(s).`, 'Success');
+    } catch (err) {
+      showPopup('Unable to refresh orders from server.', 'Error');
+    } finally {
+      setIsServerRefreshing(false);
     }
   };
 
@@ -1007,7 +1237,6 @@ const OrdersPage = ({ navigate }) => {
       return;
     }
     setPagination((prev) => ({ ...prev, page: 1 }));
-    setCustomRangeKey((prev) => prev + 1);
   };
 
   const handlePaymentAction = async (event, targetOrder) => {
@@ -1037,11 +1266,11 @@ const OrdersPage = ({ navigate }) => {
         return;
       }
       const currentOrder = (await getCachedOrderById(order.id)) || order;
-      const totalPaid = Number(currentOrder?.total_paid || 0) + parsedAmount;
+      const existingPayments = await getCachedOrderTransactions(currentOrder?.id ?? order.id);
+      const totalPaid = sumPayments(existingPayments) + parsedAmount;
       const totalAmount = Number(currentOrder?.total_amount || 0);
-      const returnedAmount = Number(currentOrder?.returned_amount || 0);
-      const nextBalance = Math.max(totalAmount - totalPaid - returnedAmount, 0);
-      const nextStatus = nextBalance <= 0 ? 'paid' : 'partial';
+      const nextBalance = Math.max(totalAmount - totalPaid, 0);
+      const nextStatus = nextBalance <= 0 ? 'paid' : 'pending';
       const updatedOrder = {
         ...currentOrder,
         total_paid: totalPaid,
@@ -1067,7 +1296,7 @@ const OrdersPage = ({ navigate }) => {
       await upsertOrders([updatedOrder]);
       await saveTransactionsBulk([localTxn]);
 
-      setOrders((prev) =>
+      setOrdersByType(routeType, (prev) =>
         prev.map((row) => (row.id === updatedOrder.id ? { ...row, ...updatedOrder } : row))
       );
       if (drawerOpen && drawerOrder?.id === updatedOrder.id) {
@@ -1146,9 +1375,10 @@ const OrdersPage = ({ navigate }) => {
     const selected = order || drawerOrder;
     if (!selected) return;
     const customerId = selected?.customer_id || selected?.customer?.id || null;
+    const selectedPaid = getActualPaidFromHistory(selected);
     const balanceAmount = Number(
       selected?.balance ??
-      (Number(selected?.total_amount || 0) - Number(selected?.total_paid || 0) - Number(selected?.returned_amount || 0))
+      (Number(selected?.total_amount || 0) - Number(selectedPaid || 0) - Number(selected?.returned_amount || 0))
     );
     if (!customerId) {
       showPopup('Customer is required to create receipt entry.', 'Validation');
@@ -1157,6 +1387,7 @@ const OrdersPage = ({ navigate }) => {
     navigate('/accounts/receipt', {
       state: {
         receiptPrefill: {
+          orderId: selected?.id ? String(selected.id) : '',
           customerId: String(customerId),
           amount: Number.isFinite(balanceAmount) && balanceAmount > 0 ? Number(balanceAmount.toFixed(2)) : '',
         },
@@ -1609,9 +1840,10 @@ const OrdersPage = ({ navigate }) => {
     setDeletingId(orderId);
     try {
       await api.delete(`/orders/${orderId}`);
+      await deleteOrdersByIds([orderId]);
       showPopup('Order deleted', 'Success');
       closeDeleteModal();
-      fetchOrdersFromServer();
+      loadOrders(routeType);
     } catch (err) {
       showPopup('Failed to delete order', 'Error');
     } finally {
@@ -1733,8 +1965,13 @@ const OrdersPage = ({ navigate }) => {
     return Array.from({ length: total }, (_, idx) => idx + 1);
   }, [pagination.total_pages]);
 
-  const isReturnEligible = (order) =>
-    ['completed', 'partially_returned'].includes(order?.order_status);
+  const isReturnEligible = (order) => {
+    const totalAmount = Number(order?.total_amount || 0);
+    const returnedAmount = Number(order?.returned_amount || 0);
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) return false;
+    if (!Number.isFinite(returnedAmount)) return true;
+    return returnedAmount < totalAmount;
+  };
 
   const renderPaymentCell = (order) => {
     const isLocalId = typeof order?.id === 'string' && order.id.startsWith('local:');
@@ -1742,7 +1979,10 @@ const OrdersPage = ({ navigate }) => {
     if (isPending) {
       return <span className="payment-badge pending">Pending Sync</span>;
     }
-    const status = order.payment_status;
+    const rowStatus = String(order?.payment_status || '').trim().toLowerCase();
+    const status = rowStatus === 'paid' || rowStatus === 'partial' || rowStatus === 'pending'
+      ? rowStatus
+      : getOrderPaymentSummaryStatus(order);
     const orderStatus = order.order_status || '';
     const isFullyReturned = orderStatus === 'fully_returned';
     const isPartiallyReturned = orderStatus === 'partially_returned';
@@ -1760,43 +2000,45 @@ const OrdersPage = ({ navigate }) => {
       return returnBadge || <span className="payment-badge paid">Completed</span>;
     }
     if (status === 'partial') {
-      return (
-        <div className="payment-cell">
-          {returnBadge}
-          <button
-            className="payment-btn warning"
-            onClick={(event) => handleOpenPaymentDetails(event, order)}
-            disabled={paymentSubmittingId === order.id}
-          >
-            {paymentSubmittingId === order.id ? 'Saving...' : 'Pay Balance'}
-          </button>
-        </div>
-      );
+      return returnBadge || <span className="payment-badge warning">Partial</span>;
     }
-    return (
-      <div className="payment-cell">
-        {returnBadge}
-        <button
-          className="payment-btn danger"
-          onClick={(event) => handleOpenPaymentDetails(event, order)}
-          disabled={paymentSubmittingId === order.id}
-        >
-          {paymentSubmittingId === order.id ? 'Saving...' : 'Make Payment'}
-        </button>
-      </div>
-    );
+    return returnBadge || <span className="payment-badge pending">Pending</span>;
   };
 
   const drawerItems = getDrawerProductItems(drawerOrder);
 
-  const paymentHistory = Array.isArray(drawerOrder?.payment_history)
+  const paymentHistory = drawerLinkedPayments.length
+    ? drawerLinkedPayments
+    : Array.isArray(drawerOrder?.payment_history)
     ? drawerOrder.payment_history
     : Array.isArray(drawerOrder?.payments)
       ? drawerOrder.payments
       : [];
 
   const customer = drawerOrder?.customer || {};
-  const balance = Number(drawerOrder?.balance || 0);
+  const summaryTotalAmount = Number(
+    drawerOrder?.total_amount ??
+    drawerOrder?.totalAmount ??
+    drawerOrder?.total_price ??
+    drawerOrder?.totalPrice ??
+    0
+  );
+  const summaryTotalPaid = paymentHistory.length ? sumPayments(paymentHistory) : 0;
+  const isCreditPurchaseOrder = getOrderKind(drawerOrder) === 'purchase' &&
+    isCreditMode(drawerOrder?.payment_mode ?? drawerOrder?.paymentMode);
+  const summaryBalanceRaw = Number(drawerOrder?.balance);
+  const balance = isCreditPurchaseOrder
+    ? Math.max(summaryTotalAmount - summaryTotalPaid, 0)
+    : Number.isFinite(summaryBalanceRaw)
+      ? Math.max(summaryBalanceRaw, 0)
+      : Math.max(summaryTotalAmount - summaryTotalPaid, 0);
+  const summaryStatus = getOrderPaymentSummaryStatus({
+    ...(drawerOrder || {}),
+    payment_history: paymentHistory,
+    total_amount: summaryTotalAmount,
+    total_paid: summaryTotalPaid,
+    balance,
+  });
   const gstEnabledForOrder =
     drawerOrder?.is_gst_enabled === true || drawerOrder?.gst_enabled === true;
 
@@ -1857,6 +2099,9 @@ const OrdersPage = ({ navigate }) => {
             <button
               className="btn btn-sm orders-resync-btn"
               type="button"
+              onPointerDown={() => {
+                resyncClickArmedRef.current = true;
+              }}
               onClick={handleForceResync}
               disabled={isLoading}
             >
@@ -1865,22 +2110,14 @@ const OrdersPage = ({ navigate }) => {
             <button
               className="btn btn-sm orders-refresh-btn"
               type="button"
+              onPointerDown={() => {
+                refreshClickArmedRef.current = true;
+              }}
               onClick={handleRefreshFromServer}
-              disabled={isLoading}
+              disabled={isLoading || isServerRefreshing}
             >
-              Refresh from server
+              {isServerRefreshing ? 'Refreshing...' : 'Refresh from Server'}
             </button>
-            <label className="orders-purchase-toggle">
-              <input
-                type="checkbox"
-                checked={showPurchaseOrders}
-                onChange={(event) => {
-                  setShowPurchaseOrders(event.target.checked);
-                  setPagination((prev) => ({ ...prev, page: 1 }));
-                }}
-              />
-              Show Purchase Orders
-            </label>
             {selectedRange === 'custom' && (
               <div className="range-custom">
                 <input
@@ -1925,7 +2162,7 @@ const OrdersPage = ({ navigate }) => {
               </tr>
             </thead>
             <tbody>
-              {isLoading && Array.from({ length: 6 }).map((_, idx) => (
+              {isLoading && orders.length === 0 && Array.from({ length: 6 }).map((_, idx) => (
                 <tr key={`skeleton-${idx}`} className="skeleton-row">
                   <td><span className="skeleton-block" /></td>
                   <td><span className="skeleton-block" /></td>
@@ -1947,7 +2184,7 @@ const OrdersPage = ({ navigate }) => {
                   <td colSpan={customerDetailsEnabled ? (hasActions ? 8 : 7) : (hasActions ? 7 : 6)} className="empty-state">No orders found.</td>
                 </tr>
               )}
-              {!isLoading && !errorMessage && orders.map((order) => {
+              {!errorMessage && orders.map((order) => {
                 const isLocalId = typeof order?.id === 'string' && order.id.startsWith('local:');
                 const isPending = order?.is_offline === true || isLocalId;
                 const orderIdRaw = order?.id;
@@ -1975,7 +2212,7 @@ const OrdersPage = ({ navigate }) => {
                   <td>
                     <span className="order-id-cell">
                       #{orderIdText}
-                      {showPurchaseOrders && (
+                      {normalizedMode === 'purchase' && (
                         <span className={`order-type-tag ${isPurchaseOrder ? 'purchase' : 'billing'}`}>
                           {isPurchaseOrder ? 'Purchase' : 'Billing'}
                         </span>
@@ -2030,6 +2267,11 @@ const OrdersPage = ({ navigate }) => {
                 </tr>
               );
               })}
+              {isLoading && orders.length > 0 && (
+                <tr>
+                  <td colSpan={customerDetailsEnabled ? (hasActions ? 8 : 7) : (hasActions ? 7 : 6)} className="empty-state">Orders are loading...</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -2154,11 +2396,11 @@ const OrdersPage = ({ navigate }) => {
                   <div className="summary-grid">
                     <div>
                       <span>Total Amount</span>
-                      <strong>{formatMoney(drawerOrder.total_amount)}</strong>
+                      <strong>{formatMoney(summaryTotalAmount)}</strong>
                     </div>
                     <div>
                       <span>Total Paid</span>
-                      <strong>{formatMoney(drawerOrder.total_paid)}</strong>
+                      <strong>{formatMoney(summaryTotalPaid)}</strong>
                     </div>
                     <div>
                       <span>Returned</span>
@@ -2166,11 +2408,11 @@ const OrdersPage = ({ navigate }) => {
                     </div>
                     <div>
                       <span>Balance</span>
-                      <strong>{formatMoney(drawerOrder.balance)}</strong>
+                      <strong>{formatMoney(balance)}</strong>
                     </div>
                     <div>
                       <span>Status</span>
-                      <strong className="status-text">{drawerOrder.order_status || '-'}</strong>
+                      <strong className="status-text">{summaryStatus}</strong>
                     </div>
                   </div>
                 </section>
@@ -2274,7 +2516,13 @@ const OrdersPage = ({ navigate }) => {
                       )}
                     </>
                   ) : (
-                    <span className="payment-badge paid">Fully Paid</span>
+                    isCreditPurchaseOrder ? (
+                      <span className="payment-badge pending">
+                        Credit Order | Balance: {formatMoney(balance)}
+                      </span>
+                    ) : (
+                      <span className="payment-badge paid">Fully Paid</span>
+                    )
                   )}
                   {gstEnabledForOrder && (
                     <button
@@ -2387,9 +2635,20 @@ const OrdersPage = ({ navigate }) => {
                   </div>
                 )}
                 <div className="return-total">
-                  <span>Final Refund</span>
-                  <strong>{formatMoney(returnSummary.finalRefund)}</strong>
+                  <span>Refund</span>
+                  <strong>{formatMoney(returnFinancialSplit.paid_portion)}</strong>
                 </div>
+                {returnFinancialSplit.unpaid_portion > 0 && (
+                  <div className="return-total">
+                    <span>Adjusted</span>
+                    <strong>{formatMoney(returnFinancialSplit.unpaid_portion)}</strong>
+                  </div>
+                )}
+                {returnFinancialSplit.paid_portion === 0 && returnSummary.finalRefund > 0 && (
+                  <small className="text-secondary d-block">
+                    Adjusted against payable.
+                  </small>
+                )}
                 {returnSummary.discountAdjust > 0 && (
                   <small className="text-secondary d-block">
                     Discount benefit will be adjusted on return.
@@ -2418,7 +2677,7 @@ const OrdersPage = ({ navigate }) => {
           <div className="delete-modal" onClick={(event) => event.stopPropagation()}>
             <h4>Delete order?</h4>
             <p>Are you sure you want to delete order #{deleteTarget?.id}?</p>
-            {Number(deleteTarget?.total_paid || 0) > 0 && (
+            {getActualPaidFromHistory(deleteTarget || {}) > 0 && (
               <p className="delete-warning">Warning: This order has payments recorded.</p>
             )}
             <div className="delete-actions">

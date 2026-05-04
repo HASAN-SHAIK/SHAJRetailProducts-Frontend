@@ -13,6 +13,8 @@ import {
 } from '../../core/db';
 import { enqueueOfflinePurchaseReturn } from '../../utils/offlinePurchaseReturns';
 import { processInventorySyncQueue } from '../../utils/inventorySync';
+import { createPayment } from '../../services/accountingService';
+import { enqueuePayment } from '../../utils/accountingOffline';
 import './Suppliers.css';
 
 const PurchaseReturn = () => {
@@ -28,6 +30,35 @@ const PurchaseReturn = () => {
   const [saving, setSaving] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const round2 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+  const isCreditMode = (mode) => String(mode || '').trim().toLowerCase() === 'credit';
+  const isCashOrBankMode = (mode) => {
+    const normalized = String(mode || '').trim().toLowerCase();
+    return normalized === 'cash' || normalized === 'bank' || normalized === 'upi';
+  };
+  const sumPayments = (payments = []) =>
+    (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
+      const amount = Number(payment?.amount ?? payment?.total_price ?? payment?.amount_paid ?? 0);
+      return sum + (Number.isFinite(amount) ? amount : 0);
+    }, 0);
+  const computeReturnSplit = ({ totalAmount = 0, totalPaid = 0, returnAmount = 0 }) => {
+    const paid = Math.max(Number(totalPaid || 0), 0);
+    const ret = Math.max(Number(returnAmount || 0), 0);
+    if (ret <= 0) {
+      return { paid_ratio: 0, paid_portion: 0, unpaid_portion: 0 };
+    }
+    if (paid <= 0) {
+      return { paid_ratio: 0, paid_portion: 0, unpaid_portion: round2(ret) };
+    }
+    const paidPortion = round2(Math.min(ret, paid));
+    const unpaidPortion = round2(Math.max(ret - paidPortion, 0));
+    const paidRatio = ret > 0 ? Math.max(0, Math.min(paidPortion / ret, 1)) : 0;
+    return {
+      paid_ratio: paidRatio,
+      paid_portion: paidPortion,
+      unpaid_portion: unpaidPortion,
+    };
+  };
 
   const resolveServerPurchaseId = (value) => {
     if (value === null || value === undefined) return null;
@@ -277,17 +308,88 @@ const PurchaseReturn = () => {
       showPopup('Enter at least one return quantity.', 'Validation');
       return;
     }
+    const invalidItem = items.find((item) => {
+      const row = returnRows.find((entry) => String(entry.batch_id) === String(item.batch_id));
+      const available = Number(row?.available || 0);
+      return Number(item.quantity || 0) > available;
+    });
+    if (invalidItem) {
+      showPopup('Return quantity cannot exceed available stock.', 'Validation');
+      return;
+    }
 
     setSaving(true);
     try {
+      const itemUnitPriceByProduct = new Map(
+        (Array.isArray(detail?.items) ? detail.items : []).map((item) => {
+          const unitPrice = Number(
+            item?.purchase_price_snapshot ??
+            item?.purchase_price ??
+            item?.unit_price ??
+            0
+          );
+          return [String(item?.product_id), Number.isFinite(unitPrice) ? unitPrice : 0];
+        })
+      );
+      const returnAmount = items.reduce((sum, item) => {
+        const unitPrice = Number(itemUnitPriceByProduct.get(String(item.product_id)) || 0);
+        const qty = Number(item.quantity || 0);
+        if (!Number.isFinite(qty) || qty <= 0) return sum;
+        return sum + unitPrice * qty;
+      }, 0);
+      const detailPayments = Array.isArray(detail?.order?.payment_history)
+        ? detail.order.payment_history
+        : Array.isArray(detail?.order?.payments)
+          ? detail.order.payments
+          : [];
+      const purchaseTotalAmount = Number(
+        detail?.order?.total_amount ??
+        detail?.order?.totalAmount ??
+        detail?.order?.total_price ??
+        detail?.order?.totalPrice ??
+        0
+      );
+      const purchaseTotalPaid = detailPayments.length ? sumPayments(detailPayments) : 0;
+      const split = computeReturnSplit({
+        totalAmount: purchaseTotalAmount,
+        totalPaid: purchaseTotalPaid,
+        returnAmount,
+      });
+      const originalPaymentMode = String(detail?.order?.payment_mode || detail?.order?.paymentMode || '').trim().toLowerCase();
       const payload = {
         purchase_id: detail.order.id,
         supplier_id: detail.order.supplier_id,
         branch_id: detail.order.branch_id || effectiveBranchId,
         items,
         reason,
+        return_amount: round2(returnAmount),
+        paid_ratio: split.paid_ratio,
+        paid_portion: split.paid_portion,
+        unpaid_portion: split.unpaid_portion,
       };
       await enqueueOfflinePurchaseReturn(payload);
+      const shouldCreateRefundPayment =
+        Number(split.paid_portion) > 0 &&
+        Boolean(detail?.order?.supplier_id) &&
+        !isCreditMode(originalPaymentMode) &&
+        isCashOrBankMode(originalPaymentMode);
+      if (shouldCreateRefundPayment) {
+        const refundPayload = {
+          supplier_id: detail.order.supplier_id,
+          order_id: detail.order.id,
+          amount: -Math.abs(Number(split.paid_portion || 0)),
+          payment_mode: originalPaymentMode,
+          reference_type: 'order',
+          reference_id: detail.order.id,
+          notes: `Purchase return refund (${reason || 'return'}) paid=${split.paid_portion} unpaid=${split.unpaid_portion}`,
+          type: 'refund',
+        };
+        if (navigator.onLine) {
+          await createPayment(refundPayload);
+        } else {
+          await enqueuePayment(refundPayload);
+        }
+      }
       showPopup('Return saved offline. Will sync in background.', 'Offline');
       setSelectedPurchaseId('');
       setDetail(null);

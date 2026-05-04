@@ -11,7 +11,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import Logout from './pages/Logout';
 import { setUserDetails } from './store/userSlice';
 import api from './utils/axios';
-import { preloadAllCaches } from './utils/indexedDb';
+import { preloadAllCaches, preloadOrdersToIndexedDb } from './utils/indexedDb';
 import { startImportSyncWorker, stopImportSyncWorker } from './utils/importSync';
 import { startCustomerSyncWorker, stopCustomerSyncWorker } from './utils/customersSync';
 import { startInventorySyncWorker, stopInventorySyncWorker } from './utils/inventorySync';
@@ -103,6 +103,7 @@ function App() {
   const [isOpeningCompleted, setIsOpeningCompleted] = useState(true);
   const bannerFetchRef = useRef({ userId: null, inFlight: false });
   const preloadOnceRef = useRef(false);
+  const ordersPreloadOnceRef = useRef(false);
   const setupInProgressRef = useRef(false);
   const setupDidRunRef = useRef(false);
   const initialSyncDoneRef = useRef(false);
@@ -131,6 +132,16 @@ function App() {
   const canUseMobileRoutes = tenantConfigStatus === 'loaded' ? mobileAccessEnabled : true;
   const isStaffUser = String(userDetails?.role || '').toLowerCase() === 'staff';
   const isAdminUser = String(userDetails?.role || '').toLowerCase() === 'admin';
+  const preloadOrdersOnce = async () => {
+    if (ordersPreloadOnceRef.current) return;
+    ordersPreloadOnceRef.current = true;
+    try {
+      await preloadOrdersToIndexedDb();
+    } catch (err) {
+      console.error('Orders preload failed', err);
+      ordersPreloadOnceRef.current = false;
+    }
+  };
   useEffect(() => {
     const runSetup = async () => {
       if (!userDetails) {
@@ -150,6 +161,7 @@ function App() {
         await preloadAllCaches().catch((err) => {
           console.error('IndexedDB preload failed', err);
         });
+        await preloadOrdersOnce();
 
         if (tenantConfigStatus !== 'loading' && tenantConfigStatus !== 'loaded') {
           dispatch(setTenantConfigStatus('loading'));
@@ -585,6 +597,7 @@ useEffect(() => {
     preloadAllCaches().catch((err) => {
       console.error('IndexedDB preload failed', err);
     });
+    preloadOrdersOnce();
     };
     window.addEventListener('login-success', handleLoginSuccess);
     return () => window.removeEventListener('login-success', handleLoginSuccess);
@@ -791,16 +804,6 @@ const tenantBannerColor = (() => {
             }
           />
           <Route
-            path='/orders'
-            element={
-              <ProtectedRoute>
-                <OpeningRequired>
-                  <Orders navigate={navigate} userRole={userDetails && userDetails.role} />
-                </OpeningRequired>
-              </ProtectedRoute>
-            }
-          />
-          <Route
             path="/products"
             element={
               <ProtectedRoute>
@@ -824,6 +827,9 @@ const tenantBannerColor = (() => {
             }
           >
             <Route path="/billing" element={<Navigate to="/billing/retail" replace />} />
+            <Route path="/orders" element={<Navigate to="/orders/sales" replace />} />
+            <Route path="/orders/sales" element={<OpeningRequired><Orders navigate={navigate} userRole={userDetails && userDetails.role} mode="sales" /></OpeningRequired>} />
+            <Route path="/orders/purchases" element={<OpeningRequired><Orders navigate={navigate} userRole={userDetails && userDetails.role} mode="purchase" /></OpeningRequired>} />
             <Route path="/billing/retail" element={<OpeningRequired><RetailBilling /></OpeningRequired>} />
             <Route path="/billing/wholesale" element={<OpeningRequired><WholesaleBilling /></OpeningRequired>} />
             <Route path="/inventory" element={<Navigate to="/inventory/catalog" replace />} />

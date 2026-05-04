@@ -311,6 +311,185 @@ db.version(8).stores({
   product_id_map: 'tempId, realId, createdAt'
 });
 
+db.version(9).stores({
+  products_cache: 'id, name, name_lower, barcode, branch_id, updated_at, is_deleted, sync_status',
+  batches_cache: 'id, product_id, batch_number, expiry_date, branch_id, updated_at, is_deleted, quantity_remaining, sync_version',
+  suppliers_cache: 'id, name, name_lower, mobile, branch_id, updated_at, is_deleted, sync_status',
+  offline_purchases: 'local_id, supplier_id, status, branch_id, created_at',
+  offline_purchase_items: '++id, local_purchase_id, product_id',
+  offline_purchase_returns: 'local_id, status, branch_id, created_at',
+  offline_orders: 'id',
+  orders: 'id, created_at',
+  orders_sale: 'id, created_at, updated_at',
+  orders_purchase: 'id, created_at, updated_at',
+  order_items: '++id, order_id',
+  transactions: 'id, order_id, created_at, txn_type, party_type, party_id, direction, payment_mode',
+  supplier_ledger: 'id, supplier_id, created_at, type',
+  customers: 'id, name, mobile',
+  sync_queue: '++id, status, order_id, type, entityId, action, refId, updated_at',
+  session: 'key',
+  config: 'key',
+  products: 'id, name, updatedAt, syncStatus',
+  suppliers: 'id, name, phone, syncStatus',
+  purchases: 'id, supplierId, date, syncStatus, createdAt',
+  purchase_items: 'id, purchaseId, productId',
+  purchase_returns: 'id, purchaseId, date, syncStatus',
+  sync_logs: '++id, type, entityId, status, createdAt',
+  staff: 'staffId, name, phone, role, status, isSynced, updatedAt',
+  salaries: 'salaryId, staffId, month, paymentStatus, isSynced, updatedAt',
+  expenses: 'expenseId, type, category, date, staffId, isSynced, updatedAt',
+  sales_returns: 'returnId, originalBillId, date, isSynced, updatedAt',
+  corrections: 'correctionId, billId, type, createdAt, isSynced',
+  gst_ledger: 'gstEntryId, billId, type, date, isSynced',
+  eway_bills: 'ewayId, billId, status, isSynced, updatedAt',
+  offline_imports: 'id, createdAt, status',
+  offline_import_items: 'id, importId, productId',
+  offline_stock_batches: 'id, productId, batchNo, expiryDate',
+  product_id_map: 'tempId, realId, createdAt'
+});
+
+db.version(10).stores({
+  products_cache: 'id, name, name_lower, barcode, branch_id, updated_at, is_deleted, sync_status',
+  batches_cache: 'id, product_id, batch_number, expiry_date, branch_id, updated_at, is_deleted, quantity_remaining, sync_version',
+  suppliers_cache: 'id, name, name_lower, mobile, branch_id, updated_at, is_deleted, sync_status',
+  offline_purchases: 'local_id, supplier_id, status, branch_id, created_at',
+  offline_purchase_items: '++id, local_purchase_id, product_id',
+  offline_purchase_returns: 'local_id, status, branch_id, created_at',
+  offline_orders: 'id',
+  orders: 'id, transaction_type, payment_mode, created_at, sync_status',
+  orders_sale: 'id, transaction_type, payment_mode, created_at, updated_at, sync_status',
+  orders_purchase: 'id, transaction_type, payment_mode, created_at, updated_at, sync_status',
+  order_items: '++id, order_id',
+  transactions: 'id, order_id, created_at, txn_type, party_type, party_id, direction, payment_mode',
+  supplier_ledger: 'id, supplier_id, created_at, type',
+  customers: 'id, name, mobile',
+  sync_queue: '++id, status, order_id, type, entityId, action, refId, updated_at',
+  session: 'key',
+  config: 'key',
+  products: 'id, name, updatedAt, syncStatus',
+  suppliers: 'id, name, phone, syncStatus',
+  purchases: 'id, supplierId, date, syncStatus, createdAt',
+  purchase_items: 'id, purchaseId, productId',
+  purchase_returns: 'id, purchaseId, date, syncStatus',
+  sync_logs: '++id, type, entityId, status, createdAt',
+  staff: 'staffId, name, phone, role, status, isSynced, updatedAt',
+  salaries: 'salaryId, staffId, month, paymentStatus, isSynced, updatedAt',
+  expenses: 'expenseId, type, category, date, staffId, isSynced, updatedAt',
+  sales_returns: 'returnId, originalBillId, date, isSynced, updatedAt',
+  corrections: 'correctionId, billId, type, createdAt, isSynced',
+  gst_ledger: 'gstEntryId, billId, type, date, isSynced',
+  eway_bills: 'ewayId, billId, status, isSynced, updatedAt',
+  offline_imports: 'id, createdAt, status',
+  offline_import_items: 'id, importId, productId',
+  offline_stock_batches: 'id, productId, batchNo, expiryDate',
+  product_id_map: 'tempId, realId, createdAt'
+}).upgrade(async (tx) => {
+  try {
+    const rows = await tx.table('orders').toArray();
+    if (!rows.length) return;
+    const normalized = rows.map((entry) => {
+      const transaction_type = normalizeTransactionType(entry);
+      const payment_mode = normalizePaymentMode(entry.payment_mode ?? entry.payment_method ?? null);
+      const sync_status = entry.sync_status ?? entry.syncStatus ?? (entry.is_offline ? 'pending' : 'synced');
+      return {
+        ...entry,
+        transaction_type,
+        payment_mode,
+        sync_status,
+      };
+    });
+    await tx.table('orders').bulkPut(normalized);
+    await tx.table('orders_sale').clear();
+    await tx.table('orders_purchase').clear();
+    const sales = normalized.filter((entry) => String(entry.transaction_type) === 'sale');
+    const purchases = normalized.filter((entry) => String(entry.transaction_type) === 'purchase');
+    if (sales.length) await tx.table('orders_sale').bulkPut(sales);
+    if (purchases.length) await tx.table('orders_purchase').bulkPut(purchases);
+  } catch {
+    // ignore migration errors
+  }
+});
+
+db.version(11).stores({
+  products_cache: 'id, name, name_lower, barcode, branch_id, updated_at, is_deleted, sync_status',
+  batches_cache: 'id, product_id, batch_number, expiry_date, branch_id, updated_at, is_deleted, quantity_remaining, sync_version',
+  suppliers_cache: 'id, name, name_lower, mobile, branch_id, updated_at, is_deleted, sync_status',
+  offline_purchases: 'local_id, supplier_id, status, branch_id, created_at',
+  offline_purchase_items: '++id, local_purchase_id, product_id',
+  offline_purchase_returns: 'local_id, status, branch_id, created_at',
+  offline_orders: 'id',
+  orders: 'id, transaction_type, payment_mode, created_at, sync_status',
+  sales_orders: 'id, customer_id, total_amount, payment_mode, created_at, updated_at, sync_status',
+  purchase_orders: 'id, supplier_id, total_amount, payment_mode, created_at, updated_at, sync_status',
+  order_items: '++id, order_id',
+  transactions: 'id, order_id, created_at, txn_type, party_type, party_id, direction, payment_mode',
+  supplier_ledger: 'id, supplier_id, created_at, type',
+  customers: 'id, name, mobile',
+  sync_queue: '++id, status, order_id, type, entityId, action, refId, updated_at',
+  session: 'key',
+  config: 'key',
+  products: 'id, name, updatedAt, syncStatus',
+  suppliers: 'id, name, phone, syncStatus',
+  purchases: 'id, supplierId, date, syncStatus, createdAt',
+  purchase_items: 'id, purchaseId, productId',
+  purchase_returns: 'id, purchaseId, date, syncStatus',
+  sync_logs: '++id, type, entityId, status, createdAt',
+  staff: 'staffId, name, phone, role, status, isSynced, updatedAt',
+  salaries: 'salaryId, staffId, month, paymentStatus, isSynced, updatedAt',
+  expenses: 'expenseId, type, category, date, staffId, isSynced, updatedAt',
+  sales_returns: 'returnId, originalBillId, date, isSynced, updatedAt',
+  corrections: 'correctionId, billId, type, createdAt, isSynced',
+  gst_ledger: 'gstEntryId, billId, type, date, isSynced',
+  eway_bills: 'ewayId, billId, status, isSynced, updatedAt',
+  offline_imports: 'id, createdAt, status',
+  offline_import_items: 'id, importId, productId',
+  offline_stock_batches: 'id, productId, batchNo, expiryDate',
+  product_id_map: 'tempId, realId, createdAt'
+}).upgrade(async (tx) => {
+  try {
+    const fallbackOrders = await tx.table('orders').toArray();
+    const legacySales = await tx.table('orders_sale').toArray().catch(() => []);
+    const legacyPurchases = await tx.table('orders_purchase').toArray().catch(() => []);
+
+    const source = Array.isArray(fallbackOrders) ? fallbackOrders : [];
+    const normalized = source.map((entry) => {
+      const transaction_type = normalizeTransactionType(entry);
+      const payment_mode = normalizePaymentMode(entry.payment_mode ?? entry.payment_method ?? null);
+      const sync_status = entry.sync_status ?? entry.syncStatus ?? (entry.is_offline ? 'pending' : 'synced');
+      return {
+        ...entry,
+        transaction_type,
+        payment_mode,
+        sync_status,
+      };
+    });
+
+    const sales =
+      legacySales.length > 0
+        ? legacySales.map((entry) => ({
+            ...entry,
+            transaction_type: 'sale',
+            sync_status: entry.sync_status ?? entry.syncStatus ?? (entry.is_offline ? 'pending' : 'synced'),
+          }))
+        : normalized.filter((entry) => String(entry.transaction_type) === 'sale');
+    const purchases =
+      legacyPurchases.length > 0
+        ? legacyPurchases.map((entry) => ({
+            ...entry,
+            transaction_type: 'purchase',
+            sync_status: entry.sync_status ?? entry.syncStatus ?? (entry.is_offline ? 'pending' : 'synced'),
+          }))
+        : normalized.filter((entry) => String(entry.transaction_type) === 'purchase');
+
+    await tx.table('sales_orders').clear();
+    await tx.table('purchase_orders').clear();
+    if (sales.length) await tx.table('sales_orders').bulkPut(sales);
+    if (purchases.length) await tx.table('purchase_orders').bulkPut(purchases);
+  } catch {
+    // ignore migration errors
+  }
+});
+
 const normalizeProduct = (product) => {
   if (!product) return null;
   const rawBarcode =
@@ -445,6 +624,23 @@ const hashString = (input) => {
 };
 
 const notifyValidationFailure = () => {};
+
+const normalizePaymentMode = (value) => {
+  const mode = String(value || '').trim().toLowerCase();
+  if (mode === 'cash') return 'cash';
+  if (mode === 'bank') return 'bank';
+  if (mode === 'credit') return 'credit';
+  if (mode === 'upi' || mode === 'card' || mode === 'wallet') return 'bank';
+  return 'cash';
+};
+
+const normalizeTransactionType = (order = {}) => {
+  const rawType = String(order?.transaction_type ?? order?.transactionType ?? '').trim().toLowerCase();
+  if (rawType === 'purchase') return 'purchase';
+  if (rawType === 'sale') return 'sale';
+  const hasSupplier = Boolean(order?.supplier_id || order?.supplierId || order?.supplier_name || order?.supplierName);
+  return hasSupplier ? 'purchase' : 'sale';
+};
 
 const ENTITY_SCHEMAS = {
   product_cache: {
@@ -590,6 +786,9 @@ const ENTITY_SCHEMAS = {
       'customer_mobile',
       'customer_id',
       'customerId',
+      'supplier_id',
+      'supplierId',
+      'supplier_name',
       'total_amount',
       'total_price',
       'total_paid',
@@ -600,6 +799,8 @@ const ENTITY_SCHEMAS = {
       'billingType',
       'payment_mode',
       'payment_method',
+      'transaction_type',
+      'transactionType',
       'payment_action',
       'order_status',
       'is_gst_enabled',
@@ -671,6 +872,8 @@ const ENTITY_SCHEMAS = {
     allowed: [
       'id',
       'order_id',
+      'reference_type',
+      'reference_id',
       'client_order_id',
       'total_price',
       'amount',
@@ -936,6 +1139,8 @@ export const validateAndPrepare = async (entityType, data) => {
       if (!payload.created_at && payload.createdAt) {
         payload.created_at = payload.createdAt;
       }
+      payload.transaction_type = normalizeTransactionType(payload);
+      payload.payment_mode = normalizePaymentMode(payload.payment_mode ?? payload.payment_method ?? null);
     }
 
     if (entityType === 'order_item') {
@@ -1213,6 +1418,8 @@ const normalizeTransaction = (transaction) => {
   return {
     id,
     order_id: transaction.order_id ?? transaction.orderId ?? null,
+    reference_type: transaction.reference_type ?? transaction.referenceType ?? null,
+    reference_id: transaction.reference_id ?? transaction.referenceId ?? null,
     client_order_id: transaction.client_order_id ?? transaction.clientOrderId ?? null,
     total_price: transaction.total_price ?? transaction.amount_paid ?? transaction.amount ?? null,
     amount: transaction.amount ?? transaction.total_price ?? transaction.amount_paid ?? transaction.amount ?? null,

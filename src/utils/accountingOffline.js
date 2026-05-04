@@ -12,6 +12,8 @@ const buildBaseTransaction = (payload = {}) => {
     payment_mode: payload.payment_mode || payload.paymentMode || 'cash',
     notes: payload.notes || null,
     order_id: payload.order_id || payload.orderId || null,
+    reference_type: payload.reference_type || payload.referenceType || null,
+    reference_id: payload.reference_id || payload.referenceId || payload.order_id || payload.orderId || null,
     date: payload.date || null,
     source: payload.source || null,
     sync_status: 'pending',

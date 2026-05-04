@@ -246,6 +246,14 @@ body.app-theme-light .context-sidebar__link.active {
   transition: margin-left 0.25s ease, padding 0.25s ease;
 }
 
+.context-content.no-sidebar {
+  margin-left: 0;
+}
+
+.context-layout.is-collapsed .context-content.no-sidebar {
+  margin-left: 0;
+}
+
 @media (max-width: 1024px) {
   .context-content {
     margin-left: 0;

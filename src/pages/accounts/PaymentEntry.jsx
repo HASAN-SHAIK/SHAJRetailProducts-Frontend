@@ -8,6 +8,13 @@ import { enqueuePayment } from '../../utils/accountingOffline';
 import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './Accounts.css';
 
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '-';
+  return dt.toLocaleString();
+};
+
 const dedupeSuppliers = (list = []) => {
   const seen = new Set();
   const out = [];
@@ -268,7 +275,7 @@ const PaymentEntry = () => {
             )}
             {history.map((entry) => (
               <tr key={entry.id}>
-                <td>{entry.created_at ? new Date(entry.created_at).toLocaleDateString() : '-'}</td>
+                <td>{formatDateTime(entry.created_at)}</td>
                 <td>{entry.txn_type || '-'}</td>
                 <td>{entry.party_name || (entry.party_type === 'expense' ? 'Expense' : entry.party_id || '-')}</td>
                 <td>{entry.payment_mode || '-'}</td>

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/axios';
 import { getAllCustomers, upsertCustomersBulk } from '../../core/db';
-import { getCachedOrderItems, getCachedOrdersByCustomer } from '../../db/ordersDb';
+import { getCachedOrderItems, getCachedOrdersByCustomer, upsertOrderDetailsCache } from '../../db/ordersDb';
 import './Customers.css';
 
 const toCustomerIdentity = (customer) => {
@@ -211,6 +211,13 @@ const CustomerReorder = () => {
     setOrderItems([]);
     setSelectedProductIds(new Set());
     try {
+      const cachedItems = await loadOrderItemsFromCache(orderId);
+      if (cachedItems.length) {
+        setOrderItems(cachedItems);
+        setSelectedProductIds(new Set(cachedItems.map((item) => String(getOrderItemProductId(item)))));
+        return;
+      }
+
       const embeddedItems = Array.isArray(order?.items)
         ? order.items
         : Array.isArray(order?.products)
@@ -220,20 +227,48 @@ const CustomerReorder = () => {
         setOrderItems(embeddedItems);
         setSelectedProductIds(new Set(embeddedItems.map((item) => String(getOrderItemProductId(item)))));
       }
-
-      const cachedItems = await loadOrderItemsFromCache(orderId);
-      if (cachedItems.length) {
-        setOrderItems(cachedItems);
-        setSelectedProductIds(new Set(cachedItems.map((item) => String(getOrderItemProductId(item)))));
-      }
       const shouldFallbackToApi =
-        !cachedItems.length && preferApi && navigator.onLine && Number.isFinite(Number(orderId));
+        !cachedItems.length &&
+        !embeddedItems.length &&
+        preferApi &&
+        navigator.onLine &&
+        Number.isFinite(Number(orderId));
       if (!shouldFallbackToApi) {
         return;
       }
       const res = await api.get(`/orders/${orderId}`);
-      const fetchedOrder = res?.data?.order || {};
-      const apiItems = Array.isArray(fetchedOrder?.items) ? fetchedOrder.items : [];
+      const payload = res?.data || {};
+      const fetchedOrder =
+        payload?.order ||
+        payload?.data?.order ||
+        payload?.data ||
+        {};
+      const apiItems = Array.isArray(fetchedOrder?.items)
+        ? fetchedOrder.items
+        : Array.isArray(fetchedOrder?.products)
+          ? fetchedOrder.products
+          : Array.isArray(payload?.items)
+            ? payload.items
+            : Array.isArray(payload?.order_items)
+              ? payload.order_items
+              : Array.isArray(payload?.data?.items)
+                ? payload.data.items
+                : [];
+      if (apiItems.length) {
+        const payments = Array.isArray(fetchedOrder?.payment_history)
+          ? fetchedOrder.payment_history
+          : Array.isArray(fetchedOrder?.payments)
+            ? fetchedOrder.payments
+            : Array.isArray(payload?.payments)
+              ? payload.payments
+              : Array.isArray(payload?.transactions)
+                ? payload.transactions
+                : Array.isArray(payload?.data?.payments)
+                  ? payload.data.payments
+                  : [];
+        const orderForCache = fetchedOrder?.id ? fetchedOrder : { ...order, ...fetchedOrder };
+        upsertOrderDetailsCache({ order: orderForCache, items: apiItems, payments }).catch(() => {});
+      }
       if (apiItems.length) {
         setOrderItems(apiItems);
         setSelectedProductIds(new Set(apiItems.map((item) => String(getOrderItemProductId(item)))));
@@ -296,7 +331,7 @@ const CustomerReorder = () => {
   const handleOrderPick = (order) => {
     setSelectedOrder(order || null);
     if (order?.id) {
-      loadItemsForOrder(order, { preferApi: false });
+      loadItemsForOrder(order, { preferApi: true });
     } else {
       setOrderItems([]);
       setSelectedProductIds(new Set());
@@ -444,15 +479,19 @@ const CustomerReorder = () => {
             <>
               <div className="reorder-list">
                 {orderItems.map((item) => {
-                  const checked = selectedProductIds.has(String(item.product_id));
+                  const productId = getOrderItemProductId(item);
+                  const checked = selectedProductIds.has(String(productId));
                   return (
-                    <label key={item.product_id} className={`reorder-check-item ${checked ? 'active' : ''}`}>
+                    <label
+                      key={`${String(productId)}:${String(item.product_name || item.name || '')}`}
+                      className={`reorder-check-item ${checked ? 'active' : ''}`}
+                    >
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => toggleProductSelection(item.product_id)}
+                        onChange={() => toggleProductSelection(productId)}
                       />
-                      <span className="title">{item.product_name}</span>
+                      <span className="title">{item.product_name || item.name || 'Unnamed Item'}</span>
                       <span className="meta">
                         Qty {item.remaining_quantity ?? item.quantity} | INR {toMoney(item.selling_price)}
                       </span>

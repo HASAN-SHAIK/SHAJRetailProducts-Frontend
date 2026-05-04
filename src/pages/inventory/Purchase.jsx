@@ -6,11 +6,17 @@ import {
   dedupeSuppliersCache,
   getInventorySyncQueueEntries,
   getLatestBatchForProduct,
+  getSupplierCacheById,
   getLocalPurchases,
   getProductCacheByBarcode,
+  saveSessionValue,
+  upsertSupplierLedgerEntry,
   updateSuppliersCacheBulk,
 } from '../../core/db';
+import { upsertOrderDetailsCache } from '../../db/ordersDb';
 import { enqueueOfflinePurchase } from '../../utils/offlinePurchases';
+import { createPayment } from '../../services/accountingService';
+import { enqueuePayment } from '../../utils/accountingOffline';
 import { findProductByBarcodeLocal, searchProductsLocal } from '../../utils/purchaseSearch';
 import { processInventorySyncQueue } from '../../utils/inventorySync';
 import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
@@ -35,6 +41,69 @@ const getAdaptiveInputWidth = (value, base = 260, max = 760) => {
   const length = String(value || '').length;
   const estimated = length * 9 + 36;
   return `${Math.min(max, Math.max(base, estimated))}px`;
+};
+
+const buildPurchaseOrderCachePayload = ({
+  orderId,
+  supplierId,
+  supplierName,
+  branchId,
+  invoiceNumber,
+  paymentMode,
+  paymentStatus,
+  totalAmount,
+  paidAmount,
+  balanceAmount,
+  items,
+}) => {
+  const createdAt = new Date().toISOString();
+  const normalizedItems = (Array.isArray(items) ? items : []).map((item) => {
+    const quantity = Number(item?.quantity ?? item?.qty ?? 0);
+    const price = Number(item?.purchase_price ?? item?.price ?? 0);
+    const lineTotal = Number(item?.total ?? (quantity * price));
+    return {
+      order_id: orderId,
+      product_id: item?.product_id ?? item?.productId ?? null,
+      product_name: item?.name ?? item?.product_name ?? '',
+      name: item?.name ?? item?.product_name ?? '',
+      quantity,
+      qty: quantity,
+      price,
+      purchase_price: price,
+      total: Number.isFinite(lineTotal) ? lineTotal : 0,
+      line_total: Number.isFinite(lineTotal) ? lineTotal : 0,
+    };
+  });
+  const productNames = normalizedItems
+    .map((item) => String(item?.product_name || item?.name || '').trim())
+    .filter(Boolean);
+
+  return {
+    order: {
+      id: orderId,
+      supplier_id: supplierId,
+      supplier_name: supplierName || null,
+      branch_id: branchId ?? null,
+      invoice_number: invoiceNumber || null,
+      payment_mode: paymentMode,
+      payment_status: paymentStatus,
+      total_amount: totalAmount,
+      total_price: totalAmount,
+      paid_amount: paidAmount,
+      total_paid: paidAmount,
+      balance: balanceAmount,
+      transaction_type: 'purchase',
+      order_type: 'purchase',
+      source_type: 'purchase',
+      billing_type: 'purchase',
+      products_summary: productNames.join(', '),
+      product_names: productNames,
+      product_count: productNames.length,
+      created_at: createdAt,
+      updated_at: createdAt,
+    },
+    items: normalizedItems,
+  };
 };
 
 let pdfJsLoader = null;
@@ -262,7 +331,6 @@ const Purchase = () => {
   };
   const removeRow = (index) => {
     setRows((prev) => prev.filter((_, idx) => idx !== index));
-    showPopup('Row removed.', 'Info');
   };
 
   const fetchSuppliers = async () => {
@@ -472,7 +540,6 @@ const Purchase = () => {
       batch_number: rows[index]?.batch_number || '',
       qty: rows[index]?.qty || '1',
     });
-    showPopup(`${displayName} selected.`, 'Success');
     setRowSuggestions((prev) => ({ ...prev, [index]: [] }));
     const nextIndex = index + 1;
     if (!rows[nextIndex]) {
@@ -495,7 +562,9 @@ const Purchase = () => {
       matched = true;
       return;
     }
-    const found = await findProductByBarcodeLocal(barcode, effectiveBranchId);
+    // Purchase product search should span all branches; selected branch is only
+    // used when resolving the latest batch/pricing to apply into the row.
+    const found = await findProductByBarcodeLocal(barcode, null);
     if (found) {
       await applyProductToRow(index, found);
       matched = true;
@@ -517,7 +586,7 @@ const Purchase = () => {
     }
     setSearchLoadingIndex(index);
     searchTimerRef.current = setTimeout(async () => {
-      const results = await searchProductsLocal(query, effectiveBranchId);
+      const results = await searchProductsLocal(query, null);
       const suggestions = results.slice(0, 8);
       if (!suggestions.length) {
         setRowSuggestions((prev) => ({
@@ -660,6 +729,12 @@ const Purchase = () => {
       return;
     }
 
+    const normalizedPaymentMode = normalizePurchasePaymentMode(paymentMode);
+    const isCreditPurchase = normalizedPaymentMode === 'credit';
+    const paidAmount = isCreditPurchase ? 0 : totalAmount;
+    const balanceAmount = Math.max(totalAmount - paidAmount, 0);
+    const paymentStatus = balanceAmount > 0 ? 'pending' : 'paid';
+
     const payload = {
       type: 'purchase',
       order_type: 'purchase',
@@ -669,19 +744,69 @@ const Purchase = () => {
       branch_id: effectiveBranchId,
       supplier_id: supplierId,
       invoice_number: invoiceNumber || null,
-      payment_mode: paymentMode,
+      payment_mode: normalizedPaymentMode,
       items,
       total_price: totalAmount,
+      paid_amount: paidAmount,
+      total_paid: paidAmount,
+      balance: balanceAmount,
+      payment_status: paymentStatus,
+    };
+    const selectedSupplier = suppliers.find((supplier) => String(supplier?.id) === String(supplierId));
+    const writePurchaseOrderToCache = async (orderId) => {
+      if (!orderId) return;
+      const cachePayload = buildPurchaseOrderCachePayload({
+        orderId,
+        supplierId,
+        supplierName: selectedSupplier?.name ?? null,
+        branchId: effectiveBranchId,
+        invoiceNumber,
+        paymentMode: normalizedPaymentMode,
+        paymentStatus,
+        totalAmount,
+        paidAmount,
+        balanceAmount,
+        items,
+      });
+      await upsertOrderDetailsCache(cachePayload).catch(() => {});
+      await saveSessionValue('orders_last_sync', new Date().toISOString()).catch(() => {});
+      window.dispatchEvent(new CustomEvent('orders-cache-updated'));
     };
 
     setIsSaving(true);
     try {
-      if (String(paymentMode || '').toLowerCase() === 'credit') {
+      if (isCreditPurchase) {
         if (!navigator.onLine) {
           showPopup('Credit purchase requires server connection. Please go online and retry.', 'Validation');
           return;
         }
-        await api.post('/purchases', payload);
+        const purchaseRes = await api.post('/purchases', payload);
+        const serverOrderId =
+          purchaseRes?.data?.data?.order_id ||
+          purchaseRes?.data?.order_id ||
+          purchaseRes?.data?.data?.id ||
+          purchaseRes?.data?.id ||
+          null;
+        await writePurchaseOrderToCache(serverOrderId);
+        if (supplierId && Number(totalAmount) > 0) {
+          const supplier = await getSupplierCacheById(supplierId).catch(() => null);
+          const currentBalance = Number(supplier?.current_balance || 0);
+          const nextBalance = currentBalance + Number(totalAmount);
+          await upsertSupplierLedgerEntry({
+            id: `supplier_payable_${serverOrderId || Date.now()}`,
+            supplier_id: String(supplierId),
+            type: 'supplier_payable',
+            amount: Number(totalAmount),
+            payment_mode: null,
+            running_balance: Number.isFinite(nextBalance) ? nextBalance : null,
+            notes: serverOrderId ? `Credit purchase payable for order ${serverOrderId}` : 'Credit purchase payable',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).catch(() => {});
+          if (supplier) {
+            await updateSuppliersCacheBulk([{ ...supplier, current_balance: nextBalance }]).catch(() => {});
+          }
+        }
         showPopup('Credit purchase saved on server.', 'Success');
         setRows([emptyRow()]);
         setInvoiceNumber('');
@@ -689,7 +814,47 @@ const Purchase = () => {
         return;
       }
 
-      await enqueueOfflinePurchase(payload);
+      if (navigator.onLine) {
+        const purchaseRes = await api.post('/purchases', payload);
+        const serverOrderId =
+          purchaseRes?.data?.data?.order_id ||
+          purchaseRes?.data?.order_id ||
+          purchaseRes?.data?.data?.id ||
+          purchaseRes?.data?.id ||
+          null;
+        const normalizedMode = normalizePurchasePaymentMode(paymentMode);
+        if (isImmediatePaymentMode(normalizedMode) && Number(totalAmount) > 0) {
+          await createPayment({
+            supplier_id: supplierId,
+            order_id: serverOrderId,
+            reference_type: 'order',
+            reference_id: serverOrderId,
+            amount: Number(totalAmount),
+            payment_mode: normalizedMode,
+            notes: `Purchase payment for order ${serverOrderId || ''}`.trim(),
+          }).catch(() => null);
+        }
+        await writePurchaseOrderToCache(serverOrderId);
+        showPopup('Purchase saved on server.', 'Success');
+        setRows([emptyRow()]);
+        setInvoiceNumber('');
+        await refreshPendingSummary();
+        return;
+      }
+
+      const offlinePurchase = await enqueueOfflinePurchase(payload);
+      const normalizedMode = normalizePurchasePaymentMode(paymentMode);
+      if (isImmediatePaymentMode(normalizedMode) && Number(totalAmount) > 0) {
+        await enqueuePayment({
+          supplier_id: supplierId,
+          order_id: offlinePurchase?.local_id || null,
+          reference_type: 'order',
+          reference_id: offlinePurchase?.local_id || null,
+          amount: Number(totalAmount),
+          payment_mode: normalizedMode,
+          notes: 'Offline purchase payment',
+        }).catch(() => null);
+      }
       showPopup('Saved offline. Will sync in background.', 'Offline');
       setRows([emptyRow()]);
       setInvoiceNumber('');
@@ -778,8 +943,6 @@ const Purchase = () => {
               setSupplierId(value);
               if (!value) {
                 showPopup('Supplier is required for purchase.', 'Validation');
-              } else {
-                showPopup('Supplier selected.', 'Info');
               }
             }}
           >
@@ -802,8 +965,8 @@ const Purchase = () => {
           >
             <option value="cash">Cash</option>
             <option value="bank">Bank</option>
-            <option value="credit">Credit</option>
-            <option value="online">Online</option>
+            <option value="upi">UPI</option>
+            <option value="credit">Credit Order</option>
           </select>
         </div>
         <div className="billing-table-wrapper">
@@ -1009,3 +1172,12 @@ const Purchase = () => {
 };
 
 export default Purchase;
+  const normalizePurchasePaymentMode = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'online') return 'upi';
+    return normalized;
+  };
+  const isImmediatePaymentMode = (value) => {
+    const normalized = normalizePurchasePaymentMode(value);
+    return normalized === 'cash' || normalized === 'bank' || normalized === 'upi';
+  };

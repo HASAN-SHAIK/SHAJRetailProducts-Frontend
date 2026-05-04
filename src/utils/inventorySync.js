@@ -327,6 +327,17 @@ const syncPurchaseEntry = async (entry) => {
     gst_percent: Number(item.gst_percent || 0),
     expiry_date: item.expiry_date || null,
   }));
+  const normalizedMode = String(purchase.paymentMode ?? purchase.payment_mode ?? '').trim().toLowerCase() === 'online'
+    ? 'upi'
+    : String(purchase.paymentMode ?? purchase.payment_mode ?? '').trim().toLowerCase();
+  const isCreditPurchase = normalizedMode === 'credit';
+  const syncedTotalAmount = Number(purchase.totalPrice ?? purchase.total_price ?? 0);
+  const syncedTotalPaid = isCreditPurchase
+    ? 0
+    : Number(purchase.totalPaid ?? purchase.total_paid ?? purchase.paidAmount ?? purchase.paid_amount ?? 0);
+  const syncedBalance = isCreditPurchase
+    ? Math.max(syncedTotalAmount, 0)
+    : Number(purchase.balance ?? Math.max(syncedTotalAmount - syncedTotalPaid, 0));
   const response = await api.post('/purchases', {
     type: 'purchase',
     order_type: 'purchase',
@@ -336,7 +347,11 @@ const syncPurchaseEntry = async (entry) => {
     branch_id: purchase.branchId ?? purchase.branch_id ?? null,
     supplier_id: purchase.supplierId ?? purchase.supplier_id ?? null,
     invoice_number: purchase.invoiceNumber ?? purchase.invoice_number ?? null,
-    payment_mode: purchase.paymentMode ?? purchase.payment_mode ?? null,
+    payment_mode: normalizedMode || null,
+    paid_amount: syncedTotalPaid,
+    total_paid: syncedTotalPaid,
+    balance: syncedBalance,
+    payment_status: isCreditPurchase ? 'pending' : (purchase.paymentStatus ?? purchase.payment_status ?? (syncedBalance > 0 ? 'pending' : 'paid')),
     items: payloadItems,
   });
   const responseData = response?.data?.data || response?.data || {};
@@ -429,6 +444,8 @@ const syncAccountingEntry = async (entry) => {
     payment_mode: txn.payment_mode || 'cash',
     notes: txn.notes || null,
     order_id: txn.order_id || txn.orderId || null,
+    reference_type: txn.reference_type || txn.referenceType || null,
+    reference_id: txn.reference_id || txn.referenceId || txn.order_id || txn.orderId || null,
     date: txn.date || txn.created_at || null,
     client_txn_id: txn.client_txn_id || txn.clientTxnId || String(txn.id || ''),
   };

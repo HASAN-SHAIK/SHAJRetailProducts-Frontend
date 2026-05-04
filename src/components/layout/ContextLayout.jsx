@@ -6,6 +6,17 @@ import './ContextSidebar.css';
 const ContextLayout = () => {
   const location = useLocation();
   const isMobileRoute = location.pathname.startsWith('/m');
+  const module = String(location.pathname || '').split('/')[1] || '';
+  const modulesWithSidebar = new Set([
+    'billing',
+    'inventory',
+    'customers',
+    'accounts',
+    'orders',
+    'staff-expenses',
+    'returns-corrections',
+  ]);
+  const hasSidebar = modulesWithSidebar.has(module);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -49,7 +60,7 @@ const ContextLayout = () => {
   return (
     <div className={`context-layout ${collapsed ? 'is-collapsed' : ''}`}>
       <ContextSidebar collapsed={collapsed} onToggle={handleToggle} />
-      <div className="context-content">
+      <div className={`context-content ${hasSidebar ? '' : 'no-sidebar'}`.trim()}>
         <Outlet />
       </div>
     </div>

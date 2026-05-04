@@ -5,6 +5,15 @@ const normalizeNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const normalizePaymentMode = (value) => {
+  const mode = String(value || '').trim().toLowerCase();
+  if (mode === 'cash') return 'cash';
+  if (mode === 'bank') return 'bank';
+  if (mode === 'credit') return 'credit';
+  if (mode === 'upi' || mode === 'card' || mode === 'wallet') return 'bank';
+  return 'cash';
+};
+
 const normalizeProduct = (product) => {
   if (!product) return null;
   const id = product.id ?? product.product_id ?? product.productId ?? null;
@@ -74,7 +83,11 @@ export const getProductByBarcode = async (barcode) => {
 
 export const saveOrder = async (order) => {
   if (!order) return null;
-  const prepared = await validateAndPrepare('order', order);
+  const prepared = await validateAndPrepare('order', {
+    transaction_type: order?.transaction_type ?? 'sale',
+    payment_mode: normalizePaymentMode(order?.payment_mode ?? order?.payment_method ?? null),
+    ...order,
+  });
   await db.orders.put(prepared);
   return prepared;
 };
@@ -84,10 +97,15 @@ export const getOrderById = async (orderId) => {
   return await db.orders.get(orderId);
 };
 
-export const getOrdersByStatus = async (status) => {
+export const getOrdersByStatus = async (status, transactionType = 'sale') => {
   if (!status) return [];
+  const normalizedType = String(transactionType || 'sale').toLowerCase() === 'purchase' ? 'purchase' : 'sale';
   const orders = await db.orders.toArray();
-  return orders.filter((order) => order?.status === status);
+  return orders.filter(
+    (order) =>
+      order?.status === status &&
+      String(order?.transaction_type || '').toLowerCase() === normalizedType
+  );
 };
 
 export const updateOrdersBulk = async (orders) => {

@@ -5,17 +5,53 @@ import './Accounts.css';
 const normalizeEntryAmount = (entry) => Number(entry.amount ?? entry.total_price ?? entry.debit ?? entry.credit ?? 0);
 const normalizeInAmount = (entry) => Number(entry.debit ?? (String(entry.direction || '').toLowerCase() === 'in' ? normalizeEntryAmount(entry) : 0));
 const normalizeOutAmount = (entry) => Number(entry.credit ?? (String(entry.direction || '').toLowerCase() === 'out' ? normalizeEntryAmount(entry) : 0));
-
-const applyRunningBalance = (entries = []) => {
-  const sorted = [...entries].sort((a, b) => new Date(a.date || a.created_at || 0) - new Date(b.date || b.created_at || 0));
-  let running = 0;
-  const withBalance = sorted.map((entry) => {
-    const inAmount = normalizeInAmount(entry);
-    const outAmount = normalizeOutAmount(entry);
-    running += inAmount - outAmount;
-    return { ...entry, running_balance: running };
+const isOpeningEntry = (entry) => {
+  const refType = String(entry?.reference_type || '').toLowerCase();
+  const txnType = String(entry?.txn_type || '').toLowerCase();
+  return refType === 'opening' || txnType === 'opening';
+};
+const toDateKey = (entry) => {
+  const raw = entry?.date || entry?.created_at;
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+};
+const toEpoch = (entry) => {
+  const raw = entry?.date || entry?.created_at;
+  const ts = raw ? new Date(raw).getTime() : 0;
+  return Number.isFinite(ts) ? ts : 0;
+};
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '-';
+  return dt.toLocaleString();
+};
+const normalizeCashBookEntries = (entries = []) => {
+  const list = Array.isArray(entries) ? entries : [];
+  const asc = [...list].sort((a, b) => {
+    const ra = isOpeningEntry(a) ? 0 : 1;
+    const rb = isOpeningEntry(b) ? 0 : 1;
+    if (ra !== rb) return ra - rb;
+    const da = toDateKey(a);
+    const db = toDateKey(b);
+    if (da !== db) return da.localeCompare(db);
+    const ta = toEpoch(a);
+    const tb = toEpoch(b);
+    if (ta !== tb) return ta - tb;
+    const ca = a?.created_at ? new Date(a.created_at).getTime() : ta;
+    const cb = b?.created_at ? new Date(b.created_at).getTime() : tb;
+    if (ca !== cb) return ca - cb;
+    return Number(a?.id || 0) - Number(b?.id || 0);
   });
-  return withBalance;
+  let balance = 0;
+  const withBalance = asc.map((entry) => {
+    balance += normalizeInAmount(entry);
+    balance -= normalizeOutAmount(entry);
+    return { ...entry, running_balance: balance };
+  });
+  return withBalance.reverse();
 };
 
 const CashBook = () => {
@@ -31,10 +67,7 @@ const CashBook = () => {
         range: filters.start_date && filters.end_date ? 'custom' : 'all',
       });
       const list = Array.isArray(payload.entries) ? payload.entries : [];
-      const withBalance = list.some((entry) => entry.running_balance !== undefined)
-        ? list
-        : applyRunningBalance(list);
-      setEntries(withBalance);
+      setEntries(normalizeCashBookEntries(list));
     } catch {
       setEntries([]);
     } finally {
@@ -46,10 +79,7 @@ const CashBook = () => {
     load();
   }, [filters]);
 
-  const rows = useMemo(() => {
-    const list = entries || [];
-    return [...list].sort((a, b) => new Date(b.date || b.created_at || 0) - new Date(a.date || a.created_at || 0));
-  }, [entries]);
+  const rows = useMemo(() => entries || [], [entries]);
 
   return (
     <div className="billing-page accounts-page">
@@ -101,10 +131,10 @@ const CashBook = () => {
               const outAmount = normalizeOutAmount(entry);
               const type = entry.txn_type || entry.reference_type || (entry.description ? 'ledger' : '-');
               const party = entry.party_name || entry.party_id || entry.description || '-';
-              const rowDate = entry.date || entry.created_at;
+              const rowDate = entry.created_at || entry.date;
               return (
                 <tr key={entry.id || `${rowDate || ''}-${entry.ledger_id || ''}-${entry.reference_id || ''}`}>
-                  <td>{rowDate ? new Date(rowDate).toLocaleDateString() : '-'}</td>
+                  <td>{formatDateTime(rowDate)}</td>
                   <td>{type}</td>
                   <td>{party}</td>
                   <td>{inAmount > 0 ? `INR ${inAmount.toFixed(2)}` : '-'}</td>

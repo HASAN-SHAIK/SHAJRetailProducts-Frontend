@@ -1,7 +1,7 @@
 import React from 'react'
 import OrdersPage from '../components/OrdersPage/OrdersPage'
 
-export default function Orders({userRole, navigate}) {
+export default function Orders({ userRole, navigate, mode = 'sales' }) {
   return (
     <div className="wow-page">
       <div className="wow-motion-layer" aria-hidden="true">
@@ -14,7 +14,7 @@ export default function Orders({userRole, navigate}) {
         <span className="wow-pulse"></span>
       </div>
       <div className="wow-content container-fluid">
-        <OrdersPage navigate={navigate} userRole={userRole}/>
+        <OrdersPage navigate={navigate} userRole={userRole} mode={mode} />
       </div>
     </div>
   )

@@ -9,6 +9,30 @@ const normalizeOrderId = (orderId) => {
   return raw;
 };
 
+const normalizePaymentMode = (value) => {
+  const mode = String(value || '').trim().toLowerCase();
+  if (mode === 'cash') return 'cash';
+  if (mode === 'bank') return 'bank';
+  if (mode === 'credit') return 'credit';
+  if (mode === 'upi' || mode === 'card' || mode === 'wallet') return 'bank';
+  return 'cash';
+};
+
+const toOptionalNumber = (value) => {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const normalizeTransactionType = (order = {}) => {
+  const type = String(order?.transaction_type || order?.transactionType || '').trim().toLowerCase();
+  if (type === 'purchase') return 'purchase';
+  if (type === 'sale') return 'sale';
+  const hasSupplier = Boolean(order?.supplier_id || order?.supplierId || order?.supplier_name || order?.supplierName);
+  return hasSupplier ? 'purchase' : 'sale';
+};
+
 const normalizeOrder = (order) => {
   const normalizedId = normalizeOrderId(order?.id ?? null);
   const isLocalId = typeof normalizedId === 'string' && normalizedId.startsWith('local:');
@@ -36,20 +60,27 @@ const normalizeOrder = (order) => {
   customer_name: order?.customer_name ?? null,
   customer_phone: order?.customer_phone ?? order?.customer_mobile ?? null,
   customer_id: order?.customer_id ?? order?.customerId ?? null,
-  total_amount: order?.total_amount ?? order?.total_price ?? 0,
-  total_paid: order?.total_paid ?? 0,
-  returned_amount: order?.returned_amount ?? 0,
-  balance: order?.balance ?? null,
+  supplier_id: order?.supplier_id ?? order?.supplierId ?? null,
+  supplier_name: order?.supplier_name ?? order?.supplierName ?? null,
+  total_amount: toOptionalNumber(order?.total_amount ?? order?.total_price) ?? 0,
+  total: toOptionalNumber(order?.total ?? order?.total_amount ?? order?.total_price) ?? 0,
+  total_paid: toOptionalNumber(order?.total_paid) ?? 0,
+  returned_amount: toOptionalNumber(order?.returned_amount) ?? 0,
+  balance: toOptionalNumber(order?.balance),
   payment_status: order?.payment_status ?? null,
   billing_type: order?.billing_type ?? order?.billingType ?? null,
-  payment_mode: order?.payment_mode ?? order?.payment_method ?? null,
+  payment_mode: normalizePaymentMode(order?.payment_mode ?? order?.payment_method ?? null),
+  transaction_type: normalizeTransactionType(order),
   payment_action: order?.payment_action ?? null,
   order_status: order?.order_status ?? null,
   is_gst_enabled: order?.is_gst_enabled === true || order?.gst_enabled === true,
   created_at: order?.created_at ?? null,
+  updated_at: order?.updated_at ?? order?.updatedAt ?? order?.created_at ?? null,
   };
 };
-
+const resolveOrderType = (order = {}) => {
+  return normalizeTransactionType(order);
+};
 export const upsertOrders = async (orders) => {
   const list = Array.isArray(orders) ? orders : [];
   const normalized = list.map(normalizeOrder).filter((item) => item.id !== null);
@@ -67,6 +98,10 @@ export const upsertOrders = async (orders) => {
     prepared.push(await validateAndPrepare('order', entry));
   }
   await db.orders.bulkPut(prepared);
+  const salePrepared = prepared.filter((entry) => resolveOrderType(entry) === 'sale');
+  const purchasePrepared = prepared.filter((entry) => resolveOrderType(entry) === 'purchase');
+  if (salePrepared.length) await db.sales_orders.bulkPut(salePrepared);
+  if (purchasePrepared.length) await db.purchase_orders.bulkPut(purchasePrepared);
   return normalized.length;
 };
 
@@ -159,14 +194,20 @@ const normalizePaymentRecord = (payment, order, index = 0) => {
 export const replaceAllOrders = async (orders) => {
   const list = Array.isArray(orders) ? orders : [];
   const normalized = list.map(normalizeOrder).filter((item) => item.id !== null);
-  await db.transaction('rw', db.orders, async () => {
+  await db.transaction('rw', db.orders, db.sales_orders, db.purchase_orders, async () => {
     await db.orders.clear();
+    await db.sales_orders.clear();
+    await db.purchase_orders.clear();
     if (normalized.length) {
       const prepared = [];
       for (const entry of normalized) {
         prepared.push(await validateAndPrepare('order', entry));
       }
       await db.orders.bulkPut(prepared);
+      const salePrepared = prepared.filter((entry) => resolveOrderType(entry) === 'sale');
+      const purchasePrepared = prepared.filter((entry) => resolveOrderType(entry) === 'purchase');
+      if (salePrepared.length) await db.sales_orders.bulkPut(salePrepared);
+      if (purchasePrepared.length) await db.purchase_orders.bulkPut(purchasePrepared);
     }
   });
   return normalized.length;
@@ -210,15 +251,63 @@ export const replaceCachedOrderItems = async (orderId, items = []) => {
   return prepared.length;
 };
 
+const getOrdersTableByType = (type = 'sale') =>
+  String(type || '').toLowerCase() === 'purchase' ? db.purchase_orders : db.sales_orders;
+
+export const getCachedOrdersByType = async (type = 'sale') => {
+  const table = getOrdersTableByType(type);
+  let list = await table.toArray();
+  if (!Array.isArray(list) || list.length === 0) {
+    const legacy = await db.orders.toArray();
+    const normalizedType = String(type || '').toLowerCase() === 'purchase' ? 'purchase' : 'sale';
+    const filteredLegacy = legacy.filter((row) => resolveOrderType(row) === normalizedType);
+    if (filteredLegacy.length) {
+      const prepared = [];
+      for (const entry of filteredLegacy) {
+        prepared.push(await validateAndPrepare('order', normalizeOrder(entry)));
+      }
+      await table.bulkPut(prepared);
+      list = prepared;
+    }
+  }
+  const sorted = (Array.isArray(list) ? list : [])
+    .slice()
+    .sort((a, b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
+  return sorted;
+};
+
+export const replaceCachedOrdersByType = async (type = 'sale', orders = []) => {
+  const table = getOrdersTableByType(type);
+  const list = Array.isArray(orders) ? orders : [];
+  const normalized = list.map(normalizeOrder).filter((item) => item.id !== null);
+  await db.transaction('rw', table, async () => {
+    await table.clear();
+    if (!normalized.length) return;
+    const prepared = [];
+    for (const entry of normalized) {
+      prepared.push(await validateAndPrepare('order', entry));
+    }
+    await table.bulkPut(prepared);
+  });
+  return normalized.length;
+};
+
+export const clearCachedOrdersByType = async (type = 'sale') => {
+  const table = getOrdersTableByType(type);
+  await table.clear();
+};
+
 export const getCachedOrderTransactions = async (orderId) => {
   const key = normalizeOrderKey(orderId);
   if (key === null) return [];
-  try {
-    return await db.transactions.where('order_id').equals(key).toArray();
-  } catch {
-    const all = await db.transactions.toArray();
-    return all.filter((txn) => String(txn?.order_id) === String(orderId));
-  }
+  const all = await db.transactions.toArray();
+  return all.filter((txn) => {
+    const directOrderId = String(txn?.order_id ?? txn?.orderId ?? '').trim();
+    const referenceType = String(txn?.reference_type ?? txn?.referenceType ?? '').trim().toLowerCase();
+    const referenceId = String(txn?.reference_id ?? txn?.referenceId ?? '').trim();
+    const target = String(orderId).trim();
+    return directOrderId === target || (referenceType === 'order' && referenceId === target);
+  });
 };
 
 export const upsertOrderDetailsCache = async ({ order, items, payments } = {}) => {
@@ -233,23 +322,6 @@ export const upsertOrderDetailsCache = async ({ order, items, payments } = {}) =
       let normalizedPayments = incomingPayments
         .map((payment, index) => normalizePaymentRecord(payment, order, index))
         .filter((payment) => Number(payment?.amount || 0) > 0);
-
-      if (!normalizedPayments.length) {
-        const totalPaid = Number(order?.total_paid || 0);
-        if (totalPaid > 0) {
-          normalizedPayments = [
-            normalizePaymentRecord(
-              {
-                id: `order-${order.id}-paid-summary`,
-                amount: totalPaid,
-                payment_mode: order?.payment_mode ?? order?.payment_method ?? 'cash',
-              },
-              order,
-              0
-            ),
-          ];
-        }
-      }
 
       if (normalizedPayments.length) {
         await saveTransactionsBulk(normalizedPayments);
@@ -338,21 +410,35 @@ export const getCachedOrdersByCustomer = async (customer = {}) => {
 };
 
 export const clearOrdersCache = async () => {
-  await db.orders.clear();
+  await db.transaction('rw', db.orders, db.sales_orders, db.purchase_orders, async () => {
+    await db.orders.clear();
+    await db.sales_orders.clear();
+    await db.purchase_orders.clear();
+  });
 };
 
 export const deleteOrdersByIds = async (ids = []) => {
   const list = Array.isArray(ids) ? ids.filter((id) => id !== null && id !== undefined) : [];
   if (!list.length) return 0;
-  await db.orders.bulkDelete(list);
+  await db.transaction('rw', db.orders, db.sales_orders, db.purchase_orders, async () => {
+    await db.orders.bulkDelete(list);
+    await db.sales_orders.bulkDelete(list);
+    await db.purchase_orders.bulkDelete(list);
+  });
   return list.length;
 };
 
 export default {
   upsertOrders,
   replaceAllOrders,
+  getCachedOrdersByType,
+  replaceCachedOrdersByType,
+  clearCachedOrdersByType,
   getCachedOrdersPage,
   getAllCachedOrders,
   clearOrdersCache,
   deleteOrdersByIds,
 };
+
+
+

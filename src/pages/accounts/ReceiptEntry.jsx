@@ -8,6 +8,13 @@ import { enqueueReceipt } from '../../utils/accountingOffline';
 import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './Accounts.css';
 
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '-';
+  return dt.toLocaleString();
+};
+
 const dedupeCustomers = (list = []) => {
   const seen = new Set();
   const out = [];
@@ -35,6 +42,7 @@ const ReceiptEntry = () => {
   const [customers, setCustomers] = useState([]);
   const [customerInput, setCustomerInput] = useState('');
   const [customerId, setCustomerId] = useState('');
+  const [orderId, setOrderId] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('cash');
   const [notes, setNotes] = useState('');
@@ -86,8 +94,10 @@ const ReceiptEntry = () => {
     const params = new URLSearchParams(location?.search || '');
     const partyType = String(params.get('party_type') || '').toLowerCase();
     const prefillCustomerId = prefill?.customerId ?? params.get('customer_id') ?? (partyType === 'customer' ? params.get('party_id') : '') ?? '';
+    const prefillOrderId = prefill?.orderId ?? params.get('order_id') ?? '';
     const prefillAmount = prefill?.amount ?? params.get('amount') ?? '';
     if (prefillCustomerId) setCustomerId(String(prefillCustomerId));
+    if (prefillOrderId) setOrderId(String(prefillOrderId));
     if (prefillAmount && Number(prefillAmount) > 0) setAmount(String(prefillAmount));
   }, [location?.state, location?.search]);
 
@@ -143,6 +153,7 @@ const ReceiptEntry = () => {
     const numericAmount = Number(amount);
     const nextErrors = collectValidationErrors([
       { key: 'customerId', validate: () => Boolean(customerId), message: 'Select a customer.' },
+      { key: 'orderId', validate: () => Boolean(String(orderId || '').trim()), message: 'Order ID is required.' },
       { key: 'amount', validate: () => Number.isFinite(numericAmount) && numericAmount > 0, message: 'Amount must be greater than 0.' },
       { key: 'paymentMode', validate: () => Boolean(paymentMode), message: 'Select a payment mode.' }
     ]);
@@ -155,6 +166,9 @@ const ReceiptEntry = () => {
     try {
       const payload = {
         customer_id: Number(customerId),
+        order_id: String(orderId).trim(),
+        reference_type: 'order',
+        reference_id: String(orderId).trim(),
         amount: numericAmount,
         payment_mode: paymentMode,
         notes,
@@ -169,6 +183,7 @@ const ReceiptEntry = () => {
       }
       setCustomerInput('');
       setCustomerId('');
+      setOrderId('');
       setAmount('');
       setNotes('');
       setErrors({});
@@ -210,6 +225,16 @@ const ReceiptEntry = () => {
           </datalist>
           {errors.customerId && <small className="text-danger">{errors.customerId}</small>}
           {loading && <small className="text-secondary">Loading customers...</small>}
+        </label>
+        <label>
+          Order ID *
+          <input
+            className={`form-control billing-input ${errors.orderId ? 'is-invalid' : ''}`}
+            value={orderId}
+            onChange={(event) => setOrderId(event.target.value)}
+            placeholder="Enter order id"
+          />
+          {errors.orderId && <small className="text-danger">{errors.orderId}</small>}
         </label>
         <label>
           Amount *
@@ -269,7 +294,7 @@ const ReceiptEntry = () => {
             )}
             {history.map((entry) => (
               <tr key={entry.id}>
-                <td>{entry.created_at ? new Date(entry.created_at).toLocaleDateString() : '-'}</td>
+                <td>{formatDateTime(entry.created_at)}</td>
                 <td>{entry.txn_type || '-'}</td>
                 <td>{entry.party_name || entry.party_id || '-'}</td>
                 <td>{entry.payment_mode || '-'}</td>

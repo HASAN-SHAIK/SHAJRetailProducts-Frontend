@@ -30,13 +30,25 @@ const broadcastUpdate = () => {
 export const enqueueOfflinePurchase = async (payload) => {
   const local_id = createLocalId();
   const created_at = new Date().toISOString();
+  const totalAmount = Number(payload.total_price || 0);
+  const normalizedMode = String(payload.payment_mode || '').toLowerCase() === 'online'
+    ? 'upi'
+    : String(payload.payment_mode || '').toLowerCase();
+  const isCreditPurchase = normalizedMode === 'credit';
+  const paidAmount = Number(payload.paid_amount ?? payload.total_paid ?? (isCreditPurchase ? 0 : totalAmount));
+  const balanceAmount = Math.max(Number(payload.balance ?? (totalAmount - paidAmount)), 0);
+  const paymentStatus = balanceAmount > 0 ? 'pending' : 'paid';
   const purchase = {
     id: local_id,
     supplierId: payload.supplier_id ?? null,
     branchId: payload.branch_id ?? null,
     invoiceNumber: payload.invoice_number ?? null,
-    paymentMode: payload.payment_mode ?? null,
-    totalPrice: payload.total_price ?? null,
+    paymentMode: normalizedMode || null,
+    totalPrice: totalAmount,
+    paidAmount,
+    totalPaid: paidAmount,
+    balance: balanceAmount,
+    paymentStatus,
     createdAt: created_at,
     date: created_at,
     syncStatus: STATUS_PENDING,
@@ -74,22 +86,24 @@ export const enqueueOfflinePurchase = async (payload) => {
   if (payload.supplier_id) {
     const supplierId = String(payload.supplier_id);
     const supplier = await getSupplierCacheById(payload.supplier_id);
-    const amount = Number(payload.total_price || 0);
+    const amount = Math.max(balanceAmount, 0);
     const currentBalance = Number(supplier?.current_balance || 0);
     const nextBalance = supplier ? currentBalance + amount : null;
     const ledgerEntry = {
       id: local_id,
       supplier_id: supplierId,
-      type: 'purchase',
+      type: isCreditPurchase ? 'supplier_payable' : 'purchase',
       amount,
-      payment_mode: payload.payment_mode || null,
+      payment_mode: isCreditPurchase ? null : (normalizedMode || null),
       running_balance: nextBalance,
       created_at,
       sync_status: STATUS_PENDING,
     };
-    await upsertSupplierLedgerEntry(ledgerEntry).catch(() => {});
-    if (supplier) {
-      await updateSuppliersCacheBulk([{ ...supplier, current_balance: nextBalance }]).catch(() => {});
+    if (amount > 0) {
+      await upsertSupplierLedgerEntry(ledgerEntry).catch(() => {});
+      if (supplier) {
+        await updateSuppliersCacheBulk([{ ...supplier, current_balance: nextBalance }]).catch(() => {});
+      }
     }
   }
 
