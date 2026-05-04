@@ -17,6 +17,8 @@ const Login = ( ) => {
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [offlineSessionUser, setOfflineSessionUser] = useState(null);
+  const resumeEmail = process.env.REACT_APP_RESUME_EMAIL || 'admin@hasan.com';
+  const resumePassword = process.env.REACT_APP_RESUME_PASSWORD || 'admin';
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const handleChange = (e) => {
@@ -114,7 +116,11 @@ const Login = ( ) => {
        <img className='companyLogo' src={logo} alt="SHAJ Logo" width="30%" height="20%"/>
       <div className="login-container">
         <h2 className="tenant-name">SHAJ NextGen Technologies</h2>
-        { process.env.REACT_APP_FOR_RESUME && <p className='demoCredentials'>Demo credentials: admin@hasan.com / admin</p> }
+        {process.env.REACT_APP_FOR_RESUME && (
+          <p className='demoCredentials'>
+            Demo credentials: {resumeEmail} / {resumePassword}
+          </p>
+        )}
         {/* <p className='disabled'>Use password 'admin'</p> */}
       <div className="floating-shape logincube green"></div>
       <div className="floating-shape logincircle red"></div>
