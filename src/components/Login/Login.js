@@ -99,6 +99,11 @@ const Login = () => {
       }
 
       dispatch(setUserDetails(userPayload));
+      try {
+        localStorage.removeItem('selected_branch_id');
+      } catch (storageErr) {
+        // Ignore storage failures
+      }
       setIsLoading(false);
       navigate('/setup');
     } catch (err) {

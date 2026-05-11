@@ -42,6 +42,8 @@ const probeServerReachability = async () => {
 // 🔐 REGISTER INTERCEPTOR HERE (ONCE)
 api.interceptors.request.use(
   async (config) => {
+    const requestUrl = String(config?.url || '');
+    const isAuthEndpoint = requestUrl.includes('/auth/');
     config.metadata = {
       startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
     };
@@ -50,7 +52,7 @@ api.interceptors.request.use(
     config.headers['x-device-id'] = deviceId;
     try {
       const selectedBranchId = localStorage.getItem('selected_branch_id');
-      if (selectedBranchId && selectedBranchId !== 'all') {
+      if (!isAuthEndpoint && selectedBranchId && selectedBranchId !== 'all') {
         config.headers['x-branch-id'] = selectedBranchId;
       }
     } catch (err) {
