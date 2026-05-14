@@ -12,6 +12,21 @@ const api = axios.create({
 });
 
 let serverReachabilityProbe = null;
+const shouldTriggerAuthExpired = (error) => {
+  const status = error?.response?.status;
+  if (status !== 401) return false;
+  const url = String(error?.config?.url || '').toLowerCase();
+  if (url.includes('/auth/getlogin')) return true;
+  const code = String(error?.response?.data?.code || '').toLowerCase();
+  const message = String(error?.response?.data?.message || '').toLowerCase();
+  if (code.includes('invalid') && code.includes('token')) return true;
+  if (message.includes('invalid token')) return true;
+  if (message.includes('token expired')) return true;
+  if (message.includes('jwt')) return true;
+  if (message.includes('unauthorized')) return true;
+  return false;
+};
+
 const probeServerReachability = async () => {
   if (serverReachabilityProbe) return serverReachabilityProbe;
 
@@ -101,11 +116,7 @@ api.interceptors.response.use(
         console.log('[cacheDB] reset preload flag on logout');
       }
       if (url.includes('/auth/login')) {
-        window.dispatchEvent(new CustomEvent('login-success'));
-        console.log('[cacheDB] login success detected');
-        preloadAllCaches().catch((err) => {
-          console.error('[cacheDB] preload failed', err);
-        });
+        console.log('[cacheDB] login response received');
       }
     }
     return response;
@@ -142,7 +153,7 @@ api.interceptors.response.use(
     }
     const status = error?.response?.status;
     if (typeof window !== 'undefined') {
-      if (status === 401) {
+      if (shouldTriggerAuthExpired(error)) {
         window.dispatchEvent(new CustomEvent('auth-expired'));
       }
       if (status === 402) {
