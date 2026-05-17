@@ -318,31 +318,18 @@ const OrdersPage = ({ navigate }) => {
     }
   }, [buildRangeParams, customEndDate, customStartDate, navigate, selectedRange, showPopup, loadCachedOrders, pagination.page, ORDER_CACHE_FULL_SYNC_LIMIT, ORDER_CACHE_PAGE_SIZE, searchQuery, syncOrdersSince]);
 
-  const fetchOrders = useCallback(async () => {
-    if (selectedRange === 'custom' && (!customStartDate || !customEndDate)) {
-      return;
-    }
-    setIsLoading(true);
-    setErrorMessage('');
-    try {
-      await loadCachedOrders();
-    } finally {
-      setIsLoading(false);
-    }
-  }, [customEndDate, customStartDate, loadCachedOrders, selectedRange]);
-
   useEffect(() => {
     loadCachedOrders();
   }, [loadCachedOrders, customRangeKey]);
 
   useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders, customRangeKey]);
+    fetchOrdersFromServer();
+  }, [fetchOrdersFromServer, customRangeKey]);
 
   useEffect(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
-    fetchOrders();
-  }, [selectedBranchId, fetchOrders]);
+    fetchOrdersFromServer();
+  }, [selectedBranchId, fetchOrdersFromServer]);
 
   useEffect(() => {
     const refreshPending = async () => {
