@@ -328,8 +328,7 @@ const OrdersPage = ({ navigate }) => {
 
   useEffect(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
-    fetchOrdersFromServer();
-  }, [selectedBranchId, fetchOrdersFromServer]);
+  }, [selectedBranchId]);
 
   useEffect(() => {
     const refreshPending = async () => {
