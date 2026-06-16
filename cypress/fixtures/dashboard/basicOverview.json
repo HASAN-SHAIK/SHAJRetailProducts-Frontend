@@ -1,0 +1,20 @@
+{
+  "range": "this_month",
+  "date_range": { "start_date": "2026-03-01", "end_date": "2026-03-31" },
+  "products": {
+    "total": 1200,
+    "low_stock": 18,
+    "expiring_30_days": 12,
+    "expiring_7_days": 4,
+    "expired": 2
+  },
+  "orders": {
+    "total": 540,
+    "pending": 7,
+    "completed": 528
+  },
+  "revenue": {
+    "total": 1250000.5
+  }
+}
+

@@ -1,0 +1,7 @@
+{
+  "locations": [
+    { "city": "Hyderabad", "revenue": 250000, "orders": 320, "growth_percent": 12.5 },
+    { "city": "Bengaluru", "revenue": 300000, "orders": 410, "growth_percent": 8.2 }
+  ]
+}
+

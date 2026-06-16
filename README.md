@@ -68,3 +68,30 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 ### `npm run build` fails to minify
 
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+
+## End-to-End Tests (Cypress)
+
+Environment variables:
+- `CYPRESS_BASE_URL` (default: `http://localhost:3000`)
+- `CYPRESS_API_URL` (default: `http://localhost:5000/api`)
+- `CYPRESS_EMAIL` and `CYPRESS_PASSWORD` for `cy.login()`
+
+Run tests headless:
+
+```bash
+set CYPRESS_BASE_URL=http://localhost:3000
+set CYPRESS_API_URL=http://localhost:5000/api
+set CYPRESS_EMAIL=admin@example.com
+set CYPRESS_PASSWORD=secret
+npm run test:e2e
+```
+
+Run tests interactively:
+
+```bash
+npm run test:e2e:open
+```
+
+Key files added:
+- `cypress/e2e/adminDashboard.cy.js` – UI + API assertions for Admin Dashboard
+- `cypress/fixtures/dashboard/*` – stub payloads for deterministic tests
