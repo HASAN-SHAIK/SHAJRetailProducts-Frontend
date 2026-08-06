@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { preloadProductsToIndexedDb } from '../../utils/indexedDb';
-import api from '../../utils/axios';
+import { getDashboard, getSalesSummary } from '../../services/local';
 import MobileShell from '../components/MobileShell';
 import MetricCard from '../components/MetricCard';
 import SectionCard from '../components/SectionCard';
@@ -28,8 +28,8 @@ const DashboardMobile = () => {
     let active = true;
     const fetchDashboard = async () => {
       try {
-        const res = await api.get('/mobile/dashboard');
-        if (active) setDashboard(res.data || null);
+        const payload = await getDashboard();
+        if (active) setDashboard(payload || null);
       } catch {
         if (active) setDashboard(null);
       } finally {
@@ -46,8 +46,8 @@ const DashboardMobile = () => {
     let active = true;
     const fetchSummary = async () => {
       try {
-        const res = await api.get('/mobile/sales-summary');
-        if (active) setSummary(res.data || null);
+        const payload = await getSalesSummary();
+        if (active) setSummary(payload || null);
       } catch {
         if (active) setSummary(null);
       } finally {

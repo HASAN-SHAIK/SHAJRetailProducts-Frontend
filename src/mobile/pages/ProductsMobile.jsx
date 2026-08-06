@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import api from '../../utils/axios';
+import { searchProductsMobile } from '../../Repositories/api/productApiClient';
 import { searchLocalProducts, normalizeDisplayProduct } from '../../utils/localProductSearch';
 import MobileShell from '../components/MobileShell';
 import SectionCard from '../components/SectionCard';
@@ -18,30 +18,7 @@ const searchRemoteProducts = async (query) => {
   const text = String(query || '').trim();
   if (!text) return [];
   try {
-    const saleResponse = await api.get('/products/search/sale', {
-      params: { name: text },
-    });
-    const saleList =
-      saleResponse?.data?.data?.products ||
-      saleResponse?.data?.products ||
-      saleResponse?.data?.data ||
-      [];
-    if (Array.isArray(saleList) && saleList.length) {
-      return saleList;
-    }
-  } catch {
-    // fall through to generic endpoint
-  }
-  try {
-    const fallbackResponse = await api.get('/products/search', {
-      params: { view: 'mobile', q: text, name: text },
-    });
-    const fallbackList =
-      fallbackResponse?.data?.data?.products ||
-      fallbackResponse?.data?.products ||
-      fallbackResponse?.data?.data ||
-      [];
-    return Array.isArray(fallbackList) ? fallbackList : [];
+    return await searchProductsMobile(text);
   } catch {
     return [];
   }

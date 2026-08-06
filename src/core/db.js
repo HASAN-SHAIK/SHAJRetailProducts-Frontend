@@ -548,7 +548,7 @@ const normalizeBatch = (batch) => {
     expiry_date: batch.expiry_date ?? batch.expiryDate ?? null,
     purchase_price: batch.purchase_price ?? batch.purchasePrice ?? null,
     selling_price: batch.selling_price ?? batch.sellingPrice ?? null,
-    mrp: batch.mrp ?? null,
+    mrp: batch.mrp ?? batch.mrp_price ?? batch.mrpPrice ?? null,
     quantity: batch.quantity ?? 0,
     quantity_remaining: batch.quantity_remaining ?? batch.quantityRemaining ?? batch.quantity ?? 0,
     sync_version: batch.sync_version ?? batch.syncVersion ?? 1,
@@ -920,11 +920,18 @@ const ENTITY_SCHEMAS = {
       'status',
       'order_id',
       'type',
+      'module',
+      'entityType',
       'entityId',
       'action',
       'refId',
       'payload',
       'payload_hash',
+      'priority',
+      'client_id',
+      'clientId',
+      'last_error',
+      'lastError',
       'retry_count',
       'retryCount',
       'createdAt',
@@ -1305,11 +1312,13 @@ export const validateAndPrepare = async (entityType, data) => {
         payload.status = 'pending';
       }
       const hashPayload = {
+        module: payload.module,
         type: payload.type,
         action: payload.action,
         entityId: payload.entityId,
         order_id: payload.order_id,
         refId: payload.refId,
+        client_id: payload.client_id || payload.clientId,
         payload: payload.payload,
       };
       payload.payload_hash = hashString(stableStringify(hashPayload));
@@ -1551,7 +1560,14 @@ export const updateBatchesBulk = async (batches) => {
     if (!local) return true;
     const localVersion = Number(local.sync_version ?? 0);
     const serverVersion = Number(batch.sync_version ?? 0);
-    return serverVersion > localVersion;
+    const fillsMissingValue = ['purchase_price', 'selling_price', 'mrp'].some(
+      (field) =>
+        (local[field] === undefined || local[field] === null || local[field] === '') &&
+        batch[field] !== undefined &&
+        batch[field] !== null &&
+        batch[field] !== ''
+    );
+    return serverVersion > localVersion || fillsMissingValue;
   });
   if (!toUpsert.length) return 0;
   const prepared = [];
@@ -1593,6 +1609,16 @@ export const getLatestBatchForProduct = async (productId, branchId = null) => {
     return bTime - aTime;
   });
   return filtered[0] || null;
+};
+
+export const getBatchesForProduct = async (productId, branchId = null) => {
+  if (!productId) return [];
+  const list = await db.batches_cache.where('product_id').equals(productId).toArray();
+  return list.filter((batch) => {
+    if (batch?.is_deleted) return false;
+    if (branchId && batch.branch_id && String(batch.branch_id) !== String(branchId)) return false;
+    return true;
+  });
 };
 
 export const getProductByBarcode = async (barcode, branchId = null) => {

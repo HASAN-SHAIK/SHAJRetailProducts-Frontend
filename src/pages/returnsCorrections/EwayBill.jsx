@@ -1,8 +1,8 @@
-﻿import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
-import { db, getLocalEwayBills, upsertLocalEwayBill } from '../../core/db';
+import { getAllOrderRecords, getEwayBills, upsertLocalEwayBill } from '../../services/local';
 import './ReturnsCorrections.css';
 
 const EwayBill = () => {
@@ -31,14 +31,14 @@ const EwayBill = () => {
   };
 
   const loadOrders = useCallback(async () => {
-    const list = await db.orders.toArray();
+    const list = await getAllOrderRecords();
     setOrders(list);
   }, []);
 
   const loadEways = useCallback(async () => {
     setIsLoading(true);
     try {
-      const list = await getLocalEwayBills();
+      const list = await getEwayBills();
       setEwayBills(list);
     } finally {
       setIsLoading(false);

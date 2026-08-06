@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import api from '../../utils/axios';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
-import { getAllCustomers, upsertCustomersBulk } from '../../core/db';
+import { getAllCustomers, searchCustomers } from '../../services/local';
 import { createReceipt, fetchReceiptEntries } from '../../services/accountingService';
 import { enqueueReceipt } from '../../utils/accountingOffline';
 import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
@@ -58,12 +57,10 @@ const ReceiptEntry = () => {
       let list = Array.isArray(cached) ? cached : [];
       setCustomers(dedupeCustomers(list));
       if (!navigator.onLine) return;
-      const res = await api.get('/customers', { params: { limit: 200 } });
-      const serverList = res?.data?.data?.customers || res?.data?.customers || [];
+      const serverList = await searchCustomers({ limit: 200 });
       if (Array.isArray(serverList) && serverList.length) {
-        upsertCustomersBulk(serverList).catch(() => {});
+        setCustomers(dedupeCustomers(serverList));
       }
-      setCustomers(dedupeCustomers(Array.isArray(serverList) ? serverList : list));
     } catch {
       setCustomers([]);
     } finally {

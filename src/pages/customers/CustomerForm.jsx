@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import api from '../../utils/axios';
-import { addSyncQueueItem, getCustomerById, replaceCustomerIdReferences, upsertCustomersBulk } from '../../core/db';
+import { addSyncQueueItem, createCustomer, getCustomerById, getCustomerDetail, replaceCustomerIdReferences, updateCustomer, upsertCustomersBulk } from '../../services/local';
 import { syncAllCustomers } from '../../utils/customersSync';
 import './Customers.css';
 
@@ -60,16 +59,15 @@ const CustomerForm = () => {
         setLoading(false);
         return;
       }
-      api.get(`/customers/${id}`)
-        .then((res) => {
-          const customer = res?.data?.data?.customer || res?.data?.customer || res?.data?.data?.customer;
-          if (customer) {
-            applyCustomer(customer);
-            upsertCustomersBulk([customer]).catch(() => {});
-          }
-        })
-        .catch(() => setError('Failed to load customer'))
-        .finally(() => setLoading(false));
+      const detail = await getCustomerDetail(resolveCustomerId(id));
+      const customer = detail?.customer || null;
+      if (customer) {
+        applyCustomer(customer);
+        upsertCustomersBulk([customer]).catch(() => {});
+      } else if (!cached) {
+        setError('Failed to load customer');
+      }
+      setLoading(false);
     })();
   }, [id, isEdit]);
 
@@ -103,17 +101,14 @@ const CustomerForm = () => {
       await upsertCustomersBulk([localCustomer]);
 
       let savedCustomer = null;
-      let response = null;
       let synced = false;
 
       if (navigator.onLine) {
         try {
           if (isEdit) {
-            response = await api.put(`/customers/${id}`, payload);
-            savedCustomer = response?.data?.data?.customer || response?.data?.customer || response?.data?.data || null;
+            savedCustomer = await updateCustomer(id, payload);
           } else {
-            response = await api.post('/customers', payload);
-            savedCustomer = response?.data?.data?.customer || response?.data?.customer || response?.data?.data || null;
+            savedCustomer = await createCustomer(payload);
           }
           synced = true;
         } catch {
@@ -122,10 +117,7 @@ const CustomerForm = () => {
       }
 
       if (synced && !savedCustomer) {
-        const possibleId = response?.data?.data?.id || response?.data?.id || null;
-        if (possibleId) {
-          savedCustomer = { ...payload, id: possibleId };
-        }
+        savedCustomer = null;
       }
 
       if (synced && savedCustomer) {

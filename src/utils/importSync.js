@@ -1,11 +1,11 @@
 import api from '../utils/axios';
+import { updateOfflineImportStatus } from '../services/local/offlineLocalService';
 import {
   addProductIdMapping,
   getSyncQueueItems,
-  updateSyncQueueItem,
-  updateOfflineImportStatus,
   replaceProductIdReferences,
-} from '../core/db';
+  updateSyncQueueItem,
+} from '../services/local/syncLocalService';
 
 let workerTimer = null;
 

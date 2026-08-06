@@ -1,5 +1,5 @@
 import api from './axios';
-import { exportLocalDbSnapshot, restoreLocalDbSnapshot } from '../core/db';
+import { exportLocalDbSnapshot, restoreLocalDbSnapshot } from '../services/local/backupLocalService';
 
 const textToHash = async (text) => {
   if (!window?.crypto?.subtle) return null;

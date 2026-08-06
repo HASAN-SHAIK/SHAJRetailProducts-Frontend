@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import api from '../../utils/axios';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
-import { getAllSuppliersCache, updateSuppliersCacheBulk } from '../../core/db';
+import { getAllSuppliersCache, searchSuppliers } from '../../services/local';
 import { createPayment, fetchPaymentEntries } from '../../services/accountingService';
 import { enqueuePayment } from '../../utils/accountingOffline';
 import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
@@ -62,11 +61,7 @@ const PaymentEntry = () => {
       let list = Array.isArray(cached) ? cached : [];
       setSuppliers(dedupeSuppliers(list));
       if (!navigator.onLine) return;
-      const res = await api.get('/suppliers', { params: { limit: 200 } });
-      const serverList = res?.data?.data?.suppliers || res?.data?.suppliers || [];
-      if (Array.isArray(serverList) && serverList.length) {
-        updateSuppliersCacheBulk(serverList).catch(() => {});
-      }
+      const serverList = await searchSuppliers({ limit: 200 });
       setSuppliers(dedupeSuppliers(Array.isArray(serverList) ? serverList : list));
     } catch {
       setSuppliers([]);

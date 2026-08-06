@@ -1,13 +1,5 @@
 import api from './axios';
-import {
-  db,
-  upsertLocalStaff,
-  upsertLocalSalary,
-  upsertLocalExpense,
-  deleteLocalStaff,
-  deleteLocalSalary,
-  deleteLocalExpense,
-} from '../core/db';
+import * as staffLocal from '../services/local/staffLocalService';
 
 const nowIso = () => new Date().toISOString();
 
@@ -18,7 +10,7 @@ const normalizeAction = (value) => {
 };
 
 const markStaffSynced = async (staff) => {
-  await upsertLocalStaff({
+  await staffLocal.upsertLocalStaff({
     ...staff,
     isSynced: true,
     syncAction: null,
@@ -27,7 +19,7 @@ const markStaffSynced = async (staff) => {
 };
 
 const markSalarySynced = async (salary) => {
-  await upsertLocalSalary({
+  await staffLocal.upsertLocalSalary({
     ...salary,
     isSynced: true,
     syncAction: null,
@@ -36,7 +28,7 @@ const markSalarySynced = async (salary) => {
 };
 
 const markExpenseSynced = async (expense) => {
-  await upsertLocalExpense({
+  await staffLocal.upsertLocalExpense({
     ...expense,
     isSynced: true,
     syncAction: null,
@@ -48,7 +40,7 @@ const syncStaffRecord = async (staff) => {
   const action = normalizeAction(staff.syncAction);
   if (action === 'DELETE') {
     await api.delete(`/staff/${encodeURIComponent(staff.staffId)}`);
-    await deleteLocalStaff(staff.staffId);
+    await staffLocal.deleteLocalStaff(staff.staffId);
     return;
   }
   const payload = {
@@ -72,7 +64,7 @@ const syncSalaryRecord = async (salary) => {
   const action = normalizeAction(salary.syncAction);
   if (action === 'DELETE') {
     await api.delete(`/salary/${encodeURIComponent(salary.salaryId)}`);
-    await deleteLocalSalary(salary.salaryId);
+    await staffLocal.deleteLocalSalary(salary.salaryId);
     return;
   }
   const payload = {
@@ -99,7 +91,7 @@ const syncExpenseRecord = async (expense) => {
   const action = normalizeAction(expense.syncAction);
   if (action === 'DELETE') {
     await api.delete(`/expenses/${encodeURIComponent(expense.expenseId)}`);
-    await deleteLocalExpense(expense.expenseId);
+    await staffLocal.deleteLocalExpense(expense.expenseId);
     return;
   }
   const payload = {
@@ -133,10 +125,9 @@ export const processStaffExpensesSync = async () => {
   if (!navigator.onLine) return { synced: [], failed: [] };
   const synced = [];
   const failed = [];
-  // Use toArray+filter to avoid IDB key-range edge cases on some IndexedDB states.
-  const staffPending = (await db.staff.toArray()).filter((entry) => entry?.isSynced !== true);
-  const salaryPending = (await db.salaries.toArray()).filter((entry) => entry?.isSynced !== true);
-  const expensePending = (await db.expenses.toArray()).filter((entry) => entry?.isSynced !== true);
+  const staffPending = (await staffLocal.getStaffRecords()).filter((entry) => entry?.isSynced !== true);
+  const salaryPending = (await staffLocal.getSalaryRecords()).filter((entry) => entry?.isSynced !== true);
+  const expensePending = (await staffLocal.getExpenseRecords()).filter((entry) => entry?.isSynced !== true);
 
   for (const staff of staffPending) {
     try {
@@ -181,29 +172,6 @@ export const processStaffExpensesSync = async () => {
   return { synced, failed };
 };
 
-const mergeRemoteRecords = async (table, records, idKey) => {
-  const list = Array.isArray(records) ? records : [];
-  if (!list.length) return;
-  const localMap = new Map((await table.toArray()).map((item) => [String(item[idKey]), item]));
-  const updates = [];
-  list.forEach((record) => {
-    const id = record[idKey];
-    if (!id) return;
-    const local = localMap.get(String(id));
-    if (local && local.isSynced === false) return;
-    updates.push({
-      ...local,
-      ...record,
-      isSynced: true,
-      syncAction: null,
-      updatedAt: record.updatedAt || record.updated_at || nowIso(),
-    });
-  });
-  if (updates.length) {
-    await table.bulkPut(updates);
-  }
-};
-
 export const syncAllStaffExpenses = async (options = {}) => {
   const queueResult = await processStaffExpensesSync();
   if (!navigator.onLine) return queueResult;
@@ -226,8 +194,7 @@ export const syncAllStaffExpenses = async (options = {}) => {
   const [staffRes, salaryRes, expenseRes] = remoteFetches;
 
   if (staffRes.status === 'fulfilled') {
-    await mergeRemoteRecords(
-      db.staff,
+    await staffLocal.mergeRemoteStaffRecords(
       staffRes.value?.data?.staff || staffRes.value?.data?.data || staffRes.value?.data || [],
       'staffId'
     );
@@ -236,8 +203,7 @@ export const syncAllStaffExpenses = async (options = {}) => {
   }
 
   if (salaryRes.status === 'fulfilled') {
-    await mergeRemoteRecords(
-      db.salaries,
+    await staffLocal.mergeRemoteSalaryRecords(
       salaryRes.value?.data?.salaries || salaryRes.value?.data?.data || salaryRes.value?.data || [],
       'salaryId'
     );
@@ -246,8 +212,7 @@ export const syncAllStaffExpenses = async (options = {}) => {
   }
 
   if (expenseRes.status === 'fulfilled') {
-    await mergeRemoteRecords(
-      db.expenses,
+    await staffLocal.mergeRemoteExpenseRecords(
       expenseRes.value?.data?.expenses || expenseRes.value?.data?.data || expenseRes.value?.data || [],
       'expenseId'
     );
@@ -256,19 +221,9 @@ export const syncAllStaffExpenses = async (options = {}) => {
   }
 
   emitSyncEvent();
-
-  const result = {
+  return {
     synced: queueResult?.synced || [],
-    failed: [...(queueResult?.failed || [])],
+    failed: queueResult?.failed || [],
     remoteErrors,
   };
-
-  if (!result.synced.length && result.failed.length && remoteErrors.length) {
-    const first = result.failed[0]?.message || remoteErrors[0] || 'sync failed';
-    const error = new Error(first);
-    error.details = result;
-    throw error;
-  }
-
-  return result;
 };

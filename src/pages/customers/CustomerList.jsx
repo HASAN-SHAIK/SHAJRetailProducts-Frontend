@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../../utils/axios';
-import { getAllCustomers, upsertCustomersBulk } from '../../core/db';
+import { getAllCustomers, searchCustomers, upsertCustomersBulk } from '../../services/local';
 import './Customers.css';
 
 const toCustomerIdentity = (customer) => {
@@ -55,10 +54,10 @@ const CustomerList = () => {
     try {
       await loadCustomersFromCache(term);
       if (!navigator.onLine) return;
-      const res = await api.get('/customers', {
-        params: term ? { search: term } : { limit: 500 },
+      const list = await searchCustomers({
+        search: term,
+        limit: term ? undefined : 500,
       });
-      const list = res?.data?.data?.customers || res?.data?.customers || [];
       const safe = dedupeCustomers(list);
       setCustomers(safe.length ? safe : filterLocalCustomers(await getAllCustomers(), term));
       if (safe.length) {

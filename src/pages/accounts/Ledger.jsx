@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import api from '../../utils/axios';
 import { fetchLedger } from '../../services/accountingService';
-import { getAllCustomers, getAllSuppliersCache, updateSuppliersCacheBulk, upsertCustomersBulk } from '../../core/db';
+import { getAllCustomers, getAllSuppliersCache, searchCustomers, searchSuppliers } from '../../services/local';
 import './Accounts.css';
 
 const formatDateTime = (value) => {
@@ -24,21 +23,15 @@ const Ledger = () => {
         const cached = await getAllCustomers();
         setParties(Array.isArray(cached) ? cached : []);
         if (!navigator.onLine) return;
-        const res = await api.get('/customers', { params: { limit: 500 } });
-        const list = res?.data?.data?.customers || res?.data?.customers || [];
+        const list = await searchCustomers({ limit: 500 });
         if (Array.isArray(list) && list.length) {
-          upsertCustomersBulk(list).catch(() => {});
+          setParties(list);
         }
-        setParties(Array.isArray(list) ? list : cached);
       } else {
         const cached = await getAllSuppliersCache();
         setParties(Array.isArray(cached) ? cached : []);
         if (!navigator.onLine) return;
-        const res = await api.get('/suppliers', { params: { limit: 500 } });
-        const list = res?.data?.data?.suppliers || res?.data?.suppliers || [];
-        if (Array.isArray(list) && list.length) {
-          updateSuppliersCacheBulk(list).catch(() => {});
-        }
+        const list = await searchSuppliers({ limit: 500 });
         setParties(Array.isArray(list) ? list : cached);
       }
     } catch {

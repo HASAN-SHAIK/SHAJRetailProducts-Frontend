@@ -1,6 +1,6 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import StaffExpensesHeader from '../../components/staffExpenses/StaffExpensesHeader';
-import { getLocalExpenses } from '../../core/db';
+import { getDailyExpenseReport } from '../../services/local';
 import './StaffExpenses.css';
 
 const ExpenseDailyReport = () => {
@@ -11,38 +11,22 @@ const ExpenseDailyReport = () => {
     const d = String(now.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   });
-  const [expenses, setExpenses] = useState([]);
+  const [summary, setSummary] = useState({ total: 0, categories: [] });
 
-  const loadExpenses = useCallback(async () => {
-    const list = await getLocalExpenses({ from: date, to: date });
-    setExpenses(list.filter((item) => !item.isDeleted));
+  const loadReport = useCallback(async () => {
+    const report = await getDailyExpenseReport({ date });
+    setSummary(report || { total: 0, categories: [] });
   }, [date]);
 
   useEffect(() => {
-    loadExpenses();
-  }, [loadExpenses]);
+    loadReport();
+  }, [loadReport]);
 
   useEffect(() => {
-    const handler = () => loadExpenses();
+    const handler = () => loadReport();
     window.addEventListener('staff-expenses-sync-updated', handler);
     return () => window.removeEventListener('staff-expenses-sync-updated', handler);
-  }, [loadExpenses]);
-
-  const summary = useMemo(() => {
-    const categoryMap = new Map();
-    let total = 0;
-    expenses.forEach((item) => {
-      const amount = Number(item.amount || 0);
-      total += amount;
-      const category = item.category || 'Uncategorized';
-      categoryMap.set(category, (categoryMap.get(category) || 0) + amount);
-    });
-    const categories = Array.from(categoryMap.entries()).map(([category, amount]) => ({
-      category,
-      amount,
-    }));
-    return { total, categories };
-  }, [expenses]);
+  }, [loadReport]);
 
   return (
     <div className="staff-expenses-page">
@@ -89,4 +73,3 @@ const ExpenseDailyReport = () => {
 };
 
 export default ExpenseDailyReport;
-

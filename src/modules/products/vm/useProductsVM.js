@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../../../utils/axios';
-import { getAllProducts } from '../../../core/db';
+import { getAllProducts } from '../../../services/local';
 import { runDeltaSync } from '../../../utils/deltaSync';
 
 export const useProductsVM = () => {

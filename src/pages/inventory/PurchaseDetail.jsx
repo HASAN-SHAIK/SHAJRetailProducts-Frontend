@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import api from '../../utils/axios';
-import { addLocalPurchaseItems, getLocalPurchaseById, getLocalPurchaseItems, upsertLocalPurchasesBulk } from '../../core/db';
+import { getPurchaseDetail } from '../../services/local/purchaseLocalService';
+import {
+  addLocalPurchaseItems,
+  getLocalPurchaseById,
+  getLocalPurchaseItems,
+  upsertLocalPurchasesBulk,
+} from '../../services/local';
 import './Suppliers.css';
 
 const PurchaseDetail = () => {
@@ -49,8 +54,7 @@ const PurchaseDetail = () => {
         });
         const serverPurchaseId = resolveServerPurchaseId(local.serverId || id);
         if (navigator.onLine && serverPurchaseId) {
-          const res = await api.get(`/purchases/${serverPurchaseId}`);
-          serverData = res?.data?.data || null;
+          serverData = await getPurchaseDetail(serverPurchaseId);
           setDetail(serverData);
         }
       } else if (!navigator.onLine) {
@@ -62,8 +66,7 @@ const PurchaseDetail = () => {
           setDetail(null);
           return;
         }
-        const res = await api.get(`/purchases/${serverPurchaseId}`);
-        serverData = res?.data?.data || null;
+        serverData = await getPurchaseDetail(serverPurchaseId);
         setDetail(serverData);
       }
       const data = serverData;

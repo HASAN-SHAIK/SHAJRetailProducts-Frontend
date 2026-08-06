@@ -1,3 +1,15 @@
+import {
+  createCorrectionRemote,
+  createOrderReturnRemote,
+  deleteCorrectionRemote,
+  deleteReturnRemote,
+  fetchCorrectionsRemote,
+  fetchOrderDetailRemote,
+  fetchReturnsRemote,
+  listOrdersRemote,
+  upsertCorrectionRemote,
+  upsertReturnRemote,
+} from '../Repositories/api/saleApiClient';
 import api from '../utils/axios';
 
 export const fetchAllSalesOrders = async () => {
@@ -7,49 +19,38 @@ export const fetchAllSalesOrders = async () => {
   const collected = [];
 
   do {
-    const res = await api.get('/orders', {
-      params: {
-        page,
-        limit,
-        range: 'all',
-        sort_by: 'created_at',
-        sort_order: 'desc',
-      },
+    const { list, pagination } = await listOrdersRemote({
+      page,
+      limit,
+      range: 'all',
+      sortBy: 'created_at',
+      sortOrder: 'desc',
     });
-    const payload = res?.data || {};
-    const list = Array.isArray(payload.orders) ? payload.orders : [];
     collected.push(...list);
-    totalPages = Number(payload?.pagination?.total_pages || 1);
+    totalPages = Number(pagination?.total_pages || 1);
     page += 1;
   } while (page <= totalPages);
 
   return collected.filter((order) => String(order?.transaction_type || '').toLowerCase() !== 'purchase');
 };
 
-export const fetchOrderDetails = async (orderId) => {
-  const res = await api.get(`/orders/${orderId}`);
-  return res?.data?.order || res?.data || null;
-};
+export const fetchOrderDetails = async (orderId) => fetchOrderDetailRemote(orderId);
 
-export const createOrderReturn = async (orderId, payload) => {
-  const res = await api.post(`/orders/${orderId}/returns`, payload);
-  return res?.data || {};
-};
+export const createOrderReturn = async (orderId, payload) => createOrderReturnRemote(orderId, payload);
 
-export const fetchReturns = async () => {
-  const res = await api.get('/returns');
-  return Array.isArray(res?.data?.returns) ? res.data.returns : [];
-};
+export const fetchReturns = async () => fetchReturnsRemote();
 
-export const fetchCorrections = async () => {
-  const res = await api.get('/corrections');
-  return Array.isArray(res?.data?.corrections) ? res.data.corrections : [];
-};
+export const fetchCorrections = async () => fetchCorrectionsRemote();
 
-export const createCorrection = async (payload) => {
-  const res = await api.post('/corrections', payload);
-  return res?.data || {};
-};
+export const createCorrection = async (payload) => createCorrectionRemote(payload);
+
+export const deleteReturn = async (returnId) => deleteReturnRemote(returnId);
+
+export const upsertReturn = async (returnId, payload) => upsertReturnRemote(returnId, payload);
+
+export const deleteCorrection = async (correctionId) => deleteCorrectionRemote(correctionId);
+
+export const upsertCorrection = async (correctionId, payload) => upsertCorrectionRemote(correctionId, payload);
 
 export const fetchGstSummary = async () => {
   const res = await api.get('/gst/summary');

@@ -7,10 +7,11 @@ import {
   addSyncQueueItem,
   getAllCustomers,
   getProductByBarcode,
+  searchCustomers,
   updateProductsBulk,
   upsertCustomerLocal,
   upsertCustomersBulk,
-} from '../../core/db';
+} from '../../services/local';
 import { searchLocalProducts } from '../../utils/localProductSearch';
 import { enqueueOfflineOrder, processOfflineQueue } from '../../utils/offlineOrders';
 import { enqueueReceipt } from '../../utils/accountingOffline';
@@ -405,13 +406,8 @@ const WholesaleBilling = () => {
         setCustomerSuggestions([]);
         return;
       }
-      const response = await api.get('/customers', { params: { search: text, limit: 10 } });
-      const results = response?.data?.data?.customers || response?.data?.customers || [];
-      const list = Array.isArray(results) ? results : [];
+      const list = await searchCustomers({ search: text, limit: 10 });
       setCustomerSuggestions(list);
-      if (list.length) {
-        upsertCustomersBulk(list).catch(() => {});
-      }
     } catch {
       setCustomerSuggestions([]);
     }

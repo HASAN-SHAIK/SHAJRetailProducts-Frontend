@@ -1,5 +1,9 @@
-import api from '../utils/axios';
-import { getSyncQueueItems, updateSyncQueueItem, replaceCustomerIdReferences } from '../core/db';
+import {
+  getSyncQueueItems,
+  replaceCustomerIdReferences,
+  updateSyncQueueItem,
+} from '../services/local/syncLocalService';
+import { createCustomerRemote, updateCustomerRemote } from '../Repositories/api/customerApiClient';
 
 let workerTimer = null;
 
@@ -43,13 +47,9 @@ export const syncAllCustomers = async () => {
     await updateSyncQueueItem({ ...entry, status: 'processing' });
     try {
       if (action === 'update' && entry.entityId) {
-        await api.put(`/customers/${entry.entityId}`, payload);
+        await updateCustomerRemote(entry.entityId, payload);
       } else {
-        const res = await api.post('/customers', payload);
-        const customer =
-          res?.data?.data?.customer ||
-          res?.data?.customer ||
-          res?.data?.data;
+        const customer = await createCustomerRemote(payload);
         if (customer?.id && entry.entityId && String(entry.entityId).startsWith('temp:')) {
           await replaceCustomerIdReferences(entry.entityId, customer.id);
         }

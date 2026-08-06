@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../../utils/axios';
 import { useBranchStore } from '../../store/branchStore';
-import { dedupeSuppliersCache, getLocalPurchases, upsertLocalPurchasesBulk, updateSuppliersCacheBulk } from '../../core/db';
+import { dedupeSuppliersCache, getLocalPurchases, listPurchases, searchSuppliers, upsertLocalPurchasesBulk } from '../../services/local';
 import { syncAllInventory } from '../../utils/inventorySync';
 import './Suppliers.css';
 
@@ -25,11 +24,7 @@ const PurchaseBook = () => {
         setSuppliers(cachedList);
       }
       if (!navigator.onLine || cachedList.length) return;
-      const res = await api.get('/suppliers', { params: { limit: 500, branch_id: effectiveBranchId } });
-      const list = res?.data?.data?.suppliers || res?.data?.suppliers || [];
-      if (Array.isArray(list) && list.length) {
-        updateSuppliersCacheBulk(list).catch(() => {});
-      }
+      const list = await searchSuppliers({ limit: 500, branchId: effectiveBranchId });
       setSuppliers(Array.isArray(list) ? list : []);
     } catch {
       setSuppliers([]);
@@ -64,13 +59,6 @@ const PurchaseBook = () => {
         if (invoice) return `${supplierId}|${invoice}|${dateKey}`;
         return `${supplierId}|${total}|${dateKey}`;
       };
-      const params = {
-        branch_id: effectiveBranchId,
-        supplier_id: filters.supplier_id || undefined,
-        start_date: filters.start_date || undefined,
-        end_date: filters.end_date || undefined,
-      };
-
       const deduplicatePurchases = (list) => {
         const choosePreferred = (a, b) => {
           if (!a) return b;
@@ -160,8 +148,12 @@ const PurchaseBook = () => {
         return;
       }
 
-      const res = await api.get('/purchases', { params });
-      const list = res?.data?.data?.purchases || res?.data?.purchases || [];
+      const list = await listPurchases({
+        branchId: effectiveBranchId,
+        supplierId: filters.supplier_id || undefined,
+        startDate: filters.start_date || undefined,
+        endDate: filters.end_date || undefined,
+      });
       if (Array.isArray(list) && list.length) {
         const mapped = list.map((purchase) => ({
           id: String(purchase.id),

@@ -1,7 +1,7 @@
-﻿﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import { useBranchStore } from '../../store/branchStore';
-import api from '../../utils/axios';
+import { createPurchase, importPurchasePdf } from '../../services/local/purchaseLocalService';
 import {
   dedupeSuppliersCache,
   getInventorySyncQueueEntries,
@@ -10,9 +10,10 @@ import {
   getLocalPurchases,
   getProductCacheByBarcode,
   saveSessionValue,
+  searchSuppliers,
   upsertSupplierLedgerEntry,
   updateSuppliersCacheBulk,
-} from '../../core/db';
+} from '../../services/local';
 import { upsertOrderDetailsCache } from '../../db/ordersDb';
 import { enqueueOfflinePurchase } from '../../utils/offlinePurchases';
 import { createPayment } from '../../services/accountingService';
@@ -344,10 +345,8 @@ const Purchase = () => {
         if (!cachedList.length) setSuppliers([]);
         return;
       }
-      const res = await api.get('/suppliers', { params: { limit: 500, branch_id: effectiveBranchId } });
-      const list = res?.data?.data?.suppliers || res?.data?.suppliers || [];
+      const list = await searchSuppliers({ limit: 500, branchId: effectiveBranchId });
       if (Array.isArray(list) && list.length) {
-        await updateSuppliersCacheBulk(list);
         const latest = await dedupeSuppliersCache();
         setSuppliers(Array.isArray(latest) ? latest : list);
       } else {
@@ -456,10 +455,7 @@ const Purchase = () => {
       if (effectiveBranchId) {
         formData.append('branch_id', effectiveBranchId);
       }
-      const res = await api.post('/purchase/import-pdf', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      const payload = res?.data?.data || {};
+      const payload = await importPurchasePdf(formData);
       const items = Array.isArray(payload.items) ? payload.items : [];
       if (!items.length) {
         showPopup('No items detected in import.', 'Import');
@@ -780,13 +776,8 @@ const Purchase = () => {
           showPopup('Credit purchase requires server connection. Please go online and retry.', 'Validation');
           return;
         }
-        const purchaseRes = await api.post('/purchases', payload);
-        const serverOrderId =
-          purchaseRes?.data?.data?.order_id ||
-          purchaseRes?.data?.order_id ||
-          purchaseRes?.data?.data?.id ||
-          purchaseRes?.data?.id ||
-          null;
+        const purchaseRes = await createPurchase(payload);
+        const serverOrderId = purchaseRes?.orderId ?? null;
         await writePurchaseOrderToCache(serverOrderId);
         if (supplierId && Number(totalAmount) > 0) {
           const supplier = await getSupplierCacheById(supplierId).catch(() => null);
@@ -815,13 +806,8 @@ const Purchase = () => {
       }
 
       if (navigator.onLine) {
-        const purchaseRes = await api.post('/purchases', payload);
-        const serverOrderId =
-          purchaseRes?.data?.data?.order_id ||
-          purchaseRes?.data?.order_id ||
-          purchaseRes?.data?.data?.id ||
-          purchaseRes?.data?.id ||
-          null;
+        const purchaseRes = await createPurchase(payload);
+        const serverOrderId = purchaseRes?.orderId ?? null;
         const normalizedMode = normalizePurchasePaymentMode(paymentMode);
         if (isImmediatePaymentMode(normalizedMode) && Number(totalAmount) > 0) {
           await createPayment({
@@ -1046,7 +1032,7 @@ const Purchase = () => {
                               <span className="purchase-suggestion-text">
                                 {item.__create
                                   ? `Create "${item.name}"`
-                                  : `${item.name || '-'}${item.company ? ` Â· ${item.company}` : ''}`}
+                                  : `${item.name || '-'}${item.company ? ` · ${item.company}` : ''}`}
                               </span>
                             </li>
                           ))}

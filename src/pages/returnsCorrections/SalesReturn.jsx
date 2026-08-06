@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
-import { db, getBatchCacheById, getLocalSalesReturns, upsertLocalCorrection, upsertLocalSalesReturn, upsertLocalGstEntry } from '../../core/db';
+import { getBatchCacheById, getLocalSalesReturns, getAllOrderRecords, getOrderItemsByOrderId, upsertLocalCorrection, upsertLocalSalesReturn, upsertLocalGstEntry } from '../../services/local';
 import { createCorrection, createOrderReturn, fetchAllSalesOrders } from '../../services/returnsCorrectionsApi';
 import './ReturnsCorrections.css';
 
@@ -37,7 +37,7 @@ const SalesReturn = () => {
         // fallback to local cache
       }
     }
-    const localList = await db.orders.toArray();
+    const localList = await getAllOrderRecords();
     setOrders(localList);
   }, []);
 
@@ -48,14 +48,7 @@ const SalesReturn = () => {
     }
     setItemsLoading(true);
     try {
-      let orderItems = [];
-      const idText = String(selectedOrderId).trim();
-      const idNum = Number(idText);
-      const orderItemsByText = await db.order_items.where('order_id').equals(idText).toArray();
-      const orderItemsByNumber = Number.isFinite(idNum)
-        ? await db.order_items.where('order_id').equals(idNum).toArray()
-        : [];
-      orderItems = orderItemsByText.length ? orderItemsByText : orderItemsByNumber;
+      const orderItems = await getOrderItemsByOrderId(selectedOrderId);
 
       const existingReturns = await getLocalSalesReturns({ billId: selectedOrderId });
       const returnedMap = new Map();

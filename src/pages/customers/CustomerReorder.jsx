@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../../utils/axios';
-import { getAllCustomers, upsertCustomersBulk } from '../../core/db';
+import { getAllCustomers, getCustomerDetail, getOrderDetail, searchCustomers, upsertCustomersBulk } from '../../services/local';
 import { getCachedOrderItems, getCachedOrdersByCustomer, upsertOrderDetailsCache } from '../../db/ordersDb';
 import './Customers.css';
 
@@ -124,10 +123,10 @@ const CustomerReorder = () => {
       const filteredCached = filterLocalCustomers(cachedList, term);
       setCustomers(filteredCached);
       if (filteredCached.length || !navigator.onLine) return;
-      const res = await api.get('/customers', {
-        params: term ? { search: term } : { limit: 500 },
+      const list = await searchCustomers({
+        search: term,
+        limit: term ? undefined : 500,
       });
-      const list = res?.data?.data?.customers || res?.data?.customers || [];
       const safe = dedupeCustomers(list);
       if (safe.length) {
         setCustomers(filterLocalCustomers(safe, term));
@@ -182,8 +181,7 @@ const CustomerReorder = () => {
       if (!shouldFallbackToApi) {
         return;
       }
-      const res = await api.get(`/customers/${customerId}`);
-      const payload = res?.data?.data || res?.data || {};
+      const payload = await getCustomerDetail(customerId);
       const apiOrders = Array.isArray(payload?.orders) ? payload.orders : [];
       if (apiOrders.length) {
         setOrders(apiOrders);
@@ -236,36 +234,19 @@ const CustomerReorder = () => {
       if (!shouldFallbackToApi) {
         return;
       }
-      const res = await api.get(`/orders/${orderId}`);
-      const payload = res?.data || {};
-      const fetchedOrder =
-        payload?.order ||
-        payload?.data?.order ||
-        payload?.data ||
-        {};
+      const remoteOrder = await getOrderDetail(orderId);
+      const fetchedOrder = remoteOrder || {};
       const apiItems = Array.isArray(fetchedOrder?.items)
         ? fetchedOrder.items
         : Array.isArray(fetchedOrder?.products)
           ? fetchedOrder.products
-          : Array.isArray(payload?.items)
-            ? payload.items
-            : Array.isArray(payload?.order_items)
-              ? payload.order_items
-              : Array.isArray(payload?.data?.items)
-                ? payload.data.items
-                : [];
+          : [];
       if (apiItems.length) {
         const payments = Array.isArray(fetchedOrder?.payment_history)
           ? fetchedOrder.payment_history
           : Array.isArray(fetchedOrder?.payments)
             ? fetchedOrder.payments
-            : Array.isArray(payload?.payments)
-              ? payload.payments
-              : Array.isArray(payload?.transactions)
-                ? payload.transactions
-                : Array.isArray(payload?.data?.payments)
-                  ? payload.data.payments
-                  : [];
+            : [];
         const orderForCache = fetchedOrder?.id ? fetchedOrder : { ...order, ...fetchedOrder };
         upsertOrderDetailsCache({ order: orderForCache, items: apiItems, payments }).catch(() => {});
       }

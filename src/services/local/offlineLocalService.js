@@ -1,0 +1,36 @@
+import { getOfflineRepository } from '../../RepositoryFactory';
+import { createRepositoryFacade } from './createRepositoryFacade';
+
+export const {
+  getOfflineOrders,
+  saveOfflineOrdersBulk,
+  upsertOfflineOrder,
+  deleteOfflineOrdersByIds,
+  getOfflineImports,
+  upsertOfflinePurchase,
+  addOfflinePurchaseItems,
+  getOfflinePurchases,
+  getOfflinePurchaseItems,
+  upsertOfflinePurchaseReturn,
+  getOfflinePurchaseReturns,
+  addOfflineImport,
+  getOfflineImportItems,
+  updateOfflineImport,
+  updateOfflineImportStatus,
+} = createRepositoryFacade(() => getOfflineRepository(), [
+  'getOfflineOrders',
+  'saveOfflineOrdersBulk',
+  'upsertOfflineOrder',
+  'deleteOfflineOrdersByIds',
+  'getOfflineImports',
+  'upsertOfflinePurchase',
+  'addOfflinePurchaseItems',
+  'getOfflinePurchases',
+  'getOfflinePurchaseItems',
+  'upsertOfflinePurchaseReturn',
+  'getOfflinePurchaseReturns',
+  'addOfflineImport',
+  'getOfflineImportItems',
+  'updateOfflineImport',
+  'updateOfflineImportStatus',
+]);

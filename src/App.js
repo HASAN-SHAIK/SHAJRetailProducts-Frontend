@@ -19,6 +19,7 @@ import { setTenantConfig, setTenantConfigStatus, setSubscriptionStatus, setTenan
 import SubscriptionExpired from './pages/SubscriptionExpired';
 import { decodeJwtPayload } from './utils/jwt';
 import { getAuthToken, migrateAuthTokenFromLocalStorage } from './utils/sessionStorage';
+import { ensureValidAccessToken } from './services/authService';
 import Support from './pages/Support';
 import { usePopup } from './components/common/PopUp/PopupProvider';
 import { getSettings } from './services/settingsService';
@@ -357,7 +358,10 @@ useEffect(() => {
   const loadToken = async () => {
     try {
       await migrateAuthTokenFromLocalStorage();
-      const token = await getAuthToken();
+      let token = await getAuthToken();
+      if (!token) {
+        token = await ensureValidAccessToken();
+      }
       const decoded = decodeJwtPayload(token);
       if (decoded && active) {
         dispatch(setTenantIdentity({
@@ -564,7 +568,7 @@ useEffect(() => {
   };
   window.addEventListener('online', syncOfflineOrders);
   window.addEventListener('offline-order-enqueued', handleQueueEnqueued);
-  syncInterval = setInterval(syncOfflineOrders, 15000);
+  syncInterval = setInterval(syncOfflineOrders, 60000);
   startInventorySyncWorker();
   startImportSyncWorker();
   startCustomerSyncWorker();
@@ -631,6 +635,7 @@ useEffect(() => {
     }
   };
   const handleSubscriptionExpired = () => {
+    dispatch(setSubscriptionStatus('inactive'));
     navigate('/subscription-expired');
   };
   const handleForbidden = (event) => {
@@ -645,7 +650,7 @@ useEffect(() => {
     window.removeEventListener('subscription-expired', handleSubscriptionExpired);
     window.removeEventListener('forbidden', handleForbidden);
   };
-}, [location.pathname, navigate, showPopup]);
+}, [dispatch, location.pathname, navigate, showPopup]);
 
 const showServerDownBanner = !isOnline || serverOffline;
 const showTenantBanner = tenantBanner?.enabled === true && location.pathname === '/dashboard';

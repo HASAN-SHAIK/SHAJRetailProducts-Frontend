@@ -1,7 +1,10 @@
 import api from './axios';
-import { saveBatchesBulk, saveCustomersBulk, saveProductsBulk, saveSessionValue, saveTransactionsBulk } from '../core/db';
-import { replaceAllOrders } from '../db/ordersDb';
-import { db } from '../core/db';
+import { saveBatchesBulk, saveProductsBulk } from '../services/local/productLocalService';
+import { saveCustomersBulk } from '../services/local/customerLocalService';
+import { fetchCustomers } from '../Repositories/api/customerApiClient';
+import { saveSessionValue } from '../services/local/sessionLocalService';
+import { saveTransactionsBulk } from '../services/local/transactionLocalService';
+import { getSalesAndPurchaseOrderCounts, listOrders, replaceAllOrders } from '../services/local/orderLocalService';
 import { runDeltaSync } from './deltaSync';
 
 const extractProductsPayload = (response) => {
@@ -69,8 +72,7 @@ const extractTransactionsPayload = (response) => {
 
 export const preloadCustomersToIndexedDb = async (options = {}) => {
   const limit = options?.limit || 2000;
-  const res = await api.get('/customers', { params: { limit } });
-  const customers = extractCustomersPayload(res);
+  const customers = await fetchCustomers({ limit });
   if (!customers.length) return 0;
   return await saveCustomersBulk(customers);
 };
@@ -82,16 +84,13 @@ export const preloadOrdersToIndexedDb = async (options = {}) => {
     let page = 1;
     const all = [];
     while (true) {
-      const res = await api.get('/orders', {
-        params: {
-          range: 'all',
-          page,
-          limit,
-          sort_by: 'created_at',
-          sort_order: 'asc',
-        },
+      const { list } = await listOrders({
+        range: 'all',
+        page,
+        limit,
+        sortBy: 'created_at',
+        sortOrder: 'asc',
       });
-      const { list } = extractOrdersPayload(res);
       if (!list.length) break;
       all.push(...list);
       if (all.length >= maxRecords || list.length < limit) break;
@@ -104,10 +103,7 @@ export const preloadOrdersToIndexedDb = async (options = {}) => {
 
     await replaceAllOrders(all);
 
-    const [salesStored, purchasesStored] = await Promise.all([
-      db.sales_orders.toArray(),
-      db.purchase_orders.toArray(),
-    ]);
+    const [salesStored, purchasesStored] = await getSalesAndPurchaseOrderCounts();
     await saveSessionValue('orders_last_sync', new Date().toISOString()).catch(() => {});
     console.log(
       `[orders-cache] Cached orders: fetched=${all.length}, sales=${salesStored.length}, purchases=${purchasesStored.length}`

@@ -1,4 +1,4 @@
-import { getAllProducts } from '../core/db';
+import { db } from '../core/db';
 
 const normalizeName = (product) =>
   product?.name ||
@@ -50,17 +50,45 @@ const dedupeProducts = (products = []) => {
   return Array.from(map.values());
 };
 
+const SEARCH_LIMIT = 50;
+
 export const searchLocalProducts = async (term) => {
   const query = String(term || '').trim().toLowerCase();
   if (!query) return [];
-  const products = dedupeProducts(await getAllProducts());
-  return products.filter((product) => {
-    if (product?.is_deleted) return false;
-    const name = normalizeName(product).toLowerCase();
-    const company = String(product?.company || '').toLowerCase();
-    const barcode = String(product?.barcode || '').toLowerCase();
-    return name.includes(query) || company.includes(query) || barcode.includes(query);
-  });
+
+  const candidates = [];
+  const barcode = String(term || '').trim();
+  if (barcode) {
+    const byBarcode = await db.products_cache.where('barcode').equals(barcode).toArray();
+    candidates.push(...byBarcode);
+  }
+
+  if (candidates.length < SEARCH_LIMIT) {
+    const byPrefix = await db.products_cache
+      .where('name_lower')
+      .startsWith(query)
+      .limit(SEARCH_LIMIT * 3)
+      .toArray();
+    candidates.push(...byPrefix);
+  }
+
+  if (candidates.length < SEARCH_LIMIT) {
+    const supplemental = await db.products_cache
+      .filter((product) => {
+        if (product?.is_deleted) return false;
+        const name = normalizeName(product).toLowerCase();
+        const company = String(product?.company || '').toLowerCase();
+        const barcodeValue = String(product?.barcode || '').toLowerCase();
+        return name.includes(query) || company.includes(query) || barcodeValue.includes(query);
+      })
+      .limit(SEARCH_LIMIT * 2)
+      .toArray();
+    candidates.push(...supplemental);
+  }
+
+  return dedupeProducts(candidates)
+    .filter((product) => !product?.is_deleted)
+    .slice(0, SEARCH_LIMIT);
 };
 
 export const normalizeDisplayProduct = (product) => {

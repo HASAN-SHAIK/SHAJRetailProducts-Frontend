@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
-import { getLocalCorrections } from '../../core/db';
+import { getLocalCorrections } from '../../services/local';
 import { fetchCorrections } from '../../services/returnsCorrectionsApi';
 import './ReturnsCorrections.css';
 

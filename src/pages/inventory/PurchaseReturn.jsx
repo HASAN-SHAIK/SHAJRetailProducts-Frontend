@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import api from '../../utils/axios';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import { useBranchStore } from '../../store/branchStore';
+import { getPurchaseDetail, listPurchases } from '../../services/local/purchaseLocalService';
 import {
   addLocalPurchaseItems,
   dedupeSuppliersCache,
@@ -9,8 +9,8 @@ import {
   getLocalPurchaseItems,
   getLocalPurchaseReturns,
   getLocalPurchases,
-  upsertLocalPurchasesBulk
-} from '../../core/db';
+  upsertLocalPurchasesBulk,
+} from '../../services/local';
 import { enqueueOfflinePurchaseReturn } from '../../utils/offlinePurchaseReturns';
 import { processInventorySyncQueue } from '../../utils/inventorySync';
 import { createPayment } from '../../services/accountingService';
@@ -90,8 +90,7 @@ const PurchaseReturn = () => {
         setPurchases([]);
         return;
       }
-      const res = await api.get('/purchases', { params: { branch_id: effectiveBranchId, limit: 200 } });
-      const list = res?.data?.data?.purchases || res?.data?.purchases || [];
+      const list = await listPurchases({ branchId: effectiveBranchId, limit: 200 });
       if (Array.isArray(list) && list.length) {
         const mapped = list.map((purchase) => ({
           id: String(purchase.id),
@@ -195,8 +194,8 @@ const PurchaseReturn = () => {
         purchaseId = serverPurchaseId;
       }
 
-      const res = await api.get(`/purchases/${purchaseId}`);
-      const data = res?.data?.data || null;
+      const serverData = await getPurchaseDetail(purchaseId);
+      const data = serverData || null;
       setDetail(data);
       if (data?.order) {
         const order = data.order;

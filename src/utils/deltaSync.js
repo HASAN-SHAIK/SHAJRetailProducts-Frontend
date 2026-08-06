@@ -1,16 +1,16 @@
-import api from './axios';
+import { getConfigValue, saveConfigValue } from '../services/local/configLocalService';
 import {
   deleteBatchesCacheByIds,
   deleteProductsCacheByIds,
-  deleteSuppliersCacheByIds,
-  getConfigValue,
-  saveConfigValue,
   updateBatchesBulk,
   updateProductsBulk,
-  updateSuppliersCacheBulk,
-} from '../core/db';
+} from '../services/local/productLocalService';
+import { deleteSuppliersCacheByIds, updateSuppliersCacheBulk } from '../services/local/supplierLocalService';
+import { fetchBatchesDelta, fetchProductsDelta } from '../Repositories/api/productApiClient';
+import { fetchSuppliersDelta } from '../Repositories/api/supplierApiClient';
 
 const SYNC_KEY = 'delta_sync_state_v1';
+let deltaSyncInFlight = null;
 
 const parseSyncState = (value) => {
   if (!value) return {};
@@ -35,18 +35,15 @@ const setLastSync = async (moduleKey, timestamp) => {
   await saveConfigValue(SYNC_KEY, state);
 };
 
-const buildSyncParams = (updatedAfter, branchId) => {
-  const params = {};
-  if (updatedAfter) params.updated_after = updatedAfter;
-  if (branchId) params.branch_id = branchId;
-  return params;
-};
+const buildSyncParams = (updatedAfter, branchId) => ({
+  updatedAfter,
+  branchId,
+});
 
-const handleSyncResponse = async ({ moduleKey, response, upsert, drop }) => {
-  const payload = response?.data ?? {};
-  const data = Array.isArray(payload.data) ? payload.data : [];
-  const deletedIds = Array.isArray(payload.deleted_ids) ? payload.deleted_ids : [];
-  const serverTime = payload.server_time || new Date().toISOString();
+const handleSyncResponse = async ({ moduleKey, payload, upsert, drop }) => {
+  const data = Array.isArray(payload?.data) ? payload.data : [];
+  const deletedIds = Array.isArray(payload?.deletedIds) ? payload.deletedIds : [];
+  const serverTime = payload?.serverTime || new Date().toISOString();
 
   if (data.length) {
     await upsert(data).catch(() => {});
@@ -60,47 +57,46 @@ const handleSyncResponse = async ({ moduleKey, response, upsert, drop }) => {
 
 export const runDeltaSync = async (options = {}) => {
   if (!navigator.onLine) return null;
+  if (deltaSyncInFlight) return deltaSyncInFlight;
+
+  deltaSyncInFlight = (async () => {
   const branchId = options?.branchId || null;
   const forceFull = options?.forceFull === true;
   const results = {};
 
   const productsSince = forceFull ? null : await getLastSync('products');
-  const productsRes = await api.get('/sync/products', {
-    params: buildSyncParams(productsSince, branchId),
-    headers: branchId ? { 'x-branch-id': branchId } : undefined,
-  });
+  const productsPayload = await fetchProductsDelta(buildSyncParams(productsSince, branchId));
   results.products = await handleSyncResponse({
     moduleKey: 'products',
-    response: productsRes,
+    payload: productsPayload,
     upsert: updateProductsBulk,
     drop: deleteProductsCacheByIds,
   });
 
   const batchesSince = forceFull ? null : await getLastSync('batches');
-  const batchesRes = await api.get('/sync/batches', {
-    params: buildSyncParams(batchesSince, branchId),
-    headers: branchId ? { 'x-branch-id': branchId } : undefined,
-  });
+  const batchesPayload = await fetchBatchesDelta(buildSyncParams(batchesSince, branchId));
   results.batches = await handleSyncResponse({
     moduleKey: 'batches',
-    response: batchesRes,
+    payload: batchesPayload,
     upsert: updateBatchesBulk,
     drop: deleteBatchesCacheByIds,
   });
 
   const suppliersSince = forceFull ? null : await getLastSync('suppliers');
-  const suppliersRes = await api.get('/sync/suppliers', {
-    params: buildSyncParams(suppliersSince, branchId),
-    headers: branchId ? { 'x-branch-id': branchId } : undefined,
-  });
+  const suppliersPayload = await fetchSuppliersDelta(buildSyncParams(suppliersSince, branchId));
   results.suppliers = await handleSyncResponse({
     moduleKey: 'suppliers',
-    response: suppliersRes,
+    payload: suppliersPayload,
     upsert: updateSuppliersCacheBulk,
     drop: deleteSuppliersCacheByIds,
   });
 
   return results;
+  })().finally(() => {
+    deltaSyncInFlight = null;
+  });
+
+  return deltaSyncInFlight;
 };
 
 export const resetDeltaSyncState = async () => {

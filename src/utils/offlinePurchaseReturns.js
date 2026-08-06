@@ -2,9 +2,11 @@ import {
   addLocalBatchCache,
   getBatchCacheById,
   updateProductsCacheStock,
-  upsertLocalPurchaseReturn,
+} from '../services/local/productLocalService';
+import {
   getLocalPurchaseReturns,
-} from '../core/db';
+  upsertLocalPurchaseReturn,
+} from '../services/local/purchaseLocalService';
 import { enqueueInventorySync, processInventorySyncQueue } from './inventorySync';
 
 const STATUS_PENDING = 'pending';

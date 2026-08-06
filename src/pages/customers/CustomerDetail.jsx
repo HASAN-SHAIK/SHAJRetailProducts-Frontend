@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import api from '../../utils/axios';
-import { getCustomerById, upsertCustomersBulk } from '../../core/db';
+import { getCustomerById, getCustomerDetail, upsertCustomersBulk } from '../../services/local';
 import { getCachedOrdersByCustomer, upsertOrders } from '../../db/ordersDb';
 import './Customers.css';
 
@@ -29,8 +28,7 @@ const CustomerDetail = () => {
       return;
     }
     try {
-      const res = await api.get(`/customers/${id}`);
-      const payload = res?.data?.data || null;
+      const payload = await getCustomerDetail(id);
       setData(payload);
       if (payload?.customer) {
         upsertCustomersBulk([payload.customer]).catch(() => {});

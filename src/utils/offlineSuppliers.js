@@ -1,9 +1,9 @@
 import {
-  updateSuppliersCacheBulk,
-  getSupplierCacheById,
   deleteSuppliersCacheByIds,
+  getSupplierCacheById,
+  updateSuppliersCacheBulk,
   upsertLocalSupplier,
-} from '../core/db';
+} from '../services/local/supplierLocalService';
 import { enqueueInventorySync, processInventorySyncQueue } from './inventorySync';
 
 const createLocalId = () => `temp_${Date.now()}`;

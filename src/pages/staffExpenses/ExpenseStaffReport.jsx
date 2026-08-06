@@ -1,6 +1,6 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import StaffExpensesHeader from '../../components/staffExpenses/StaffExpensesHeader';
-import { getLocalExpenses, getLocalStaff } from '../../core/db';
+import { getLocalStaff, getStaffExpenses } from '../../services/local';
 import './StaffExpenses.css';
 
 const ExpenseStaffReport = () => {
@@ -14,7 +14,7 @@ const ExpenseStaffReport = () => {
   }, []);
 
   const loadExpenses = useCallback(async () => {
-    const list = await getLocalExpenses({ type: 'staff', staffId: staffId || undefined });
+    const list = await getStaffExpenses({ type: 'staff', staffId: staffId || undefined });
     setExpenses(list.filter((item) => !item.isDeleted));
   }, [staffId]);
 

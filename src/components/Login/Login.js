@@ -2,15 +2,15 @@
 
 import React, { useState } from 'react';
 import './Login.css';
-import api from '../../utils/axios';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
-import { setUserDetails } from '../../store/userSlice'; // Assuming you have a Redux slice for user details
+import { setUserDetails } from '../../store/userSlice';
 import logo from '../../Images/logo.png';
 import { getDeviceId } from '../../utils/device';
 import { decodeJwtPayload } from '../../utils/jwt';
 import { setTenantIdentity } from '../../store/tenantSlice';
-import { getAuthToken, getSessionInfo, saveAuthToken, saveSessionInfo } from '../../utils/sessionStorage';
+import { getAuthToken, getSessionInfo } from '../../utils/sessionStorage';
+import { login as sqlLogin } from '../../services/authService';
 
 const Login = ( ) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -32,14 +32,17 @@ const Login = ( ) => {
 
     try {
       const deviceId = getDeviceId();
-      const res = await api.post('/auth/login', {device_id: deviceId, ...form}); // Set-Cookie works if backend handles it
+      const data = await sqlLogin({
+        device_id: deviceId,
+        remember_me: true,
+        ...form,
+      });
       let decoded = null;
-      if (res.data?.token && typeof window !== 'undefined') {
+      if (data?.token && typeof window !== 'undefined') {
         try {
-          await saveAuthToken(res.data.token);
-          decoded = decodeJwtPayload(res.data.token);
+          decoded = decodeJwtPayload(data.token);
         } catch (err) {
-          // Ignore storage failures (private mode / blocked storage)
+          // Ignore decode failures
         }
       }
       if (decoded) {
@@ -49,20 +52,12 @@ const Login = ( ) => {
           userId: decoded.user_id,
         }));
       }
-      const userPayload = res.data.user || (decoded ? {
+      const userPayload = data.user || (decoded ? {
         id: decoded.user_id,
         role: decoded.role,
         tenant_id: decoded.tenant_id,
       } : null);
-      try {
-        await saveSessionInfo({
-          token: res.data?.token || null,
-          user: userPayload,
-        });
-      } catch (err) {
-        // Ignore storage failures
-      }
-      dispatch(setUserDetails(userPayload)); // Dispatch user details to Redux store
+      dispatch(setUserDetails(userPayload));
 
       setIsLoading(false);
       navigate('/setup');

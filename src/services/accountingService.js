@@ -1,5 +1,10 @@
 import api from '../utils/axios';
-import { saveTransactionsBulk, upsertAccountingTransaction, getAccountingTransactions } from '../core/db';
+import { getPurchaseDetail, listPurchases } from './local/purchaseLocalService';
+import {
+  getAccountingTransactions,
+  saveTransactionsBulk,
+  upsertAccountingTransaction,
+} from './local/transactionLocalService';
 
 const generateClientTxnId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -178,20 +183,6 @@ const normalizeOrderId = (value) => {
 
 const toArraySafe = (value) => (Array.isArray(value) ? value : []);
 
-const parsePurchaseOrdersFromResponse = (responseData) => {
-  const body = responseData?.data ?? responseData ?? {};
-  const candidates = [
-    body?.data?.purchases,
-    body?.purchases,
-    body?.data?.orders,
-    body?.orders,
-    body?.data,
-    body,
-  ];
-  const list = candidates.find((entry) => Array.isArray(entry));
-  return toArraySafe(list);
-};
-
 const parsePaymentsFromResponse = (responseData) => {
   const body = responseData?.data ?? responseData ?? {};
   const candidates = [
@@ -237,10 +228,9 @@ const extractPurchaseAmount = (purchase = {}) => {
 };
 
 export const backfillPurchasePayments = async ({ dryRun = false, onlyOrderIds = [] } = {}) => {
-  const purchasesRes = await api.get('/purchases', { params: { limit: 2000 } });
+  const listedPurchases = await listPurchases({ limit: 2000 });
   const paymentsRes = await api.get('/accounts/payment', { params: { limit: 5000, range: 'all', type: 'supplier' } });
 
-  const listedPurchases = parsePurchaseOrdersFromResponse(purchasesRes?.data);
   const allPurchases = [...listedPurchases];
   const allPayments = parsePaymentsFromResponse(paymentsRes?.data);
   const existingPaymentOrderIds = new Set(
@@ -264,8 +254,7 @@ export const backfillPurchasePayments = async ({ dryRun = false, onlyOrderIds = 
     const missingTargetIds = Array.from(targetOrderIds).filter((id) => !listedById.has(id));
     for (const targetId of missingTargetIds) {
       try {
-        const detailRes = await api.get(`/purchases/${targetId}`);
-        const detailBody = detailRes?.data?.data ?? detailRes?.data ?? {};
+        const detailBody = await getPurchaseDetail(targetId);
         const detailOrder = detailBody?.order ?? detailBody?.purchase ?? detailBody;
         if (detailOrder && (detailOrder?.id || detailOrder?.order_id)) {
           allPurchases.push(detailOrder);

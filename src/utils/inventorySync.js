@@ -1,33 +1,54 @@
 import api from './axios';
 import {
-  addInventorySyncQueueEntry,
-  updateInventorySyncQueueEntry,
-  getInventorySyncQueueEntries,
-  findInventorySyncQueueEntry,
-  addSyncLog,
-  getProductCacheById,
-  getSupplierCacheById,
-  updateProductsBulk,
-  updateBatchesBulk,
-  updateSuppliersCacheBulk,
-  deleteProductsCacheByIds,
-  deleteSuppliersCacheByIds,
   deleteBatchesCacheByIds,
+  deleteLocalProduct,
+  deleteProductsCacheByIds,
   getAllBatches,
+  getLocalProductById,
+  getProductCacheById,
+  updateBatchesBulk,
+  updateProductsBulk,
+  upsertLocalProduct,
+} from '../services/local/productLocalService';
+import {
+  createPurchase,
+  createPurchaseReturn,
+} from '../services/local/purchaseLocalService';
+import {
+  createSupplierRemote,
+  deleteSupplierRemote,
+  updateSupplierRemote,
+} from '../Repositories/api/supplierApiClient';
+import {
+  deleteLocalSupplier,
+  deleteSuppliersCacheByIds,
+  getLocalSupplierById,
+  getSupplierCacheById,
+  updateSuppliersCacheBulk,
+  upsertLocalSupplier,
+} from '../services/local/supplierLocalService';
+import {
   getLocalPurchaseById,
   getLocalPurchaseItems,
-  upsertLocalPurchase,
-  upsertLocalProduct,
-  upsertLocalSupplier,
-  upsertLocalPurchaseReturn,
   getLocalPurchaseReturnById,
+  getLocalPurchases,
+  upsertLocalPurchase,
+  upsertLocalPurchaseReturn,
+} from '../services/local/purchaseLocalService';
+import {
+  addInventorySyncQueueEntry,
+  addSyncLog,
+  findInventorySyncQueueEntry,
+  getAllSyncQueueRecords,
+  getInventorySyncQueueEntries,
   replaceProductIdReferences,
   replaceSupplierIdReferences,
+  updateInventorySyncQueueEntry,
+} from '../services/local/syncLocalService';
+import {
   getTransactionById,
   upsertAccountingTransaction,
-  getLocalPurchases,
-  db,
-} from '../core/db';
+} from '../services/local/transactionLocalService';
 import { runDeltaSync } from './deltaSync';
 
 const SYNC_INTERVAL_MS = 30000;
@@ -44,6 +65,19 @@ const normalizeStatus = (value) => {
     return normalized;
   }
   return 'pending';
+};
+
+const getErrorMessage = (error, fallback = 'sync_failed') => {
+  const data = error?.response?.data;
+  if (typeof data === 'string' && data.trim()) return data.trim();
+  if (data?.message) return data.message;
+  if (data?.error) return data.error;
+  if (Array.isArray(data?.errors) && data.errors.length) {
+    const first = data.errors.find((entry) => entry?.message || entry?.code);
+    if (first?.message) return first.message;
+    if (first?.code) return first.code;
+  }
+  return error?.message || fallback;
 };
 
 const emitSyncEvent = (type) => {
@@ -101,7 +135,7 @@ const buildSupplierPayload = (supplier) => {
 const setProductSyncStatus = async (productId, status, extras = {}) => {
   if (!productId) return;
   const normalized = normalizeStatus(status);
-  const existingLocal = await db.products.get(productId);
+  const existingLocal = await getLocalProductById(productId);
   await upsertLocalProduct({
     ...(existingLocal || { id: productId }),
     syncStatus: normalized,
@@ -118,7 +152,7 @@ const setProductSyncStatus = async (productId, status, extras = {}) => {
 const setSupplierSyncStatus = async (supplierId, status, extras = {}) => {
   if (!supplierId) return;
   const normalized = normalizeStatus(status);
-  const existingLocal = await db.suppliers.get(supplierId);
+  const existingLocal = await getLocalSupplierById(supplierId);
   await upsertLocalSupplier({
     ...(existingLocal || { id: supplierId }),
     syncStatus: normalized,
@@ -217,12 +251,12 @@ const syncProductEntry = async (entry) => {
   if (entry.action === 'delete') {
     if (String(entry.entityId).startsWith('temp_')) {
       await deleteProductsCacheByIds([entry.entityId]);
-      await db.products.delete(entry.entityId);
+      await deleteLocalProduct(entry.entityId);
       return { status: 'synced', note: 'local delete' };
     }
     await api.delete(`/products/${encodeURIComponent(entry.entityId)}`);
     await deleteProductsCacheByIds([entry.entityId]);
-    await db.products.delete(entry.entityId);
+    await deleteLocalProduct(entry.entityId);
     return { status: 'synced' };
   }
   const payload = buildProductPayload(product);
@@ -233,7 +267,7 @@ const syncProductEntry = async (entry) => {
     const serverId = serverProduct?.id ?? resolveServerId(response);
     if (serverId && serverId !== entry.entityId) {
       await replaceProductIdReferences(entry.entityId, serverId);
-      await db.products.delete(entry.entityId);
+      await deleteLocalProduct(entry.entityId);
       await upsertLocalProduct({
         ...(serverProduct || product),
         id: serverId,
@@ -263,23 +297,23 @@ const syncSupplierEntry = async (entry) => {
   if (entry.action === 'delete') {
     if (String(entry.entityId).startsWith('temp_')) {
       await deleteSuppliersCacheByIds([entry.entityId]);
-      await db.suppliers.delete(entry.entityId);
+      await deleteLocalSupplier(entry.entityId);
       return { status: 'synced', note: 'local delete' };
     }
-    await api.delete(`/suppliers/${encodeURIComponent(entry.entityId)}`);
+    await deleteSupplierRemote(entry.entityId);
     await deleteSuppliersCacheByIds([entry.entityId]);
-    await db.suppliers.delete(entry.entityId);
+    await deleteLocalSupplier(entry.entityId);
     return { status: 'synced' };
   }
   const payload = buildSupplierPayload(supplier);
   if (!payload) throw new Error('missing payload');
   if (entry.action === 'create') {
-    const response = await api.post('/suppliers', payload);
-    const serverSupplier = response?.data?.supplier || response?.data?.data || response?.data || null;
-    const serverId = serverSupplier?.id ?? resolveServerId(response);
+    const response = await createSupplierRemote(payload);
+    const serverSupplier = response || null;
+    const serverId = serverSupplier?.id ?? null;
     if (serverId && serverId !== entry.entityId) {
       await replaceSupplierIdReferences(entry.entityId, serverId);
-      await db.suppliers.delete(entry.entityId);
+      await deleteLocalSupplier(entry.entityId);
       await upsertLocalSupplier({
         ...(serverSupplier || supplier),
         id: serverId,
@@ -295,7 +329,7 @@ const syncSupplierEntry = async (entry) => {
     }
     return { status: 'synced', serverId };
   }
-  await api.put(`/suppliers/${encodeURIComponent(entry.entityId)}`, payload);
+  await updateSupplierRemote(entry.entityId, payload);
   await setSupplierSyncStatus(entry.entityId, 'synced');
   return { status: 'synced' };
 };
@@ -338,7 +372,7 @@ const syncPurchaseEntry = async (entry) => {
   const syncedBalance = isCreditPurchase
     ? Math.max(syncedTotalAmount, 0)
     : Number(purchase.balance ?? Math.max(syncedTotalAmount - syncedTotalPaid, 0));
-  const response = await api.post('/purchases', {
+  const purchaseResult = await createPurchase({
     type: 'purchase',
     order_type: 'purchase',
     source_type: 'purchase',
@@ -354,8 +388,8 @@ const syncPurchaseEntry = async (entry) => {
     payment_status: isCreditPurchase ? 'pending' : (purchase.paymentStatus ?? purchase.payment_status ?? (syncedBalance > 0 ? 'pending' : 'paid')),
     items: payloadItems,
   });
-  const responseData = response?.data?.data || response?.data || {};
-  const createdBatches = Array.isArray(responseData?.batches) ? responseData.batches : [];
+  const responseData = purchaseResult?.data || {};
+  const createdBatches = Array.isArray(purchaseResult?.batches) ? purchaseResult.batches : [];
   if (createdBatches.length) {
     const batchesForCache = createdBatches.map((batch) => ({
       id: batch?.id,
@@ -368,7 +402,7 @@ const syncPurchaseEntry = async (entry) => {
       mrp: batch?.mrp ?? null,
       quantity: Number(batch?.quantity ?? 0),
       quantity_remaining: Number(batch?.quantity_remaining ?? batch?.quantity ?? 0),
-      purchase_order_id: responseData?.order_id ?? null,
+      purchase_order_id: purchaseResult?.orderId ?? responseData?.order_id ?? null,
       is_deleted: false,
       updated_at: batch?.updated_at ?? nowIso(),
       created_at: batch?.created_at ?? nowIso(),
@@ -378,7 +412,7 @@ const syncPurchaseEntry = async (entry) => {
       await updateBatchesBulk(batchesForCache).catch(() => {});
     }
   }
-  const serverId = resolveServerId(response);
+  const serverId = purchaseResult?.orderId ?? resolveServerId(purchaseResult?.response);
   await setPurchaseSyncStatus(entry.entityId, 'synced', {
     serverId: serverId ?? purchase.serverId ?? null,
     syncedAt: nowIso(),
@@ -410,14 +444,14 @@ const syncPurchaseReturnEntry = async (entry) => {
     throw new Error('supplier_not_synced');
   }
 
-  const response = await api.post('/purchase-returns', {
+  const returnResult = await createPurchaseReturn({
     purchase_id: returnEntry.purchaseId ?? null,
     supplier_id: supplierId,
     branch_id: returnEntry.branchId ?? returnEntry.branch_id ?? null,
     reason: returnEntry.reason ?? null,
     items: returnEntry.items ?? [],
   });
-  const serverId = resolveServerId(response);
+  const serverId = returnResult?.serverId ?? resolveServerId(returnResult?.response);
   await setReturnSyncStatus(entry.entityId, 'synced', {
     serverId: serverId ?? returnEntry.serverId ?? null,
     syncedAt: nowIso(),
@@ -499,7 +533,7 @@ const ensurePurchaseQueueCoverage = async () => {
   });
   if (!unsyncedPurchases.length) return;
 
-  const queueEntries = await db.sync_queue.toArray();
+  const queueEntries = await getAllSyncQueueRecords();
   for (const purchase of unsyncedPurchases) {
     const purchaseId = purchase?.id;
     if (!purchaseId) continue;
@@ -563,7 +597,8 @@ export const processInventorySyncQueue = async () => {
           synced.push({ ...entry, ...result, status: 'synced' });
           emitSyncEvent(entry.type);
         } catch (error) {
-          const retries = (entry?.retries ?? 0) + 1;
+          const retryCount = Number(entry?.retry_count ?? entry?.retryCount ?? entry?.retries ?? 0) + 1;
+          const errorMessage = getErrorMessage(error);
           const shouldHoldPending =
             error?.message === 'purchase_not_synced' ||
             error?.message === 'supplier_not_synced' ||
@@ -571,32 +606,32 @@ export const processInventorySyncQueue = async () => {
           await updateInventorySyncQueueEntry({
             ...entry,
             status: shouldHoldPending ? 'pending' : 'failed',
-            retries,
+            retry_count: retryCount,
             updated_at: nowIso(),
-            last_error: error?.message || 'sync_failed',
+            last_error: errorMessage,
           });
           await addSyncLog({
             type: entry.type,
             entityId: entry.entityId,
             status: shouldHoldPending ? 'pending' : 'failed',
-            message: error?.message || 'sync_failed',
+            message: errorMessage,
           });
           if (!shouldHoldPending) {
             if (entry.type === 'product') {
-              await setProductSyncStatus(entry.entityId, 'failed', { last_error: error?.message || 'sync_failed' });
+              await setProductSyncStatus(entry.entityId, 'failed', { last_error: errorMessage });
             } else if (entry.type === 'supplier') {
-              await setSupplierSyncStatus(entry.entityId, 'failed', { last_error: error?.message || 'sync_failed' });
+              await setSupplierSyncStatus(entry.entityId, 'failed', { last_error: errorMessage });
             } else if (entry.type === 'purchase') {
-              await setPurchaseSyncStatus(entry.entityId, 'failed', { last_error: error?.message || 'sync_failed' });
+              await setPurchaseSyncStatus(entry.entityId, 'failed', { last_error: errorMessage });
             } else if (entry.type === 'purchase_return') {
-              await setReturnSyncStatus(entry.entityId, 'failed', { last_error: error?.message || 'sync_failed' });
+              await setReturnSyncStatus(entry.entityId, 'failed', { last_error: errorMessage });
             } else if (entry.type === 'accounting_txn') {
               const txn = await getTransactionById(entry.entityId);
               if (txn) {
                 await upsertAccountingTransaction({
                   ...txn,
                   sync_status: 'failed',
-                  last_error: error?.message || 'sync_failed',
+                  last_error: errorMessage,
                 });
               }
             }

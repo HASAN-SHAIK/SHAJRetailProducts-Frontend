@@ -8,6 +8,7 @@ import { Line, Pie } from "react-chartjs-2";
 import { useSelector } from "react-redux";
 import { useLocation } from "react-router-dom";
 import { useBranchStore } from "../../../store/branchStore";
+import { fetchInventoryIntelligence } from "../../../services/local";
 import { hasFeature, isPlanAtLeast } from "../../../utils/entitlements";
 import {
   Chart as ChartJS,
@@ -330,16 +331,12 @@ const DashboardOverview = ({ navigate }) => {
     const fetchInventory = async () => {
       setIsFetchingInventory(true);
       try {
-        const query = new URLSearchParams({
+        const payload = await fetchInventoryIntelligence({
           range,
-          ...(selectedLocation ? { location: selectedLocation } : {}),
-          ...(effectiveBranchId ? { branch_id: effectiveBranchId } : {}),
+          location: selectedLocation || null,
+          branchId: effectiveBranchId || null,
         });
-        const res = await api.get(
-          `/dashboard/inventory-intelligence?${query.toString()}`
-        );
         if (!isMounted) return;
-        const payload = res?.data?.data || res?.data || {};
         setInventoryData(payload);
       } catch (err) {
         if (isNetworkError(err)) {

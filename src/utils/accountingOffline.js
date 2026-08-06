@@ -1,4 +1,4 @@
-import { upsertAccountingTransaction } from '../core/db';
+import { upsertAccountingTransaction } from '../services/local/transactionLocalService';
 import { enqueueInventorySync, processInventorySyncQueue } from './inventorySync';
 
 const createLocalId = () => `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

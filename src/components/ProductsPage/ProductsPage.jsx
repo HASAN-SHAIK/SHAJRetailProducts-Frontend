@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import './ProductsPage.css'; // Custom styles
 import api from '../../utils/axios';
@@ -9,10 +9,12 @@ import { preloadAllCaches, preloadProductsToIndexedDb } from '../../utils/indexe
 import {
   getAllBatches,
   getAllProducts,
+  getBranchStock,
   getProductByBarcode,
   updateBatchesBulk,
   updateProductsBulk,
-} from '../../core/db';
+  getAllCategories,
+} from '../../services/local';
 import { runDeltaSync } from '../../utils/deltaSync';
 import { usePopup } from '../common/PopUp/PopupProvider';
 import { useBranchStore } from '../../store/branchStore';
@@ -69,7 +71,11 @@ const ProductsPage = ({ navigate }) => {
   const [gstTouched, setGstTouched] = useState(false);
   const toFlagValue = (value, fallback = '0') => {
     if (value === undefined || value === null || value === '') return fallback;
-    if (value === true || String(value).toLowerCase() === 'true' || String(value) === '1') return '1';
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    if (typeof value === 'number') return value !== 0 ? '1' : '0';
+    const raw = String(value).trim().toLowerCase();
+    if (['true', 'yes', 'y', '1', 'weight', 'weighted', 'weight based', 'weight-based', 'kg', 'kgs', 'gram', 'grams'].includes(raw)) return '1';
+    if (['false', 'no', 'n', '0', 'piece', 'pieces', 'piece based', 'piece-based', 'unit', 'units'].includes(raw)) return '0';
     return '0';
   };
   const toInputDateValue = (value) => {
@@ -218,6 +224,7 @@ const ProductsPage = ({ navigate }) => {
   ];
 
  const [products, setProducts] = useState([]);
+  const filteredProductsRef = useRef([]);
   const [categories, setCategories] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
  const [errorMessage, setErrorMessage] = useState('');
@@ -258,6 +265,7 @@ const ProductsPage = ({ navigate }) => {
   const [isOpeningCompleted, setIsOpeningCompleted] = useState(true);
  const [importError, setImportError] = useState('');
  const [importing, setImporting] = useState(false);
+  const [importDots, setImportDots] = useState(1);
   const [importPreviewRows, setImportPreviewRows] = useState([]);
   const [importPreviewError, setImportPreviewError] = useState('');
   const [importParsing, setImportParsing] = useState(false);
@@ -266,6 +274,17 @@ const ProductsPage = ({ navigate }) => {
   useEffect(() => {
     fetchCategories();
   }, []);
+
+  useEffect(() => {
+    if (!importing) {
+      setImportDots(1);
+      return undefined;
+    }
+    const timer = setInterval(() => {
+      setImportDots((prev) => (prev >= 4 ? 1 : prev + 1));
+    }, 450);
+    return () => clearInterval(timer);
+  }, [importing]);
 
 
   useEffect(() => {
@@ -346,7 +365,18 @@ const ProductsPage = ({ navigate }) => {
 
   useEffect(() => {
     fetchProducts();
-  }, [productUpdateFlag, pagination.page, pagination.limit, searchQuery, selectedCategory, sortBy, sortOrder]);
+  }, [productUpdateFlag, pagination.limit, searchQuery, selectedCategory, sortBy, sortOrder]);
+
+  useEffect(() => {
+    const { paged, totalRecords, totalPages, page } = paginateItems(filteredProductsRef.current);
+    setProducts(paged);
+    setPagination((prev) => ({
+      ...prev,
+      page,
+      total_pages: totalPages,
+      total_records: totalRecords,
+    }));
+  }, [pagination.page, pagination.limit]);
 
   useEffect(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
@@ -616,6 +646,7 @@ const ProductsPage = ({ navigate }) => {
       }
 
       const localFiltered = applyLocalFilters(localList);
+      filteredProductsRef.current = localFiltered;
       const { paged, totalRecords, totalPages, page } = paginateItems(localFiltered);
       setProducts(paged);
       setPagination((prev) => ({
@@ -641,18 +672,7 @@ const ProductsPage = ({ navigate }) => {
 
   const fetchCategories = async () => {
     try {
-      const res = await api.get('/orders/getcategories');
-      const raw = res?.data?.categories || res?.data?.data || res?.data || [];
-      const list = Array.isArray(raw) ? raw : [];
-      const normalized = list.map((item) => {
-        if (typeof item === 'string') {
-          return { id: item, name: item };
-        }
-        return {
-          id: item.id ?? item.category_id ?? item.value ?? item.category ?? item.name,
-          name: item.name ?? item.category ?? item.label ?? item.title ?? '',
-        };
-      }).filter((item) => item.name);
+      const normalized = await getAllCategories();
       setCategories(normalized);
     } catch (err) {
       if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
@@ -947,9 +967,19 @@ const ProductsPage = ({ navigate }) => {
     const productId = getProductId(product);
     if (!productId) return [];
     const allBatches = await getAllBatches();
-    return buildMergedBatchesForProduct(allBatches, productId).filter(
-      (batch) => Number(batch.quantity_remaining ?? 0) > 0
-    );
+    const fallbackValues = {
+      purchase_price: product?.purchase_price ?? null,
+      selling_price: product?.selling_price ?? product?.sellingPrice ?? null,
+      mrp: product?.mrp ?? product?.mrp_price ?? null,
+    };
+    return buildMergedBatchesForProduct(allBatches, productId)
+      .filter((batch) => Number(batch.quantity_remaining ?? 0) > 0)
+      .map((batch) => ({
+        ...batch,
+        purchase_price: batch.purchase_price ?? fallbackValues.purchase_price,
+        selling_price: batch.selling_price ?? fallbackValues.selling_price,
+        mrp: batch.mrp ?? batch.mrp_price ?? batch.mrpPrice ?? fallbackValues.mrp,
+      }));
   }, [effectiveBranchId]);
 
   const toggleProductBatchRow = async (product) => {
@@ -1123,8 +1153,7 @@ const ProductsPage = ({ navigate }) => {
     setStockModalOpen(true);
     setStockLoading(true);
     try {
-      const res = await api.get('/stock', { params: { product_id: product.id } });
-      const payload = res?.data?.stock || res?.data?.data || res?.data || [];
+      const payload = await getBranchStock(product.id);
       setStockRows(Array.isArray(payload) ? payload : []);
     } catch (err) {
       setStockRows([]);
@@ -1178,7 +1207,44 @@ const ProductsPage = ({ navigate }) => {
     quantity: 'stock_quantity',
     qty: 'stock_quantity',
     stock: 'stock_quantity',
+    'stock quantity': 'stock_quantity',
     stock_quantity: 'stock_quantity',
+    'current stock': 'stock_quantity',
+    current_stock: 'stock_quantity',
+    currentstock: 'stock_quantity',
+    'current quantity': 'stock_quantity',
+    current_quantity: 'stock_quantity',
+    currentquantity: 'stock_quantity',
+    'current qty': 'stock_quantity',
+    current_qty: 'stock_quantity',
+    currentqty: 'stock_quantity',
+    'opening stock': 'stock_quantity',
+    opening_stock: 'stock_quantity',
+    openingstock: 'stock_quantity',
+    'opening quantity': 'stock_quantity',
+    opening_quantity: 'stock_quantity',
+    openingquantity: 'stock_quantity',
+    'opening qty': 'stock_quantity',
+    opening_qty: 'stock_quantity',
+    openingqty: 'stock_quantity',
+    'closing stock': 'stock_quantity',
+    closing_stock: 'stock_quantity',
+    closingstock: 'stock_quantity',
+    'closing quantity': 'stock_quantity',
+    closing_quantity: 'stock_quantity',
+    closingquantity: 'stock_quantity',
+    'closing qty': 'stock_quantity',
+    closing_qty: 'stock_quantity',
+    closingqty: 'stock_quantity',
+    'available stock': 'stock_quantity',
+    available_stock: 'stock_quantity',
+    availablestock: 'stock_quantity',
+    'available quantity': 'stock_quantity',
+    available_quantity: 'stock_quantity',
+    availablequantity: 'stock_quantity',
+    'available qty': 'stock_quantity',
+    available_qty: 'stock_quantity',
+    availableqty: 'stock_quantity',
     hsn: 'hsn_code',
     hsn_code: 'hsn_code',
     gst: 'gst_percentage',
@@ -1253,6 +1319,29 @@ const ProductsPage = ({ navigate }) => {
       ]);
       if (purchaseFromHeader !== null) {
         mapped.purchase_price = purchaseFromHeader;
+      }
+    }
+    if (mapped.stock_quantity === undefined || mapped.stock_quantity === null || mapped.stock_quantity === '') {
+      const stockFromHeader = pickValueByHeaderPattern(row, [
+        'currentstock',
+        'openingstock',
+        'closingstock',
+        'availablestock',
+        'availablequantity',
+        'availableqty',
+        'stockquantity',
+        'currentquantity',
+        'currentqty',
+        'openingquantity',
+        'openingqty',
+        'closingquantity',
+        'closingqty',
+        'quantity',
+        'qty',
+        'stock',
+      ]);
+      if (stockFromHeader !== null) {
+        mapped.stock_quantity = stockFromHeader;
       }
     }
     return mapped;
@@ -1764,7 +1853,6 @@ const ProductsPage = ({ navigate }) => {
               <option value="created_at">Sort by Date</option>
               <option value="name">Sort by Name</option>
               <option value="mrp">Sort by MRP</option>
-              <option value="purchase_price">Sort by Purchase Price</option>
               <option value="selling_price">Sort by Selling Price</option>
               <option value="gst_percent">Sort by GST</option>
               <option value="stock_quantity">Sort by Stock</option>
@@ -1795,9 +1883,6 @@ const ProductsPage = ({ navigate }) => {
                   <th>Barcode</th>
                     <th role="button" onClick={() => handleSortToggle('mrp')} className="sortable">
                       MRP <span className="sort-indicator">{getSortIndicator('mrp')}</span>
-                    </th>
-                    <th role="button" onClick={() => handleSortToggle('purchase_price')} className="sortable">
-                      Purchase Price <span className="sort-indicator">{getSortIndicator('purchase_price')}</span>
                     </th>
                     <th role="button" onClick={() => handleSortToggle('selling_price')} className="sortable">
                       Selling Price <span className="sort-indicator">{getSortIndicator('selling_price')}</span>
@@ -1831,14 +1916,14 @@ const ProductsPage = ({ navigate }) => {
                 ))}
                 {!isLoading && errorMessage && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 11 : 10} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 10 : 9} className="empty-state">
                       {errorMessage}
                     </td>
                   </tr>
                 )}
                 {!isLoading && !errorMessage && products.length === 0 && (
                   <tr>
-                    <td colSpan={userDetails.role === 'admin' ? 11 : 10} className="empty-state">
+                    <td colSpan={userDetails.role === 'admin' ? 10 : 9} className="empty-state">
                       No products found.
                     </td>
                   </tr>
@@ -1850,7 +1935,7 @@ const ProductsPage = ({ navigate }) => {
                   const isExpanded = expandedProductKey === rowKey;
                   const batchRows = batchRowsByProductKey[rowKey] || [];
                   const batchLoading = Boolean(batchLoadingByProductKey[rowKey]);
-                  const rowColSpan = userDetails.role === 'admin' ? 11 : 10;
+                  const rowColSpan = userDetails.role === 'admin' ? 10 : 9;
                   const baseStock = Number(
                     displayProduct.quantity_remaining ??
                     displayProduct.quantityRemaining ??
@@ -1892,7 +1977,7 @@ const ProductsPage = ({ navigate }) => {
                       <td className="product-name-cell">
                         <span className="batch-toggle-icon">{isExpanded ? '▾' : '▸'}</span>
                         <span className="product-name-text">{displayProduct.name || displayProduct.product_name || '-'}</span>
-                        {String(displayProduct.is_weight_based ?? displayProduct.isWeightBased ?? displayProduct.weight_based ?? '0') === '1' ? (
+                        {toFlagValue(displayProduct.is_weight_based ?? displayProduct.isWeightBased ?? displayProduct.weight_based, '0') === '1' ? (
                           <span className="product-type-tag weight">Weighted</span>
                         ) : (
                           <span className="product-type-tag piece">Piece</span>
@@ -1901,7 +1986,6 @@ const ProductsPage = ({ navigate }) => {
                       <td>{displayProduct.company || displayProduct.company_name || '-'}</td>
                       <td>{getDisplayBarcode(displayProduct.barcode) || '-'}</td>
                       <td>{renderEditableCell(displayProduct, 'mrp', formatMoney)}</td>
-                      <td>{renderEditableCell(displayProduct, 'purchase_price', formatMoney)}</td>
                       <td>{renderEditableCell(displayProduct, 'selling_price', formatMoney)}</td>
                       <td>{renderEditableCell(displayProduct, 'gst_percent', formatPercent)}</td>
                       <td>{stock}</td>
@@ -1936,7 +2020,6 @@ const ProductsPage = ({ navigate }) => {
                                     <th>Batch</th>
                                     <th>Available</th>
                                     <th>Total Qty</th>
-                                    <th>Purchase Price</th>
                                     <th>Selling Price</th>
                                     <th>MRP</th>
                                     <th>Expiry</th>
@@ -1946,12 +2029,12 @@ const ProductsPage = ({ navigate }) => {
                                 <tbody>
                                   {batchLoading && (
                                     <tr>
-                                      <td colSpan={userDetails.role === 'admin' ? 8 : 7} className="empty-state">Loading batch details...</td>
+                                      <td colSpan={userDetails.role === 'admin' ? 7 : 6} className="empty-state">Loading batch details...</td>
                                     </tr>
                                   )}
                                   {!batchLoading && batchRows.length === 0 && (
                                     <tr>
-                                      <td colSpan={userDetails.role === 'admin' ? 8 : 7} className="empty-state">No batches found for this product.</td>
+                                      <td colSpan={userDetails.role === 'admin' ? 7 : 6} className="empty-state">No batches found for this product.</td>
                                     </tr>
                                   )}
                                   {!batchLoading && batchRows.map((batch, index) => (
@@ -1959,19 +2042,6 @@ const ProductsPage = ({ navigate }) => {
                                       <td>{batch.batch_number || '-'}</td>
                                       <td>{Number(batch.quantity_remaining ?? batch.quantity ?? 0)}</td>
                                       <td>{Number(batch.quantity ?? batch.quantity_remaining ?? 0)}</td>
-                                      <td>
-                                        {userDetails.role === 'admin' ? (
-                                          <input
-                                            className="products-batch-input"
-                                            type="number"
-                                            step="0.01"
-                                            value={getBatchDraftValue(rowKey, batch, index, 'purchase_price')}
-                                            onChange={(event) => updateBatchDraftField(rowKey, batch, index, 'purchase_price', event.target.value)}
-                                          />
-                                        ) : (
-                                          formatMoney(batch.purchase_price ?? 0)
-                                        )}
-                                      </td>
                                       <td>
                                         {userDetails.role === 'admin' ? (
                                           <input
@@ -2153,7 +2223,7 @@ const ProductsPage = ({ navigate }) => {
                     title={importDisableReason}
                   >
                     {importing
-                      ? 'Importing...'
+                      ? `Importing${'.'.repeat(importDots)}`
                       : importPreviewRows.length > 0
                       ? 'Confirm & Import'
                       : importParsing

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getAllCustomers } from '../core/db';
+import { getAllCustomers } from '../services/local';
 
 const Customers = () => {
   const [customers, setCustomers] = useState([]);

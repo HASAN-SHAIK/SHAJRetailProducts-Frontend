@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
-import { db, getCustomerById, upsertLocalCorrection, upsertLocalGstEntry } from '../../core/db';
+import { getCustomerById, getAllOrderRecords, getOrderRecordById, getOrderItemsByOrderId, upsertLocalCorrection, upsertLocalGstEntry } from '../../services/local';
 import { createCorrection, fetchAllSalesOrders, fetchOrderDetails } from '../../services/returnsCorrectionsApi';
 import './ReturnsCorrections.css';
 
@@ -68,7 +68,7 @@ const EditBill = () => {
         // fallback to local
       }
     }
-    const list = await db.orders.toArray();
+    const list = await getAllOrderRecords();
     setOrders(list);
   }, []);
 
@@ -86,15 +86,12 @@ const EditBill = () => {
         setBillDetails(detail || null);
         return;
       }
-      const cachedOrder = await db.orders.get(Number(billId)).catch(() => null);
-      const cachedByText = cachedOrder || (await db.orders.get(String(billId)).catch(() => null));
-      const itemListByText = await db.order_items.where('order_id').equals(String(billId)).toArray();
-      const itemListByNumber = Number.isFinite(Number(billId))
-        ? await db.order_items.where('order_id').equals(Number(billId)).toArray()
-        : [];
+      const cachedOrder = await getOrderRecordById(Number(billId)).catch(() => null);
+      const cachedByText = cachedOrder || (await getOrderRecordById(String(billId)).catch(() => null));
+      const itemList = await getOrderItemsByOrderId(billId);
       setBillDetails({
         ...(cachedByText || { id: billId }),
-        items: itemListByText.length ? itemListByText : itemListByNumber,
+        items: itemList,
       });
     } catch {
       setBillDetails(null);

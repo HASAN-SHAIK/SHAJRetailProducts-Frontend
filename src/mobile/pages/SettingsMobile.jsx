@@ -4,8 +4,10 @@ import { Link } from 'react-router-dom';
 import MobileShell from '../components/MobileShell';
 import SectionCard from '../components/SectionCard';
 import { useMobileTheme } from '../theme/MobileThemeContext';
-
-const DRAFT_KEY = 'mobile_settings_draft_v1';
+import {
+  getApplicationSettings,
+  updateApplicationSettings,
+} from '../../services/local/applicationSettingsLocalService';
 
 const SettingsBody = () => {
   const userDetails = useSelector((state) => state.user.userDetails);
@@ -35,24 +37,66 @@ const SettingsBody = () => {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(DRAFT_KEY);
-    if (saved) {
+    let mounted = true;
+    const loadSettings = async () => {
       try {
-        const parsed = JSON.parse(saved);
-        setForm((prev) => ({ ...prev, ...parsed }));
+        const settings = await getApplicationSettings();
+        if (!mounted || !settings) return;
+        setForm((prev) => ({
+          ...prev,
+          shopName: settings.company?.shop_name || prev.shopName,
+          ownerName: settings.company?.owner_name || prev.ownerName,
+          phone: settings.company?.mobile_number || prev.phone,
+          address: settings.company?.address_line || prev.address,
+          gstin: settings.company?.gst_number || prev.gstin,
+          invoicePrefix: settings.store?.invoice_prefix || prev.invoicePrefix,
+          invoiceFooter: settings.store?.invoice_footer || prev.invoiceFooter,
+          defaultTax: settings.tax?.default_tax_percent || prev.defaultTax,
+          currency: settings.store?.currency || prev.currency,
+          autoSync: settings.store?.auto_sync ?? prev.autoSync,
+          notifications: settings.store?.notifications_enabled ?? prev.notifications,
+          biometricLock: settings.store?.biometric_lock ?? prev.biometricLock,
+        }));
       } catch {
-        // ignore malformed drafts
+        // keep bootstrap defaults
       }
-    }
+    };
+    loadSettings();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const updateField = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = () => {
-    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
-    setMessage('Preferences saved on this device.');
+  const handleSave = async () => {
+    try {
+      await updateApplicationSettings({
+        store: {
+          invoice_prefix: form.invoicePrefix,
+          invoice_footer: form.invoiceFooter,
+          currency: form.currency,
+          auto_sync: form.autoSync,
+          notifications_enabled: form.notifications,
+          biometric_lock: form.biometricLock,
+        },
+        tax: {
+          default_tax_percent: form.defaultTax,
+        },
+        company: {
+          shop_name: form.shopName,
+          owner_name: form.ownerName,
+          mobile_number: form.phone,
+          gst_number: form.gstin,
+          address_line: form.address,
+        },
+      });
+      setMessage('Preferences saved.');
+    } catch {
+      setMessage('Could not save preferences.');
+    }
     setTimeout(() => setMessage(''), 2200);
   };
 

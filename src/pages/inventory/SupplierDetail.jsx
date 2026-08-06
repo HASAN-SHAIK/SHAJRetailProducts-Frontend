@@ -1,17 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import api from '../../utils/axios';
 import {
   getAccountingTransactions,
   getSupplierCacheById,
   getSupplierLedgerBySupplierId,
+  getSupplierLedgerDetail,
   getConfigValue,
   saveConfigValue,
   saveTransactionsBulk,
   upsertAccountingTransaction,
   upsertSupplierLedgerBulk,
   updateSuppliersCacheBulk,
-} from '../../core/db';
+} from '../../services/local';
 import { processInventorySyncQueue } from '../../utils/inventorySync';
 import './Suppliers.css';
 
@@ -120,8 +120,7 @@ const SupplierDetail = () => {
       processInventorySyncQueue().catch(() => {});
 
       try {
-        const res = await api.get(`/suppliers/${id}/ledger`);
-        const serverData = res?.data?.data || null;
+        const serverData = await getSupplierLedgerDetail(id);
         if (serverData?.supplier) {
           updateSuppliersCacheBulk([serverData.supplier]).catch(() => {});
           const ledger = Array.isArray(serverData.ledger) ? serverData.ledger : [];

@@ -1,23 +1,7 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import StaffExpensesHeader from '../../components/staffExpenses/StaffExpensesHeader';
-import { getLocalExpenses } from '../../core/db';
+import { getMonthlyExpenseReport } from '../../services/local';
 import './StaffExpenses.css';
-
-const monthRange = (monthValue) => {
-  const [yearRaw, monthRaw] = String(monthValue || '').split('-');
-  const year = Number(yearRaw);
-  const monthIndex = Number(monthRaw) - 1;
-  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return { from: null, to: null };
-  const start = new Date(year, monthIndex, 1);
-  const end = new Date(year, monthIndex + 1, 0);
-  const toLocalDate = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  };
-  return { from: toLocalDate(start), to: toLocalDate(end) };
-};
 
 const ExpenseMonthlyReport = () => {
   const [month, setMonth] = useState(() => {
@@ -25,43 +9,22 @@ const ExpenseMonthlyReport = () => {
     const m = String(now.getMonth() + 1).padStart(2, '0');
     return `${now.getFullYear()}-${m}`;
   });
-  const [expenses, setExpenses] = useState([]);
+  const [summary, setSummary] = useState({ total: 0, categories: [] });
 
-  const loadExpenses = useCallback(async () => {
-    const range = monthRange(month);
-    if (!range.from || !range.to) {
-      setExpenses([]);
-      return;
-    }
-    const list = await getLocalExpenses({ from: range.from, to: range.to });
-    setExpenses(list.filter((item) => !item.isDeleted));
+  const loadReport = useCallback(async () => {
+    const report = await getMonthlyExpenseReport({ month });
+    setSummary(report || { total: 0, categories: [] });
   }, [month]);
 
   useEffect(() => {
-    loadExpenses();
-  }, [loadExpenses]);
+    loadReport();
+  }, [loadReport]);
 
   useEffect(() => {
-    const handler = () => loadExpenses();
+    const handler = () => loadReport();
     window.addEventListener('staff-expenses-sync-updated', handler);
     return () => window.removeEventListener('staff-expenses-sync-updated', handler);
-  }, [loadExpenses]);
-
-  const summary = useMemo(() => {
-    const categoryMap = new Map();
-    let total = 0;
-    expenses.forEach((item) => {
-      const amount = Number(item.amount || 0);
-      total += amount;
-      const category = item.category || 'Uncategorized';
-      categoryMap.set(category, (categoryMap.get(category) || 0) + amount);
-    });
-    const categories = Array.from(categoryMap.entries()).map(([category, amount]) => ({
-      category,
-      amount,
-    }));
-    return { total, categories };
-  }, [expenses]);
+  }, [loadReport]);
 
   return (
     <div className="staff-expenses-page">
@@ -108,4 +71,3 @@ const ExpenseMonthlyReport = () => {
 };
 
 export default ExpenseMonthlyReport;
-

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { getSettingGroup, updateSettingGroup } from '../../services/local/applicationSettingsLocalService';
 
 const STORAGE_KEY = 'mobile_theme_preference_v1';
 const MobileThemeContext = createContext(null);
@@ -15,9 +16,29 @@ export const MobileThemeProvider = ({ children }) => {
   const [theme, setTheme] = useState(readStoredTheme);
 
   useEffect(() => {
+    let mounted = true;
+    const loadRemoteTheme = async () => {
+      try {
+        const themeSettings = await getSettingGroup('theme');
+        const remoteTheme = themeSettings?.mobile;
+        if (mounted && (remoteTheme === 'dark' || remoteTheme === 'light')) {
+          setTheme(remoteTheme);
+        }
+      } catch {
+        // keep local preference
+      }
+    };
+    loadRemoteTheme();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(STORAGE_KEY, theme);
     document.documentElement.dataset.mobileTheme = theme;
+    updateSettingGroup('theme', { mobile: theme }).catch(() => {});
   }, [theme]);
 
   const toggleTheme = useCallback(() => {

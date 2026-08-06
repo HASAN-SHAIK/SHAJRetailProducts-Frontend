@@ -1,9 +1,17 @@
 import axios from 'axios';
 import { getDeviceId } from './device';
-import { getAuthToken } from './sessionStorage';
-import { preloadAllCaches } from './indexedDb';
+import { getAuthToken, saveAuthToken, saveSessionInfo } from './sessionStorage';
 
-console.log('[cacheDB] axios module loaded');
+const isDev = process.env.NODE_ENV === 'development';
+
+// Lazy import breaks circular dependency:
+// axios -> indexedDb -> productLocalService -> RepositoryFactory -> ApiProductRepository -> productApiClient -> axios
+const preloadAllCachesLazy = () =>
+  import('./indexedDb').then((module) => module.preloadAllCaches());
+
+if (isDev) {
+  console.log('[cacheDB] axios module loaded');
+}
 
 
 const api = axios.create({
@@ -12,6 +20,34 @@ const api = axios.create({
 });
 
 let serverReachabilityProbe = null;
+let refreshInFlight = null;
+
+const refreshAccessToken = async () => {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = api
+    .post('/auth/refresh')
+    .then(async (response) => {
+      const token = response?.data?.token;
+      if (token) {
+        await saveAuthToken(token);
+      }
+      if (response?.data?.user) {
+        await saveSessionInfo({
+          token: token || null,
+          user: response.data.user,
+          permissions: response.data?.permissions || response.data.user?.permissions || [],
+          store_permissions:
+            response.data?.store_permissions || response.data.user?.store_permissions || null,
+          remember_me: response.data?.remember_me === true,
+        });
+      }
+      return response;
+    })
+    .finally(() => {
+      refreshInFlight = null;
+    });
+  return refreshInFlight;
+};
 const shouldTriggerAuthExpired = (error) => {
   const status = error?.response?.status;
   if (status !== 401) return false;
@@ -63,7 +99,9 @@ api.interceptors.request.use(
       startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
     };
     const deviceId = getDeviceId();
-    console.log('Sending device id:', deviceId); // 🔍 DEBUG
+    if (isDev) {
+      console.log('Sending device id:', deviceId);
+    }
     config.headers['x-device-id'] = deviceId;
     try {
       const selectedBranchId = localStorage.getItem('selected_branch_id');
@@ -94,10 +132,12 @@ api.interceptors.response.use(
     const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const startTime = response?.config?.metadata?.startTime ?? endTime;
     const durationMs = Math.round(endTime - startTime);
-    if (response?.config?.url) {
-      console.log(`[API] ${response.config.method?.toUpperCase() || 'GET'} ${response.config.url} - ${durationMs}ms`);
-    } else {
-      console.log(`[API] Response time - ${durationMs}ms`);
+    if (isDev) {
+      if (response?.config?.url) {
+        console.log(`[API] ${response.config.method?.toUpperCase() || 'GET'} ${response.config.url} - ${durationMs}ms`);
+      } else {
+        console.log(`[API] Response time - ${durationMs}ms`);
+      }
     }
     if (typeof window !== 'undefined') {
       window.__serverOffline = false;
@@ -105,30 +145,66 @@ api.interceptors.response.use(
     }
     if (typeof window !== 'undefined') {
       const url = response?.config?.url || '';
-      if (url.includes('/platform/config')) {
-        console.log('[cacheDB] platform/config detected');
-        preloadAllCaches().catch((err) => {
-          console.error('[cacheDB] preload failed', err);
-        });
+      if (url.includes('/platform/config') && !window.__cacheDbPreloadFired) {
+        window.__cacheDbPreloadFired = true;
+        if (isDev) {
+          console.log('[cacheDB] platform/config detected');
+        }
+        preloadAllCachesLazy()
+          .then((preloadAllCaches) => preloadAllCaches())
+          .catch((err) => {
+            if (isDev) {
+              console.error('[cacheDB] preload failed', err);
+            }
+          });
       }
       if (url.includes('/auth/logout')) {
         window.__cacheDbPreloadFired = false;
-        console.log('[cacheDB] reset preload flag on logout');
+        if (isDev) {
+          console.log('[cacheDB] reset preload flag on logout');
+        }
       }
-      if (url.includes('/auth/login')) {
+      if (isDev && url.includes('/auth/login')) {
         console.log('[cacheDB] login response received');
       }
     }
     return response;
   },
   async (error) => {
+    const originalRequest = error?.config || {};
+    const requestUrl = String(originalRequest?.url || '').toLowerCase();
+    const status = error?.response?.status;
+
+    if (
+      status === 401 &&
+      !originalRequest._authRetried &&
+      !requestUrl.includes('/auth/refresh') &&
+      !requestUrl.includes('/auth/login') &&
+      !requestUrl.includes('/auth/logout')
+    ) {
+      originalRequest._authRetried = true;
+      try {
+        const refreshResponse = await refreshAccessToken();
+        const nextToken = refreshResponse?.data?.token || (await getAuthToken().catch(() => null));
+        if (nextToken) {
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers.Authorization = `Bearer ${nextToken}`;
+          return api(originalRequest);
+        }
+      } catch (refreshError) {
+        // fall through to existing auth-expired handling
+      }
+    }
+
     const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const startTime = error?.config?.metadata?.startTime ?? endTime;
     const durationMs = Math.round(endTime - startTime);
-    if (error?.config?.url) {
-      console.log(`[API] ${error.config.method?.toUpperCase() || 'GET'} ${error.config.url} - ${durationMs}ms (error)`);
-    } else {
-      console.log(`[API] Error response time - ${durationMs}ms`);
+    if (isDev) {
+      if (error?.config?.url) {
+        console.log(`[API] ${error.config.method?.toUpperCase() || 'GET'} ${error.config.url} - ${durationMs}ms (error)`);
+      } else {
+        console.log(`[API] Error response time - ${durationMs}ms`);
+      }
     }
     if (!error?.response) {
       if (error?.code === 'ERR_CANCELED') {
@@ -151,7 +227,6 @@ api.interceptors.response.use(
         }
       }
     }
-    const status = error?.response?.status;
     if (typeof window !== 'undefined') {
       if (shouldTriggerAuthExpired(error)) {
         window.dispatchEvent(new CustomEvent('auth-expired'));

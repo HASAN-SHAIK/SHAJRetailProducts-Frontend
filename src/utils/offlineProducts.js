@@ -1,11 +1,11 @@
 import {
-  updateProductsBulk,
-  getProductCacheById,
-  upsertLocalProduct,
-  getAllProducts,
   getAllBatches,
+  getAllProducts,
+  getProductCacheById,
   updateBatchesBulk,
-} from '../core/db';
+  updateProductsBulk,
+  upsertLocalProduct,
+} from '../services/local/productLocalService';
 import { enqueueInventorySync, processInventorySyncQueue } from './inventorySync';
 
 const createLocalId = () => `temp_${Date.now()}`;

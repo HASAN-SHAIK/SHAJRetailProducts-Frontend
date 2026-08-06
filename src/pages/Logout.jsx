@@ -5,11 +5,10 @@ import { useDispatch } from 'react-redux';
 import { clearUserDetails } from '../store/userSlice';
 import { clearTenantState } from '../store/tenantSlice';
 import Cookies from 'js-cookie';
-import api from '../utils/axios';
 import LoadingSpinner from '../components/common/LoadingSpinner/LoadingSpinner';
 import { clearOrderDetails } from '../store/orderSlice';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
-import { clearAuthToken, clearSessionInfo } from '../utils/sessionStorage';
+import { logout as sqlLogout } from '../services/authService';
 
 const Logout = () => {
   const navigate = useNavigate();
@@ -19,7 +18,7 @@ const Logout = () => {
     const logoutUser = async () => {
       let logoutError = null;
       try {
-        await api.post('/auth/logout');
+        await sqlLogout();
       } catch (error) {
         logoutError = error;
         console.error('Logout error:', error);
@@ -29,12 +28,7 @@ const Logout = () => {
         dispatch(clearOrderDetails());
         dispatch(clearTenantState());
         Cookies.remove('token');
-        try {
-          await clearAuthToken();
-          await clearSessionInfo();
-        } catch (err) {
-          // Ignore storage failures
-        }
+        Cookies.remove('refresh_token');
         if (logoutError) {
           const status = logoutError?.response?.status;
           const message = logoutError?.response?.data?.message;

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
-import { getOfflineImports, getSyncQueueItems, updateSyncQueueItem } from '../core/db';
+import { getOfflineImports, getSyncQueueItems, getStockConsistencyLatest, runStockConsistency, updateSyncQueueItem } from '../services/local';
 import { getOfflineOrderQueue, processOfflineQueue } from '../utils/offlineOrders';
 import { syncAllCustomers } from '../utils/customersSync';
 import { syncAllImports } from '../utils/importSync';
@@ -13,6 +13,7 @@ import { useBranchStore } from '../store/branchStore';
 import api from '../utils/axios';
 import { buildFullBackup, restoreLocalFromBackup, verifyBackup } from '../utils/backupRestore';
 import { backfillPurchasePayments } from '../services/accountingService';
+import { getTransactionById } from '../services/local/transactionLocalService';
 import './SyncCenter.css';
 
 const isQueuePending = (status) => {
@@ -71,8 +72,22 @@ const SyncCenter = () => {
     }
     try {
       const [orders, queueItems] = await Promise.all([getOfflineOrderQueue(), getSyncQueueItems()]);
+      const hydratedQueueItems = await Promise.all(
+        (Array.isArray(queueItems) ? queueItems : []).map(async (entry) => {
+          if (entry?.last_error || entry?.lastError || entry?.type !== 'accounting_txn' || !entry?.entityId) {
+            return entry;
+          }
+          try {
+            const txn = await getTransactionById(entry.entityId);
+            const error = txn?.last_error || txn?.lastError || null;
+            return error ? { ...entry, last_error: error } : entry;
+          } catch {
+            return entry;
+          }
+        })
+      );
       setOfflineOrders(Array.isArray(orders) ? orders : []);
-      setSyncQueue(Array.isArray(queueItems) ? queueItems : []);
+      setSyncQueue(hydratedQueueItems);
     } catch (err) {
       showPopup('Unable to load sync queues right now.', 'Sync Center');
     } finally {
@@ -123,8 +138,8 @@ const SyncCenter = () => {
 
   const loadConsistencyRun = useCallback(async () => {
     try {
-      const res = await api.get('/data-quality/stock-consistency/latest');
-      setConsistencyRun(res?.data?.data?.run || null);
+      const payload = await getStockConsistencyLatest();
+      setConsistencyRun(payload?.run || null);
     } catch {
       setConsistencyRun(null);
     }
@@ -416,7 +431,7 @@ const SyncCenter = () => {
     if (consistencyBusy) return;
     setConsistencyBusy(true);
     try {
-      await api.post('/data-quality/stock-consistency/run', { auto_heal: true });
+      await runStockConsistency({ autoHeal: true });
       await loadConsistencyRun();
       showPopup('Stock consistency check completed.', 'Data Quality');
     } catch (err) {
@@ -853,23 +868,29 @@ const SyncCenter = () => {
                 <th>#</th>
                 <th>Order Ref</th>
                 <th>Type</th>
+                <th>Status</th>
+                <th>Retries</th>
+                <th>Reason</th>
                 <th>Created</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="text-secondary">Loading queue...</td>
+                  <td colSpan={7} className="text-secondary">Loading queue...</td>
                 </tr>
               ) : offlineOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="text-secondary">No offline orders pending.</td>
+                  <td colSpan={7} className="text-secondary">No offline orders pending.</td>
                 </tr>
               ) : offlineOrders.map((entry, index) => (
                 <tr key={entry?.id || `offline-${index}`}>
                   <td>{index + 1}</td>
                   <td>{entry?.payload?.client_order_id || entry?.id || '-'}</td>
                   <td>{entry?.type || '-'}</td>
+                  <td>{entry?.status || 'pending'}</td>
+                  <td>{Number(entry?.retry_count || entry?.retryCount || 0)}</td>
+                  <td>{entry?.last_error || '-'}</td>
                   <td>{formatDateTime(entry?.createdAt)}</td>
                 </tr>
               ))}
@@ -891,17 +912,18 @@ const SyncCenter = () => {
                 <th>Branch</th>
                 <th>Status</th>
                 <th>Retries</th>
+                <th>Reason</th>
                 <th>Updated</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="text-secondary">Loading queue...</td>
+                  <td colSpan={9} className="text-secondary">Loading queue...</td>
                 </tr>
               ) : syncQueue.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-secondary">No sync queue entries found.</td>
+                  <td colSpan={9} className="text-secondary">No sync queue entries found.</td>
                 </tr>
               ) : syncQueue.map((entry, index) => {
                 const status = humanizeStatus(entry?.status);
@@ -915,7 +937,8 @@ const SyncCenter = () => {
                     <td>
                       <span className={`sync-status-badge status-${status}`}>{status}</span>
                     </td>
-                    <td>{Number(entry?.retryCount || entry?.retries || 0)}</td>
+                    <td>{Number(entry?.retry_count ?? entry?.retryCount ?? entry?.retries ?? 0)}</td>
+                    <td>{entry?.last_error || entry?.lastError || '-'}</td>
                     <td>{formatDateTime(entry?.updated_at || entry?.updatedAt || entry?.createdAt)}</td>
                   </tr>
                 );

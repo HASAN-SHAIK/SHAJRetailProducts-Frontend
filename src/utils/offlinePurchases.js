@@ -1,14 +1,18 @@
 import {
   addLocalBatchCache,
-  addLocalPurchaseItems,
-  getSupplierCacheById,
-  getLocalPurchases,
-  upsertSupplierLedgerEntry,
-  updateProductsCacheStock,
   updateProductsCacheBulk,
-  updateSuppliersCacheBulk,
+  updateProductsCacheStock,
+} from '../services/local/productLocalService';
+import {
+  addLocalPurchaseItems,
+  getLocalPurchases,
   upsertLocalPurchase,
-} from '../core/db';
+} from '../services/local/purchaseLocalService';
+import {
+  getSupplierCacheById,
+  updateSuppliersCacheBulk,
+  upsertSupplierLedgerEntry,
+} from '../services/local/supplierLocalService';
 import { enqueueInventorySync, processInventorySyncQueue } from './inventorySync';
 
 const STATUS_PENDING = 'pending';

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import api from '../../utils/axios';
 import './OrdersPage.css';
 import { usePopup } from '../common/PopUp/PopupProvider';
-import { enqueueOfflineOrder } from '../../utils/offlineOrders';
+import { buildLocalOrderFromEntry, enqueueOfflineOrder, getOfflineOrderQueue } from '../../utils/offlineOrders';
 import {
   clearOrdersCache,
   clearCachedOrdersByType,
@@ -14,7 +14,25 @@ import {
   upsertOrders,
 } from '../../db/ordersDb';
 import { preloadOrdersToIndexedDb } from '../../utils/indexedDb';
-import { db, getSessionValue, saveSessionValue, saveTransactionsBulk } from '../../core/db';
+import {
+  createOrderReturn,
+  deleteOrder,
+  getOrderDetail,
+  listOrders,
+  markOrderPaid,
+  getSessionValue,
+  saveSessionValue,
+  saveTransactionsBulk,
+  getAllOrderRecords,
+  getSalesOrderRecords,
+  getPurchaseOrderRecords,
+  bulkPutSalesOrders,
+  bulkPutPurchaseOrders,
+  clearSalesOrders,
+  clearPurchaseOrders,
+  getAllTransactionRecords,
+} from '../../services/local';
+import { getPurchaseDetail } from '../../services/local/purchaseLocalService';
 import { useSelector } from 'react-redux';
 import { useLocation } from 'react-router-dom';
 import { jsPDF } from "jspdf";
@@ -394,12 +412,59 @@ const OrdersPage = ({ navigate }) => {
         const numeric = Number(value);
         return Number.isFinite(numeric) ? numeric : null;
       };
-      const masterOrders = await db.orders.toArray().catch(() => []);
+      const [masterOrders, offlineQueueEntries] = await Promise.all([
+        getAllOrderRecords().catch(() => []),
+        getOfflineOrderQueue().catch(() => []),
+      ]);
       const masterById = new Map(
         (Array.isArray(masterOrders) ? masterOrders : [])
           .filter((row) => row?.id !== undefined && row?.id !== null)
           .map((row) => [String(row.id), row])
       );
+      const offlineQueueRows = (Array.isArray(offlineQueueEntries) ? offlineQueueEntries : [])
+        .filter((entry) => entry?.type === 'create')
+        .map((entry) => {
+          try {
+            return buildLocalOrderFromEntry(entry);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      const allLocalOrderRows = [...(Array.isArray(masterOrders) ? masterOrders : []), ...offlineQueueRows];
+      const dedupeRowsByLocalIdentity = (rows = []) => {
+        const seen = new Set();
+        return (Array.isArray(rows) ? rows : []).filter((row) => {
+          const id = row?.id !== undefined && row?.id !== null ? `id:${String(row.id)}` : null;
+          const clientId = row?.client_order_id ?? row?.clientOrderId;
+          const clientKey = clientId ? `client:${String(clientId)}` : null;
+          const key = clientKey || id;
+          if (!key) return true;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          if (id) seen.add(id);
+          if (clientKey) seen.add(clientKey);
+          return true;
+        });
+      };
+      const appendMissingLocalRows = (rows = [], { pendingOnly = false } = {}) => {
+        const existingKeys = new Set();
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+          if (row?.id !== undefined && row?.id !== null) existingKeys.add(`id:${String(row.id)}`);
+          const clientId = row?.client_order_id ?? row?.clientOrderId;
+          if (clientId) existingKeys.add(`client:${String(clientId)}`);
+        });
+        const missingLocal = allLocalOrderRows.filter((row) => {
+          const syncStatus = String(row?.sync_status ?? row?.syncStatus ?? '').toLowerCase();
+          const isPendingLocal = row?.is_offline === true || syncStatus === 'pending';
+          if (pendingOnly && !isPendingLocal) return false;
+          if (!isModeMatch(row)) return false;
+          const id = row?.id;
+          const clientId = row?.client_order_id ?? row?.clientOrderId;
+          return !existingKeys.has(`id:${String(id)}`) && !existingKeys.has(`client:${String(clientId)}`);
+        });
+        return missingLocal.length ? dedupeRowsByLocalIdentity([...missingLocal, ...(Array.isArray(rows) ? rows : [])]) : rows;
+      };
       const mergeRowsWithMasterOrders = (rows = []) =>
         (Array.isArray(rows) ? rows : []).map((row) => {
           const master = masterById.get(String(row?.id));
@@ -476,17 +541,17 @@ const OrdersPage = ({ navigate }) => {
         });
 
       const cached = type === 'sale'
-        ? await db.sales_orders.toArray()
-        : await db.purchase_orders.toArray();
+        ? await getSalesOrderRecords()
+        : await getPurchaseOrderRecords();
       if (requestId !== requestIdRef.current) return;
       if (cached.length) {
-        const mergedCached = mergeRowsWithMasterOrders(cached);
+        const mergedCached = mergeRowsWithMasterOrders(appendMissingLocalRows(cached));
         const normalizedCached = normalizeRowsPaymentStatus(mergedCached);
         setOrdersByType(type, normalizedCached);
         if (type === 'sale') {
-          await db.sales_orders.bulkPut(normalizedCached).catch(() => {});
+          await bulkPutSalesOrders(normalizedCached).catch(() => {});
         } else {
-          await db.purchase_orders.bulkPut(normalizedCached).catch(() => {});
+          await bulkPutPurchaseOrders(normalizedCached).catch(() => {});
         }
       }
 
@@ -502,32 +567,37 @@ const OrdersPage = ({ navigate }) => {
         );
 
       if (!shouldFetchFromServer) {
+        if (!cached.length) {
+          const localOnlyRows = normalizeRowsPaymentStatus(
+            mergeRowsWithMasterOrders(appendMissingLocalRows([]))
+          );
+          if (localOnlyRows.length) {
+            setOrdersByType(type, localOnlyRows);
+            if (type === 'sale') {
+              await bulkPutSalesOrders(localOnlyRows).catch(() => {});
+            } else {
+              await bulkPutPurchaseOrders(localOnlyRows).catch(() => {});
+            }
+          }
+        }
         return;
       }
 
       const limit = 200;
+      const maxRecords = 5000;
       let page = 1;
       const all = [];
       while (true) {
-        const endpoint = '/orders';
-        const res = await api.get(endpoint, {
-          params: {
-            range: 'all',
-            page,
-            limit,
-            sort_by: 'created_at',
-            sort_order: 'asc',
-          },
+        const { list } = await listOrders({
+          range: 'all',
+          page,
+          limit,
+          sortBy: 'created_at',
+          sortOrder: 'asc',
         });
-        const payload = res?.data ?? {};
-        const list =
-          (Array.isArray(payload?.orders) && payload.orders) ||
-          (Array.isArray(payload?.data?.orders) && payload.data.orders) ||
-          (Array.isArray(payload?.data) && payload.data) ||
-          [];
         if (!list.length) break;
         all.push(...list);
-        if (list.length < limit) break;
+        if (all.length >= maxRecords || list.length < limit) break;
         page += 1;
       }
       if (requestId !== requestIdRef.current) return;
@@ -539,14 +609,20 @@ const OrdersPage = ({ navigate }) => {
         return type === 'purchase' ? hasSupplier : !hasSupplier;
       });
 
+      apiRows = appendMissingLocalRows(apiRows);
+
       // Refresh accounting evidence first so order status can rely on the same
       // payment rows shown in Payment Entry / Receipt Entry / Cash & Bank books.
       if (navigator.onLine) {
         try {
-          if (type === 'purchase') {
-            await fetchPaymentEntries({ limit: 5000, range: 'all', type: 'supplier' });
-          } else {
-            await fetchReceiptEntries({ limit: 5000, range: 'all', type: 'customer' });
+          const cachedTxns = await getAllTransactionRecords();
+          const hasCachedPayments = (Array.isArray(cachedTxns) ? cachedTxns : []).length > 0;
+          if (!hasCachedPayments) {
+            if (type === 'purchase') {
+              await fetchPaymentEntries({ limit: 5000, range: 'all', type: 'supplier' });
+            } else {
+              await fetchReceiptEntries({ limit: 5000, range: 'all', type: 'customer' });
+            }
           }
         } catch {
           // keep going with whatever is already cached locally
@@ -557,7 +633,7 @@ const OrdersPage = ({ navigate }) => {
       // the same payment evidence (receipts/payments) without opening drawer.
       if (apiRows.length) {
         try {
-          const txns = await db.transactions.toArray();
+          const txns = await getAllTransactionRecords();
           const grouped = new Map();
           (Array.isArray(txns) ? txns : []).forEach((txn) => {
             const txnType = String(txn?.txn_type || txn?.txnType || '').toLowerCase();
@@ -605,37 +681,27 @@ const OrdersPage = ({ navigate }) => {
           return status === 'paid' && !hasPayments;
         };
 
-        const candidates = apiRows.filter(needsDetailHydration).slice(0, 60);
+        const candidates = apiRows.filter(needsDetailHydration).slice(0, 15);
         if (candidates.length) {
           const detailResults = await Promise.all(
             candidates.map(async (row) => {
               const orderId = row?.id;
               if (!orderId) return null;
               try {
-                const detailEndpoint = type === 'purchase' ? `/purchases/${orderId}` : `/orders/${orderId}`;
-                const response = await api.get(detailEndpoint);
-                const payload = response?.data ?? {};
-                const detailOrder =
-                  payload?.order ||
-                  payload?.purchase ||
-                  payload?.data?.order ||
-                  payload?.data?.purchase ||
-                  payload?.data ||
-                  null;
+                const detailOrder = type === 'purchase'
+                  ? await getPurchaseDetail(orderId).then((payload) => {
+                      if (!payload) return null;
+                      return payload?.order || payload?.purchase || payload;
+                    })
+                  : await getOrderDetail(orderId);
                 if (!detailOrder?.id) return null;
                 const items =
                   detailOrder?.items ||
                   detailOrder?.products ||
-                  payload?.data?.items ||
-                  payload?.items ||
-                  payload?.order_items ||
                   [];
                 const payments =
                   detailOrder?.payment_history ||
                   detailOrder?.payments ||
-                  payload?.payments ||
-                  payload?.transactions ||
-                  payload?.data?.payments ||
                   [];
                 const normalizedPayments = Array.isArray(payments)
                   ? payments.filter((txn) => {
@@ -674,11 +740,11 @@ const OrdersPage = ({ navigate }) => {
 
       setOrdersByType(type, apiRows);
       if (type === 'sale') {
-        await db.sales_orders.clear();
-        if (apiRows.length) await db.sales_orders.bulkPut(apiRows);
+        await clearSalesOrders();
+        if (apiRows.length) await bulkPutSalesOrders(apiRows);
       } else {
-        await db.purchase_orders.clear();
-        if (apiRows.length) await db.purchase_orders.bulkPut(apiRows);
+        await clearPurchaseOrders();
+        if (apiRows.length) await bulkPutPurchaseOrders(apiRows);
       }
       await saveSessionValue('orders_last_sync', new Date().toISOString()).catch(() => {});
       syncRequestedRef.current = false;
@@ -689,7 +755,7 @@ const OrdersPage = ({ navigate }) => {
         setIsLoading(false);
       }
     }
-  }, [setOrdersByType]);
+  }, [isModeMatch, setOrdersByType]);
 
   useEffect(() => {
     loadOrders(routeType);
@@ -899,26 +965,14 @@ const OrdersPage = ({ navigate }) => {
     setReturnError('');
     try {
       const loadFullOrderDetails = async (targetOrderId) => {
-        const response = await api.get(`/orders/${targetOrderId}`);
-        const payload = response?.data ?? {};
-        const order =
-          payload?.order ||
-          payload?.data?.order ||
-          payload?.data ||
-          null;
+        const order = await getOrderDetail(targetOrderId);
         const items =
           order?.items ||
           order?.products ||
-          payload?.items ||
-          payload?.order_items ||
-          payload?.data?.items ||
           [];
         const payments =
           order?.payment_history ||
           order?.payments ||
-          payload?.payments ||
-          payload?.transactions ||
-          payload?.data?.payments ||
           [];
         if (!order?.id) return null;
         try {
@@ -1114,7 +1168,7 @@ const OrdersPage = ({ navigate }) => {
         'cash'
       ).trim().toLowerCase();
       const customerId = returnOrder?.customer_id || returnOrder?.customer?.id || null;
-      await api.post(`/orders/${returnOrder.id}/returns`, {
+      await createOrderReturn(returnOrder.id, {
         items: payloadItems.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
@@ -1325,7 +1379,7 @@ const OrdersPage = ({ navigate }) => {
         return;
       }
 
-      await api.post('/orders/mark-paid', {
+      await markOrderPaid({
         order_id: updatedOrder.id,
         payment_mode: paymentMode,
         amount_paid: parsedAmount,
@@ -1839,7 +1893,7 @@ const OrdersPage = ({ navigate }) => {
     if (!orderId) return;
     setDeletingId(orderId);
     try {
-      await api.delete(`/orders/${orderId}`);
+      await deleteOrder(orderId);
       await deleteOrdersByIds([orderId]);
       showPopup('Order deleted', 'Success');
       closeDeleteModal();

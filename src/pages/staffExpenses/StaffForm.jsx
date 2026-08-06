@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import StaffExpensesHeader from '../../components/staffExpenses/StaffExpensesHeader';
-import { getLocalStaff, getLocalStaffById, upsertLocalStaff } from '../../core/db';
+import { getLocalStaff, getLocalStaffById, upsertLocalStaff } from '../../services/local';
 import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './StaffExpenses.css';
 

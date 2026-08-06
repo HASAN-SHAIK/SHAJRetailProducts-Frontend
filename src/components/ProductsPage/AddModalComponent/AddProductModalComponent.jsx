@@ -3,6 +3,7 @@ import './AddProductModalComponent.css'; // Add this CSS file
 import api from '../../../utils/axios';
 import { usePopup } from '../../common/PopUp/PopupProvider';
 import { searchLocalProducts } from '../../../utils/localProductSearch';
+import { getAllCategories } from '../../../services/local/categoryLocalService';
 
 const getSuggestionName = (item) => String(
   item?.name ||
@@ -56,13 +57,8 @@ const AddProductModalComponent = ({
   useEffect(() => {
     const getCategories = async () => {
       try {
-        const res = await api.get('/orders/getcategories');
-        const list = Array.isArray(res.data?.data)
-          ? res.data.data.map((c) => c.category).filter(Boolean)
-          : Array.isArray(res.data)
-            ? res.data.map((c) => c.category).filter(Boolean)
-            : [];
-        setCategories(list);
+        const list = await getAllCategories();
+        setCategories(list.map((item) => item?.name).filter(Boolean));
       } catch (err) {
         if (err.response?.status === 401) {
           showPopup("Token Expired Please Login Again!", "Session");

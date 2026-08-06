@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import StaffExpensesHeader from '../../components/staffExpenses/StaffExpensesHeader';
-import { getLocalStaff, upsertLocalExpense } from '../../core/db';
+import { getLocalStaff, upsertLocalExpense } from '../../services/local';
 import { collectValidationErrors, firstValidationMessage } from '../../utils/formValidation';
 import './StaffExpenses.css';
 

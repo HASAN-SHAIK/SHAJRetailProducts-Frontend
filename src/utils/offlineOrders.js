@@ -1,13 +1,12 @@
 import {
   deleteOfflineOrdersByIds,
-  getAllBatchesCache,
   getOfflineOrders,
-  getProductCacheByBarcode,
-  getProductIdMappings,
   saveOfflineOrdersBulk,
   upsertOfflineOrder,
-} from '../core/db';
-import { deleteOrdersByIds, upsertOrders } from '../db/ordersDb';
+} from '../services/local/offlineLocalService';
+import { getAllBatchesCache, getProductCacheByBarcode } from '../services/local/productLocalService';
+import { getProductIdMappings } from '../services/local/syncLocalService';
+import { deleteOrdersByIds, getOrderDetail, markOrderPaid, syncOfflineOrders, updateOrder, upsertOrders } from '../services/local/orderLocalService';
 
 const STORAGE_KEY = 'offline_order_queue_v1';
 let migrationDone = false;
@@ -132,6 +131,119 @@ const generateUuidV4 = () => {
   });
 };
 
+const toNumberOrNull = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const normalizeFlag = (value) => {
+  if (value === true || value === 1) return true;
+  const raw = String(value ?? '').trim().toLowerCase();
+  return ['true', 'yes', 'y', '1', 'weight', 'weighted', 'weight based', 'weight-based', 'kg', 'kgs', 'gram', 'grams'].includes(raw);
+};
+
+const normalizePaymentModeText = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'upi' || raw === 'card' || raw === 'wallet' || raw === 'online') return 'bank';
+  if (raw === 'cash' || raw === 'bank' || raw === 'credit') return raw;
+  return raw;
+};
+
+const getSyncResultError = (result) => {
+  if (!result) return 'No sync result returned by server.';
+  const errors = Array.isArray(result.errors) ? result.errors : [];
+  const first = errors.find((error) => error?.message || error?.code);
+  return first?.message || result.message || result.error || 'Order sync failed.';
+};
+
+const markEntrySyncFailed = (entry, reason) => ({
+  ...entry,
+  status: 'failed',
+  last_error: reason || 'Order sync failed.',
+  retry_count: Number(entry?.retry_count ?? entry?.retryCount ?? 0) + 1,
+  updated_at: new Date().toISOString(),
+});
+
+const validateOfflineOrderPayload = (entry = {}) => {
+  if (!entry || entry.type !== 'create') return;
+  const payload = entry.payload || {};
+  const type = String(payload.transaction_type || payload.type || '').trim().toLowerCase();
+  if (!['sale', 'purchase', 'personal'].includes(type)) {
+    throw new Error('transaction_type is required and must be sale, purchase, or personal.');
+  }
+
+  const paymentMode = normalizePaymentModeText(payload.payment_mode || payload.payment_method || payload.payment);
+  if (!paymentMode) throw new Error('payment_mode is required.');
+
+  if ((type === 'sale' || type === 'purchase') && !payload.branch_id) {
+    throw new Error('branch_id is required before saving an offline order.');
+  }
+
+  const products = Array.isArray(payload.products)
+    ? payload.products
+    : Array.isArray(payload.items)
+      ? payload.items
+      : [];
+
+  if (type === 'sale') {
+    if (!products.length) throw new Error('products are required for sale.');
+    let computedTotal = 0;
+    products.forEach((item) => {
+      const productId = item?.product_id ?? item?.productId;
+      if (!productId) throw new Error('product_id is required for sale items.');
+      if (isTempId(productId)) throw new Error('Product must sync before it can be used in an order.');
+      const quantity = toNumberOrNull(item?.quantity ?? item?.qty);
+      if (quantity === null || quantity <= 0) throw new Error('quantity must be > 0 for sale items.');
+      if (!normalizeFlag(item?.is_weight_based) && !Number.isInteger(quantity)) {
+        throw new Error('Decimal quantity is allowed only for weight-based products.');
+      }
+      const price = toNumberOrNull(item?.selling_price ?? item?.price ?? item?.unit_price);
+      if (price === null || price <= 0) throw new Error('selling_price must be > 0 for sale items.');
+      computedTotal += quantity * price;
+    });
+
+    const totalAmount = toNumberOrNull(payload.total_amount ?? payload.total_price) ?? computedTotal;
+    if (totalAmount <= 0) throw new Error('total_amount must be > 0 for sale.');
+    const payments = Array.isArray(payload.payments) ? payload.payments : [];
+    const totalPaid = payments.reduce((sum, payment) => {
+      const amount = toNumberOrNull(payment?.amount_paid ?? payment?.amount);
+      return amount !== null ? sum + amount : sum;
+    }, 0);
+    const hasCustomer =
+      Boolean(payload.customer_id) ||
+      Boolean(String(payload.customer_name || '').trim()) ||
+      Boolean(String(payload.customer_phone || payload.customer_mobile || '').trim());
+    if (totalPaid < totalAmount && !hasCustomer) {
+      throw new Error('Customer is required for partial or credit sale.');
+    }
+  } else if (type === 'purchase') {
+    if (!products.length) throw new Error('products are required for purchase.');
+    if (!payload.supplier_id && !payload.supplierId) throw new Error('supplier_id is required for purchase.');
+    products.forEach((item) => {
+      if (!String(item?.product_name || '').trim()) throw new Error('product_name is required for purchase items.');
+      if (!String(item?.company || '').trim()) throw new Error('company is required for purchase items.');
+      const quantity = toNumberOrNull(item?.quantity ?? item?.qty);
+      if (quantity === null || quantity <= 0) throw new Error('quantity must be > 0 for purchase items.');
+      const purchasePrice = toNumberOrNull(item?.purchase_price);
+      if (purchasePrice === null || purchasePrice <= 0) throw new Error('purchase_price must be > 0 for purchase items.');
+      const sellingPrice = toNumberOrNull(item?.selling_price);
+      if (sellingPrice === null || sellingPrice <= 0) throw new Error('selling_price must be > 0 for purchase items.');
+    });
+  } else if (type === 'personal') {
+    const totalAmount = toNumberOrNull(payload.total_amount ?? payload.total_price);
+    if (totalAmount === null || totalAmount <= 0) throw new Error('total_amount must be > 0 for personal order.');
+  }
+
+  const payments = Array.isArray(payload.payments) ? payload.payments : [];
+  payments.forEach((payment) => {
+    const amount = toNumberOrNull(payment?.amount_paid ?? payment?.amount);
+    if (amount === null || amount <= 0) throw new Error('payment amount must be > 0.');
+    const mode = normalizePaymentModeText(payment?.payment_mode || payment?.payment_method);
+    if (!mode || mode === 'credit') throw new Error('payment_mode must be cash or bank for paid entries.');
+  });
+};
+
 export const enqueueOfflineOrder = async (entry) => {
   const payload = { ...(entry.payload || {}) };
   if (entry.type === 'create' && !payload.client_order_id) {
@@ -143,6 +255,7 @@ export const enqueueOfflineOrder = async (entry) => {
     ...entry,
     payload,
   };
+  validateOfflineOrderPayload(withMeta);
   try {
     await upsertOfflineOrder(withMeta);
   } catch {
@@ -190,6 +303,8 @@ const buildOfflineSyncOrder = (entry) => {
     is_gst_enabled: payload.is_gst_enabled,
     gst_mode: payload.gst_mode,
     client_created_at: payload.client_created_at || entry.createdAt,
+    updated_at: payload.updated_at || payload.updatedAt || entry.updated_at || entry.updatedAt || entry.createdAt,
+    sync_version: payload.sync_version ?? payload.syncVersion ?? payload.version_number ?? 0,
     customer_name: payload.customer_name,
     customer_phone: payload.customer_phone || null,
     customer_id:
@@ -282,7 +397,7 @@ const normalizeTempProductIds = async (entry) => {
   };
 };
 
-const buildLocalOrderFromEntry = (entry) => {
+export const buildLocalOrderFromEntry = (entry) => {
   const payload = entry.payload || {};
   const clientOrderId = payload.client_order_id || entry.client_order_id;
   const localId = clientOrderId ? `local:${clientOrderId}` : `local:${entry.id}`;
@@ -321,8 +436,11 @@ const buildLocalOrderFromEntry = (entry) => {
     local_id: entry.id,
     client_order_id: clientOrderId || null,
     sync_status: 'pending',
+    syncStatus: 'pending',
     is_offline: true,
+    transaction_type: payload.transaction_type || payload.type || 'sale',
     branch_id: payload.branch_id || null,
+    product_summary: productSummary,
     products_summary: productSummary,
     product_names: productNames,
     product_count: products.length,
@@ -330,9 +448,12 @@ const buildLocalOrderFromEntry = (entry) => {
     customer_phone: payload.customer_phone || null,
     customer_id: payload.customer_id || null,
     total_amount: totalAmount,
+    total_price: totalAmount,
+    total: totalAmount,
     total_paid: totalPaid || 0,
+    paid_amount: totalPaid || 0,
     returned_amount: 0,
-    balance: null,
+    balance: Math.max(Number(totalAmount || 0) - Number(totalPaid || 0), 0),
     payment_status: paymentStatus,
     billing_type: payload.billing_type || payload.billingType || 'retail',
     payment_mode: payload.payment_mode || payload.payment_method || payload.payment || null,
@@ -343,7 +464,47 @@ const buildLocalOrderFromEntry = (entry) => {
   };
 };
 
-export const processOfflineQueue = async (api) => {
+const cacheSyncedOrderFromResult = async (entry, result) => {
+  const payload = entry.payload || {};
+  const clientOrderId = payload.client_order_id || entry.client_order_id;
+  const localId = clientOrderId ? `local:${clientOrderId}` : `local:${entry.id}`;
+  const serverOrderId =
+    result?.order_id ||
+    result?.orderId ||
+    result?.id ||
+    result?.order?.id ||
+    result?.data?.order_id ||
+    result?.data?.order?.id ||
+    null;
+  if (!serverOrderId) return false;
+
+  try {
+    const orderPayload = await getOrderDetail(serverOrderId);
+    if (orderPayload) {
+      await upsertOrders([orderPayload]);
+      await deleteOrdersByIds([localId]);
+      emitOrdersCacheUpdated();
+      return true;
+    }
+  } catch {
+    // fall back to the original local payload below
+  }
+
+  const fallbackOrder = {
+    ...buildLocalOrderFromEntry(entry),
+    id: serverOrderId,
+    sync_status: 'synced',
+    syncStatus: 'synced',
+    is_offline: false,
+    order_status: result?.order_status || payload.order_status || 'pending',
+  };
+  await upsertOrders([fallbackOrder]);
+  await deleteOrdersByIds([localId]);
+  emitOrdersCacheUpdated();
+  return true;
+};
+
+export const processOfflineQueue = async (_api) => {
   if (!navigator.onLine) return { processed: 0, failed: 0, remaining: (await readQueue()).length };
 
   const queue = await readQueue();
@@ -366,8 +527,7 @@ export const processOfflineQueue = async (api) => {
       }
       const orders = createEntries.map(buildOfflineSyncOrder);
       const sync_id = generateUuidV4();
-      const res = await api.post('/orders/offline-sync', { sync_id, orders });
-      const results = res?.data?.results || [];
+      const { results } = await syncOfflineOrders({ syncId: sync_id, orders });
       synced = Array.isArray(results) ? results : [];
       const resultMap = new Map(
         results.map((r) => [r.client_order_id, r])
@@ -380,27 +540,10 @@ export const processOfflineQueue = async (api) => {
         if (result && (result.status === 'created' || result.status === 'duplicate')) {
           processed += 1;
           if (entry.id) processedIds.push(entry.id);
-          const localId = clientOrderId ? `local:${clientOrderId}` : `local:${entry.id}`;
-          try {
-            await deleteOrdersByIds([localId]);
-          } catch {
-            // ignore cache delete failures
-          }
-          if (result.order_id) {
-            try {
-              const orderRes = await api.get(`/orders/${result.order_id}`);
-              const orderPayload = orderRes?.data?.order || orderRes?.data || null;
-              if (orderPayload) {
-                await upsertOrders([orderPayload]);
-                emitOrdersCacheUpdated();
-              }
-            } catch {
-              // ignore order fetch failures
-            }
-          }
+          await cacheSyncedOrderFromResult(entry, result).catch(() => {});
         } else {
           failed += 1;
-          remaining.push(entry);
+          remaining.push(markEntrySyncFailed(entry, getSyncResultError(result)));
         }
       }
     } catch (err) {
@@ -411,44 +554,23 @@ export const processOfflineQueue = async (api) => {
           const normalized = await normalizeTempProductIds(entry);
           const singleOrder = [buildOfflineSyncOrder({ ...entry, payload: normalized.payload })];
           const singleSyncId = generateUuidV4();
-          const singleRes = await api.post('/orders/offline-sync', {
-            sync_id: singleSyncId,
+          const { results: singleResults } = await syncOfflineOrders({
+            syncId: singleSyncId,
             orders: singleOrder,
           });
-          const singleResult = Array.isArray(singleRes?.data?.results)
-            ? singleRes.data.results[0]
-            : null;
+          const singleResult = Array.isArray(singleResults) ? singleResults[0] : null;
           if (singleResult && (singleResult.status === 'created' || singleResult.status === 'duplicate')) {
             processed += 1;
             if (entry.id) processedIds.push(entry.id);
-            const payload = entry.payload || {};
-            const clientOrderId = payload.client_order_id || entry.client_order_id;
-            const localId = clientOrderId ? `local:${clientOrderId}` : `local:${entry.id}`;
-            try {
-              await deleteOrdersByIds([localId]);
-            } catch {
-              // ignore cache delete failures
-            }
-            if (singleResult.order_id) {
-              try {
-                const orderRes = await api.get(`/orders/${singleResult.order_id}`);
-                const orderPayload = orderRes?.data?.order || orderRes?.data || null;
-                if (orderPayload) {
-                  await upsertOrders([orderPayload]);
-                  emitOrdersCacheUpdated();
-                }
-              } catch {
-                // ignore order fetch failures
-              }
-            }
+            await cacheSyncedOrderFromResult(entry, singleResult).catch(() => {});
             synced.push(singleResult);
           } else {
             failed += 1;
-            remaining.push(entry);
+            remaining.push(markEntrySyncFailed(entry, getSyncResultError(singleResult)));
           }
-        } catch {
+        } catch (singleErr) {
           failed += 1;
-          remaining.push(entry);
+          remaining.push(markEntrySyncFailed(entry, singleErr?.message || err?.message || 'Order sync failed.'));
         }
       }
     }
@@ -456,23 +578,23 @@ export const processOfflineQueue = async (api) => {
 
   for (const item of updateEntries) {
     try {
-      await api.put(`/orders/${item.orderId}`, item.payload);
+      await updateOrder(item.orderId, item.payload);
       processed += 1;
       if (item.id) processedIds.push(item.id);
     } catch (err) {
       failed += 1;
-      remaining.push(item);
+      remaining.push(markEntrySyncFailed(item, err?.message || 'Order update sync failed.'));
     }
   }
 
   for (const item of markPaidEntries) {
     try {
-      await api.post('/orders/mark-paid', item.payload);
+      await markOrderPaid(item.payload);
       processed += 1;
       if (item.id) processedIds.push(item.id);
     } catch (err) {
       failed += 1;
-      remaining.push(item);
+      remaining.push(markEntrySyncFailed(item, err?.message || 'Mark paid sync failed.'));
     }
   }
 

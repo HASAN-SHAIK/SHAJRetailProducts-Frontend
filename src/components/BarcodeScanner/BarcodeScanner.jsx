@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../../utils/axios';
-import { getProductByBarcode } from '../../core/db';
+import { getProductByBarcode } from '../../services/local';
 import { normalizeDisplayProduct } from '../../utils/localProductSearch';
 import { createOfflineProduct } from '../../utils/offlineProducts';
 

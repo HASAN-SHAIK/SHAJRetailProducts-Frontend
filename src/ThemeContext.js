@@ -1,4 +1,5 @@
 import React, { createContext, useState, useEffect, useMemo } from 'react';
+import { getSettingGroup, updateSettingGroup } from './services/local/applicationSettingsLocalService';
 
 export const ThemeContext = createContext();
 const STORAGE_KEY = 'desktop_theme_preference_v1';
@@ -15,6 +16,25 @@ export const ThemeProvider = ({ children }) => {
   const [theme, setTheme] = useState(readStoredTheme);
 
   useEffect(() => {
+    let mounted = true;
+    const loadRemoteTheme = async () => {
+      try {
+        const themeSettings = await getSettingGroup('theme');
+        const remoteTheme = themeSettings?.desktop;
+        if (mounted && (remoteTheme === 'dark' || remoteTheme === 'light')) {
+          setTheme(remoteTheme);
+        }
+      } catch {
+        // keep local preference
+      }
+    };
+    loadRemoteTheme();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.body.classList.remove('app-theme-dark', 'app-theme-light');
     document.body.classList.add(`app-theme-${theme}`);
@@ -23,22 +43,22 @@ export const ThemeProvider = ({ children }) => {
     } catch {
       // Ignore storage failures.
     }
+    updateSettingGroup('theme', { desktop: theme }).catch(() => {});
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  const value = useMemo(() => ({
-    theme,
-    isDark: theme === 'dark',
-    toggleTheme,
-    setTheme,
-  }), [theme]);
-
-  return (
-    <ThemeContext.Provider value={value}>
-      {children}
-    </ThemeContext.Provider>
+  const value = useMemo(
+    () => ({
+      theme,
+      isDark: theme === 'dark',
+      toggleTheme,
+      setTheme,
+    }),
+    [theme]
   );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 };

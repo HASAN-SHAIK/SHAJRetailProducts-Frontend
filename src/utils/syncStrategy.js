@@ -1,4 +1,4 @@
-import { getConfigValue, saveConfigValue } from '../core/db';
+import { getConfigValue, saveConfigValue } from '../services/local/configLocalService';
 
 const SYNC_STATE_KEY = 'sync_strategy_state_v1';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;

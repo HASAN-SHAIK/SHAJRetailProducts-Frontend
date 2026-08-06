@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import api from '../../utils/axios';
-import { getSupplierCacheById } from '../../core/db';
+import { getSupplierById, getSupplierCacheById } from '../../services/local';
 import { createOfflineSupplier, updateOfflineSupplier } from '../../utils/offlineSuppliers';
 import './Suppliers.css';
 
@@ -30,8 +29,7 @@ const SupplierForm = () => {
     const load = async () => {
       try {
         if (!navigator.onLine) throw new Error('offline');
-        const res = await api.get(`/suppliers/${id}`);
-        const supplier = res?.data?.data?.supplier || res?.data?.supplier;
+        const supplier = await getSupplierById(id);
         if (supplier) {
           setForm((prev) => ({
             ...prev,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
-import api from '../../utils/axios';
+import { listOrders } from '../../services/local';
 import MobileShell from '../components/MobileShell';
 import SectionCard from '../components/SectionCard';
 import OrderItem from '../components/OrderItem';
@@ -30,21 +30,17 @@ const OrdersMobile = () => {
     }
 
     try {
-      const res = await api.get('/orders', {
-        params: {
-          view: 'mobile',
-          page: nextPage,
-          limit: 12,
-        },
+      const { list: nextOrders, pagination } = await listOrders({
+        view: 'mobile',
+        page: nextPage,
+        limit: 12,
       });
-      const payload = res.data || {};
-      const nextOrders = payload.orders || [];
       if (nextPage === 1) {
         setOrders(nextOrders);
       } else {
         setOrders((prev) => [...prev, ...nextOrders]);
       }
-      setTotal(payload.total || 0);
+      setTotal(pagination?.total || pagination?.total_count || nextOrders.length || 0);
       setPage(nextPage);
     } catch {
       if (nextPage === 1) {

@@ -8,21 +8,25 @@ import { useWhatsappStore } from '../../store/whatsappStore';
 import { useBranchStore } from '../../store/branchStore';
 import {
   addSyncQueueItem,
-  getAllBatches,
+  getBatchesForProduct,
   getAllCustomers,
-  getConfigValue,
+  getBranchStock,
   getProductCacheById,
   getProductByBarcode,
-  saveConfigValue,
+  getStockCount,
+  isBatchExpired,
+  searchCustomers,
   updateProductsBulk,
   upsertCustomerLocal,
   upsertCustomersBulk,
   upsertTransaction,
   saveTransactionsBulk,
-} from '../../core/db';
+} from '../../services/local';
+import { createOrder } from '../../services/orderService';
 import { searchLocalProducts } from '../../utils/localProductSearch';
 import { enqueueOfflineOrder, processOfflineQueue } from '../../utils/offlineOrders';
 import { runDeltaSync } from '../../utils/deltaSync';
+import { getSettingGroup, updateSettingGroup } from '../../services/local/applicationSettingsLocalService';
 import { syncAllCustomers } from '../../utils/customersSync';
 import { createOfflineProduct } from '../../utils/offlineProducts';
 import CartList from '../../components/Billing/CartList';
@@ -102,32 +106,6 @@ const buildBarcodeUrl = (barcode, mode) => {
     return `/products/barcode/purchase?barcode=${encodeURIComponent(barcode)}`;
   }
   return `/products/barcode/sale?barcode=${encodeURIComponent(barcode)}`;
-};
-
-const getStockCount = (product) => {
-  const raw =
-    product?.quantity_remaining ??
-    product?.quantityRemaining ??
-    product?.available_quantity ??
-    product?.availableQuantity ??
-    product?.stock_quantity ??
-    product?.stockQuantity ??
-    product?.quantity ??
-    product?.stock ??
-    null;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const isBatchExpired = (batch) => {
-  const value = batch?.expiry_date ?? batch?.expiryDate ?? null;
-  if (!value) return false;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return false;
-  const today = new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const batchDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  return batchDay < todayStart;
 };
 
 const isLikelyLocalBatchId = (value) => {
@@ -557,10 +535,10 @@ const RetailBilling = () => {
 
   useEffect(() => {
     let mounted = true;
-    getConfigValue('billing_receipt_paper_width_mm')
-      .then((value) => {
+    getSettingGroup('printer')
+      .then((printerSettings) => {
         if (!mounted) return;
-        const numeric = Number(value);
+        const numeric = Number(printerSettings?.receipt_paper_width_mm);
         if (Number.isFinite(numeric) && numeric >= 40 && numeric <= 120) {
           setPaperWidth(numeric);
           setPaperWidthInput(String(numeric));
@@ -957,12 +935,9 @@ const RetailBilling = () => {
       const cachedProduct = await getProductCacheById(productId);
       productStock = getStockCount(cachedProduct);
     }
-    const allBatches = await getAllBatches();
-    const filtered = (Array.isArray(allBatches) ? allBatches : [])
+    const productBatches = await getBatchesForProduct(productId, effectiveBranchId);
+    const filtered = (Array.isArray(productBatches) ? productBatches : [])
       .filter((batch) => {
-        if (batch?.is_deleted) return false;
-        if (String(batch?.product_id) !== String(productId)) return false;
-        if (effectiveBranchId && batch?.branch_id && String(batch.branch_id) !== String(effectiveBranchId)) return false;
         if (isBatchExpired(batch)) return false;
         const available = Number(batch?.quantity_remaining ?? batch?.quantity ?? 0);
         return Number.isFinite(available) && available > 0;
@@ -1481,13 +1456,8 @@ const RetailBilling = () => {
         setCustomerSuggestions([]);
         return;
       }
-      const response = await api.get(`/customers`, { params: { search: text, limit: 20 } });
-      const results = response?.data?.data?.customers || response?.data?.customers || [];
-      const list = Array.isArray(results) ? results : [];
+      const list = await searchCustomers({ search: text, limit: 20 });
       setCustomerSuggestions(dedupeCustomersByIdentity(list).slice(0, 20));
-      if (list.length) {
-        upsertCustomersBulk(list).catch(() => {});
-      }
     } catch {
       setCustomerSuggestions([]);
     }
@@ -1552,7 +1522,7 @@ const RetailBilling = () => {
       clearTimeout(saveTimerRef.current);
     }
     saveTimerRef.current = setTimeout(() => {
-      saveConfigValue('billing_receipt_paper_width_mm', numeric).catch(() => {});
+      updateSettingGroup('printer', { receipt_paper_width_mm: numeric }).catch(() => {});
     }, 400);
   };
 
@@ -1606,11 +1576,7 @@ const RetailBilling = () => {
     const checks = await Promise.all(
       productEntries.map(async ([productId, requestedQty]) => {
         try {
-          const response = await api.get('/stock', {
-            params: { product_id: productId },
-            timeout: STOCK_CHECK_TIMEOUT_MS,
-          });
-          const list = Array.isArray(response?.data?.stock) ? response.data.stock : [];
+          const list = await getBranchStock(productId, { timeout: STOCK_CHECK_TIMEOUT_MS });
           const branchRow = list.find((row) => String(row?.branch_id) === String(effectiveBranchId));
           const availableQty = Number(branchRow?.quantity ?? 0);
           if (!Number.isFinite(availableQty) || requestedQty > availableQty) {
@@ -1887,7 +1853,7 @@ const RetailBilling = () => {
           return;
         }
         const response = await withTimeout(
-          api.post('/orders', payload, { timeout: ORDER_CREATE_TIMEOUT_MS }).catch(() => null),
+          createOrder(payload, { timeout: ORDER_CREATE_TIMEOUT_MS }).catch(() => null),
           ORDER_CREATE_TIMEOUT_MS,
           null
         );
@@ -1895,7 +1861,15 @@ const RetailBilling = () => {
           showPopup('Order request timed out. Please retry checkout.', 'Error');
           return;
         }
-        const serverOrderId = response?.data?.order_id || response?.data?.order?.id || response?.data?.id || null;
+        const serverOrderId =
+          response?.orderId ||
+          response?.order_id ||
+          response?.order?.id ||
+          response?.data?.order_id ||
+          response?.data?.order?.id ||
+          response?.data?.id ||
+          response?.id ||
+          null;
         resetCheckoutModalState();
         setLastOrderId(serverOrderId);
         printReceipt(serverOrderId).catch(() => {});
@@ -1929,11 +1903,17 @@ const RetailBilling = () => {
         }
         return;
       }
-      const offlineEntry = await withTimeout(
-        enqueueOfflineOrder({ type: 'create', payload }).catch(() => null),
-        OFFLINE_ENQUEUE_TIMEOUT_MS,
-        null
-      );
+      let offlineEntry = null;
+      try {
+        offlineEntry = await withTimeout(
+          enqueueOfflineOrder({ type: 'create', payload }),
+          OFFLINE_ENQUEUE_TIMEOUT_MS,
+          null
+        );
+      } catch (err) {
+        showPopup(err?.message || 'Unable to save order locally right now. Please retry.', 'Validation');
+        return;
+      }
       if (!offlineEntry) {
         showPopup('Unable to save order locally right now. Please retry.', 'Error');
         return;

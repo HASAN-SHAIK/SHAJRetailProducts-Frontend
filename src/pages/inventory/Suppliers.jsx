@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../../utils/axios';
-import { dedupeSuppliersCache, updateSuppliersCacheBulk } from '../../core/db';
+import { dedupeSuppliersCache, searchSuppliers, updateSuppliersCacheBulk } from '../../services/local';
 import { syncAllInventory } from '../../utils/inventorySync';
 import './Suppliers.css';
 
@@ -49,10 +48,10 @@ const Suppliers = () => {
         setSuppliers([]);
         return;
       }
-      const res = await api.get('/suppliers', {
-        params: term ? { search: term } : { limit: 500 },
+      const list = await searchSuppliers({
+        search: term || undefined,
+        limit: 500,
       });
-      const list = res?.data?.data?.suppliers || res?.data?.suppliers || [];
       if (Array.isArray(list) && list.length) {
         updateSuppliersCacheBulk(list).catch(() => {});
       }

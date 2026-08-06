@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
-import { getLocalGstEntries } from '../../core/db';
+import { getLocalGstEntries } from '../../services/local';
 import { fetchGstFilingData } from '../../services/returnsCorrectionsApi';
 import './ReturnsCorrections.css';
 

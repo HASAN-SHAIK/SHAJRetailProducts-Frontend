@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
-import { getLocalSalesReturns } from '../../core/db';
+import { getLocalSalesReturns } from '../../services/local';
 import { fetchReturns } from '../../services/returnsCorrectionsApi';
 import './ReturnsCorrections.css';
 

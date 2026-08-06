@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
 import dayjs from 'dayjs';
 import api from '../../utils/axios';
+import { createOrder, searchCustomers } from '../../services/local';
 import { normalizeDisplayProduct, searchLocalProducts } from '../../utils/localProductSearch';
 import { useBranchStore } from '../../store/branchStore';
 import { useWhatsappStore } from '../../store/whatsappStore';
@@ -134,17 +135,10 @@ const BillingMobile = () => {
     const timer = setTimeout(async () => {
       setCustomerSearching(true);
       try {
-        const response = await api.get('/customers', {
-          params: {
-            search: term,
-            limit: 8,
-          },
+        const list = await searchCustomers({
+          search: term,
+          limit: 8,
         });
-        const list =
-          response?.data?.data?.customers ||
-          response?.data?.customers ||
-          response?.data?.data ||
-          [];
         if (!cancelled) {
           setCustomerSuggestions(Array.isArray(list) ? list : []);
         }
@@ -547,8 +541,8 @@ const BillingMobile = () => {
 
     setIsSubmitting(true);
     try {
-      const response = await api.post('/orders', payload);
-      const orderId = response?.data?.order_id || response?.data?.order?.id || response?.data?.id || '';
+      const result = await createOrder(payload);
+      const orderId = result?.orderId || result?.order?.id || result?.data?.order_id || result?.data?.id || '';
       const normalizedPhone = String(customerPhone || '').replace(/\D+/g, '');
       let statusMessage = orderId ? `Bill created successfully. Order #${orderId}` : 'Bill created successfully.';
       if (whatsappEnabled && orderId && normalizedPhone.length === 10) {

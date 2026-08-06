@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
-import api from '../../utils/axios';
+import { getSalesSummary } from '../../services/local';
 import MobileShell from '../components/MobileShell';
 import MetricCard from '../components/MetricCard';
 import SectionCard from '../components/SectionCard';
@@ -18,8 +18,8 @@ const ReportsMobile = () => {
     let active = true;
     const fetchSummary = async () => {
       try {
-        const res = await api.get('/mobile/sales-summary');
-        if (active) setSummary(res.data || null);
+        const payload = await getSalesSummary();
+        if (active) setSummary(payload || null);
       } catch {
         if (active) setSummary(null);
       } finally {

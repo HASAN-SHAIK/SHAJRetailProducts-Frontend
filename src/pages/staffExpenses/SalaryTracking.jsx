@@ -4,12 +4,12 @@ import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import StaffExpensesHeader from '../../components/staffExpenses/StaffExpensesHeader';
 import {
   getConfigValue,
-  getLocalExpenses,
   getLocalSalaries,
+  getStaffExpenseTotal,
   getLocalStaff,
   saveConfigValue,
   upsertLocalSalary
-} from '../../core/db';
+} from '../../services/local';
 import './StaffExpenses.css';
 
 const SALARY_DEDUCT_TOGGLE_KEY = 'staff_salary_auto_deduct_expenses';
@@ -97,16 +97,12 @@ const SalaryTracking = () => {
         setLinkedStaffExpenseTotal(0);
         return;
       }
-      const list = await getLocalExpenses({
-        type: 'staff',
+      const total = await getStaffExpenseTotal({
         staffId: form.staffId,
         from: range.from,
-        to: range.to
+        to: range.to,
       });
       if (cancelled) return;
-      const total = (Array.isArray(list) ? list : [])
-        .filter((item) => !item?.isDeleted)
-        .reduce((sum, item) => sum + Number(item?.amount || 0), 0);
       setLinkedStaffExpenseTotal(total);
     };
     loadLinkedExpenses();

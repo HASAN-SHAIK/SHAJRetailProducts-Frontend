@@ -1,9 +1,9 @@
-import api from './axios';
 import {
   getAllProductsCache,
   getProductCacheByBarcode,
   updateProductsBulk,
-} from '../core/db';
+} from '../services/local/productLocalService';
+import { searchProductsPurchase } from '../Repositories/api/productApiClient';
 
 const normalizeText = (value) => String(value || '').trim().toLowerCase();
 const isLocalId = (value) => {
@@ -102,13 +102,7 @@ export const searchProducts = async (query, branchId = null, { allowRemote = fal
   if (!allowRemote || !navigator.onLine) return [];
 
   try {
-    const headers = branchId ? { 'x-branch-id': branchId } : undefined;
-    const response = await api.get('/products/search/purchase', {
-      params: { name: term },
-      headers,
-    });
-    const payload = response?.data?.data ?? response?.data?.products ?? response?.data ?? [];
-    const list = Array.isArray(payload) ? payload : [];
+    const list = await searchProductsPurchase(term, branchId);
     if (list.length) {
       await updateProductsBulk(list).catch(() => {});
       return list.map(normalizeProduct).filter((product) => isBranchMatch(product, branchId));
