@@ -1,10 +1,12 @@
 import { IndexedDbDatabaseRepository } from '../Repositories/IndexedDbDatabaseRepository';
 import { ApiProductRepository } from '../Repositories/ApiProductRepository';
 import { IndexedDbProductRepository } from '../Repositories/IndexedDbProductRepository';
+import { LocalPosProductRepository } from '../Repositories/LocalPosProductRepository';
 import { ApiCategoryRepository } from '../Repositories/ApiCategoryRepository';
 import { LocalCategoryRepository } from '../Repositories/LocalCategoryRepository';
 import { ApiCustomerRepository } from '../Repositories/ApiCustomerRepository';
 import { IndexedDbCustomerRepository } from '../Repositories/IndexedDbCustomerRepository';
+import { LocalPosCustomerRepository } from '../Repositories/LocalPosCustomerRepository';
 import { ApiSupplierRepository } from '../Repositories/ApiSupplierRepository';
 import { IndexedDbSupplierRepository } from '../Repositories/IndexedDbSupplierRepository';
 import { ApiInventoryRepository } from '../Repositories/ApiInventoryRepository';
@@ -16,6 +18,7 @@ import { IndexedDbSyncRepository } from '../Repositories/IndexedDbSyncRepository
 import { IndexedDbOfflineRepository } from '../Repositories/IndexedDbOfflineRepository';
 import { ApiOrderRepository } from '../Repositories/ApiOrderRepository';
 import { IndexedDbOrderRepository } from '../Repositories/IndexedDbOrderRepository';
+import { LocalPosOrderRepository } from '../Repositories/LocalPosOrderRepository';
 import { ApiPurchaseRepository } from '../Repositories/ApiPurchaseRepository';
 import { IndexedDbPurchaseRepository } from '../Repositories/IndexedDbPurchaseRepository';
 import { IndexedDbStaffRepository } from '../Repositories/IndexedDbStaffRepository';
@@ -31,6 +34,7 @@ import { IndexedDbMobileRepository } from '../Repositories/IndexedDbMobileReposi
 import { IndexedDbOfflineOperationRepository } from '../Repositories/IndexedDbOfflineOperationRepository';
 
 const instances = {};
+const localPosEnabled = () => String(process.env.REACT_APP_POS_LOCAL_API_ENABLED || 'false').toLowerCase() === 'true';
 
 export const getDatabaseRepository = () => {
   if (!instances.database) instances.database = new IndexedDbDatabaseRepository();
@@ -40,7 +44,8 @@ export const getDatabaseRepository = () => {
 export const getProductRepository = () => {
   if (!instances.product) {
     const useApiRepository = String(process.env.REACT_APP_PRODUCT_REPOSITORY || 'api').toLowerCase() !== 'indexeddb';
-    instances.product = useApiRepository ? new ApiProductRepository() : new IndexedDbProductRepository();
+    if (localPosEnabled() && useApiRepository) instances.product = new LocalPosProductRepository();
+    else instances.product = useApiRepository ? new ApiProductRepository() : new IndexedDbProductRepository();
   }
   return instances.product;
 };
@@ -56,7 +61,8 @@ export const getCategoryRepository = () => {
 export const getCustomerRepository = () => {
   if (!instances.customer) {
     const useApiRepository = String(process.env.REACT_APP_CUSTOMER_REPOSITORY || 'api').toLowerCase() !== 'indexeddb';
-    instances.customer = useApiRepository ? new ApiCustomerRepository() : new IndexedDbCustomerRepository();
+    if (localPosEnabled() && useApiRepository) instances.customer = new LocalPosCustomerRepository();
+    else instances.customer = useApiRepository ? new ApiCustomerRepository() : new IndexedDbCustomerRepository();
   }
   return instances.customer;
 };
@@ -128,7 +134,8 @@ export const getBackupRepository = () => {
 export const getOrderRepository = () => {
   if (!instances.order) {
     const useApiRepository = String(process.env.REACT_APP_SALES_REPOSITORY || 'api').toLowerCase() !== 'indexeddb';
-    instances.order = useApiRepository ? new ApiOrderRepository() : new IndexedDbOrderRepository();
+    if (localPosEnabled() && useApiRepository) instances.order = new LocalPosOrderRepository();
+    else instances.order = useApiRepository ? new ApiOrderRepository() : new IndexedDbOrderRepository();
   }
   return instances.order;
 };
@@ -166,9 +173,7 @@ export const getMobileRepository = () => {
 };
 
 export const getOfflineOperationRepository = () => {
-  if (!instances.offlineOperation) {
-    instances.offlineOperation = new IndexedDbOfflineOperationRepository();
-  }
+  if (!instances.offlineOperation) instances.offlineOperation = new IndexedDbOfflineOperationRepository();
   return instances.offlineOperation;
 };
 
