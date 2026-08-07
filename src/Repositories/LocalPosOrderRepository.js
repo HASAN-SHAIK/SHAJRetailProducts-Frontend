@@ -52,14 +52,14 @@ const toLocalCreatePayload = (payload = {}) => ({
   items: toLocalItems(payload),
 });
 
-const toPaymentInput = (payload = {}) => ({
+const toPaymentInput = (payload = {}, fallbackCurrency = 'INR') => ({
   client_payment_id: String(payload.client_payment_id || payload.payment_id || uuid('payment')),
-  mode: String(payload.mode || payload.payment_mode || payload.method || 'cash').toLowerCase(),
+  mode: String(payload.mode || payload.payment_mode || payload.payment_method || payload.method || 'cash').toLowerCase(),
   direction: payload.direction || 'in',
   amount_minor: payload.amount_minor !== undefined
     ? Math.round(Number(payload.amount_minor) || 0)
-    : toMinor(payload.amount ?? payload.paid_amount ?? payload.total ?? 0),
-  currency: String(payload.currency || 'INR').toUpperCase(),
+    : toMinor(payload.amount ?? payload.amount_paid ?? payload.paid_amount ?? payload.total ?? 0),
+  currency: String(payload.currency || fallbackCurrency || 'INR').toUpperCase(),
   status: payload.status || 'captured',
   reference: payload.reference || payload.transaction_id || payload.ref || undefined,
   provider: payload.provider || undefined,
@@ -88,19 +88,42 @@ export class LocalPosOrderRepository extends ApiOrderRepository {
 
   async createOrder(payload, options = {}) {
     if (!isLocalPosEnabled()) return super.createOrder(payload, options);
+
     const order = await localPosRequest('/orders', { method: 'POST', body: toLocalCreatePayload(payload) });
-    return { order, orderId: order?.id || null, data: order, response: null };
+    const orderId = order?.id;
+    if (!orderId) throw new Error('local_pos_order_id_missing');
+
+    const payments = Array.isArray(payload?.payments) ? payload.payments : [];
+    for (const payment of payments) {
+      const input = toPaymentInput(payment, order.currency || payload.currency || 'INR');
+      if (input.amount_minor <= 0) continue;
+      await localPosRequest(`/orders/${encodeURIComponent(String(orderId))}/payments`, {
+        method: 'POST', body: input,
+      });
+    }
+
+    if (options.deferCompletion === true) {
+      return { order, orderId, data: order, response: null };
+    }
+
+    const completed = await localPosRequest(`/orders/${encodeURIComponent(String(orderId))}/complete`, { method: 'POST' });
+    const completedOrder = completed?.order || completed || order;
+    return {
+      order: completedOrder,
+      orderId,
+      receipt: completed?.receipt || null,
+      data: completed,
+      response: null,
+    };
   }
 
   async markOrderPaid(payload = {}) {
     if (!isLocalPosEnabled()) return super.markOrderPaid(payload);
     const orderId = payload.order_id || payload.orderId || payload.id;
     if (!orderId) throw new Error('order_id_required');
-    const payment = await localPosRequest(`/orders/${encodeURIComponent(String(orderId))}/payments`, {
-      method: 'POST',
-      body: toPaymentInput(payload),
+    return localPosRequest(`/orders/${encodeURIComponent(String(orderId))}/payments`, {
+      method: 'POST', body: toPaymentInput(payload),
     });
-    return payment;
   }
 
   async completeOrder(orderId) {
