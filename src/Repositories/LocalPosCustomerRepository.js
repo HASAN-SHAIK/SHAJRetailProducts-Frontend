@@ -5,7 +5,21 @@ const normalizeCustomer = (customer) => customer ? {
   ...customer,
   customer_id: customer.customer_id || customer.id,
   mobile: customer.mobile || customer.phone,
+  credit_limit: customer.credit_limit ?? Number(customer.credit_limit_minor || 0) / 100,
+  current_balance: customer.current_balance ?? Number(customer.outstanding_minor || 0) / 100,
 } : customer;
+
+const toLocalCustomerPayload = (payload = {}) => ({
+  customer_code: payload.customer_code || payload.customerCode || undefined,
+  name: payload.name || payload.customer_name || '',
+  phone: payload.phone || payload.mobile || payload.customer_phone || undefined,
+  email: payload.email || undefined,
+  tax_id: payload.tax_id || payload.gstin || payload.gst_number || undefined,
+  credit_limit_minor: payload.credit_limit_minor !== undefined
+    ? Math.round(Number(payload.credit_limit_minor) || 0)
+    : Math.round(Number(payload.credit_limit || 0) * 100),
+  currency: String(payload.currency || 'INR').toUpperCase(),
+});
 
 /** Local-first customer projection with the existing IndexedDB cache retained as a read-through cache. */
 export class LocalPosCustomerRepository extends ApiCustomerRepository {
@@ -24,9 +38,7 @@ export class LocalPosCustomerRepository extends ApiCustomerRepository {
     const cached = await this.cache.getCustomerById(customerId);
     if (cached) return cached;
     if (!isLocalPosEnabled()) return super.getCustomerById(customerId);
-    const customer = normalizeCustomer(
-      await localPosRequest(`/customers/${encodeURIComponent(String(customerId || '').trim())}`)
-    );
+    const customer = normalizeCustomer(await localPosRequest(`/customers/${encodeURIComponent(String(customerId || '').trim())}`));
     if (customer) await this.cache.upsertCustomersBulk([customer]).catch(() => {});
     return customer;
   }
@@ -39,7 +51,7 @@ export class LocalPosCustomerRepository extends ApiCustomerRepository {
 
   async createCustomer(payload) {
     if (!isLocalPosEnabled()) return super.createCustomer(payload);
-    const customer = normalizeCustomer(await localPosRequest('/customers', { method: 'POST', body: payload }));
+    const customer = normalizeCustomer(await localPosRequest('/customers', { method: 'POST', body: toLocalCustomerPayload(payload) }));
     if (customer) await this.cache.upsertCustomersBulk([customer]).catch(() => {});
     return customer;
   }
@@ -47,7 +59,7 @@ export class LocalPosCustomerRepository extends ApiCustomerRepository {
   async updateCustomer(customerId, payload) {
     if (!isLocalPosEnabled()) return super.updateCustomer(customerId, payload);
     const customer = normalizeCustomer(await localPosRequest(`/customers/${encodeURIComponent(String(customerId))}`, {
-      method: 'PUT', body: payload,
+      method: 'PUT', body: toLocalCustomerPayload(payload),
     }));
     if (customer) await this.cache.upsertCustomersBulk([customer]).catch(() => {});
     return customer;
