@@ -16,9 +16,7 @@ export const login = async ({ email, password, device_id, branch_id, remember_me
     remember_me,
   });
 
-  if (res.data?.token) {
-    await saveAuthToken(res.data.token);
-  }
+  if (res.data?.token) await saveAuthToken(res.data.token);
 
   const userPayload = res.data?.user || null;
   if (userPayload) {
@@ -30,7 +28,11 @@ export const login = async ({ email, password, device_id, branch_id, remember_me
       remember_me: res.data?.remember_me === true,
     });
   }
+  return res.data;
+};
 
+export const issueOfflinePosGrant = async () => {
+  const res = await api.post('/auth/offline-grant');
   return res.data;
 };
 
@@ -45,9 +47,7 @@ export const logout = async () => {
 
 export const refreshSession = async () => {
   const res = await api.post('/auth/refresh');
-  if (res.data?.token) {
-    await saveAuthToken(res.data.token);
-  }
+  if (res.data?.token) await saveAuthToken(res.data.token);
   if (res.data?.user) {
     await saveSessionInfo({
       token: res.data?.token || null,
