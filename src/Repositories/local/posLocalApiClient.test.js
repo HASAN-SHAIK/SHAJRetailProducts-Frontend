@@ -3,6 +3,7 @@ import {
   getCachedLocalPosUserId,
   localPosRequest,
   loginLocalPosUser,
+  requestLocalManagerApproval,
 } from './posLocalApiClient';
 
 const jsonResponse = (payload, status = 200) => ({
@@ -58,5 +59,48 @@ describe('local POS API client security contract', () => {
 
     await expect(localPosRequest('/orders')).rejects.toThrow('local_pos_session_unavailable');
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('manager approval is requested under the cashier session without replacing it', async () => {
+    window.sessionStorage.setItem('pos_local_session_token', 'cashier-session-token');
+    global.fetch.mockResolvedValue(jsonResponse({
+      approval_token: 'single-use-token',
+      approver_user_id: 'manager-7',
+      permission: 'pos:discount',
+    }, 201));
+
+    const result = await requestLocalManagerApproval({
+      managerUserId: 'manager-7',
+      pin: '2468',
+      permission: 'pos:discount',
+      reason: 'customer retention',
+    });
+
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toContain('/auth/approvals');
+    expect(options.headers['X-POS-Session-Token']).toBe('cashier-session-token');
+    expect(JSON.parse(options.body)).toEqual({
+      manager_user_id: 'manager-7',
+      pin: '2468',
+      permission: 'pos:discount',
+      reason: 'customer retention',
+    });
+    expect(result.approval_token).toBe('single-use-token');
+    expect(window.sessionStorage.getItem('pos_local_session_token')).toBe('cashier-session-token');
+  });
+
+  test('approval token is attached only to the explicitly retried business request', async () => {
+    window.sessionStorage.setItem('pos_local_session_token', 'cashier-session-token');
+    global.fetch.mockResolvedValue(jsonResponse({ id: 'ord-1' }, 201));
+
+    await localPosRequest('/orders', {
+      method: 'POST',
+      approvalToken: 'single-use-token',
+      body: { items: [{ discount_minor: 250 }] },
+    });
+
+    const [, options] = global.fetch.mock.calls[0];
+    expect(options.headers['X-POS-Approval-Token']).toBe('single-use-token');
+    expect(window.sessionStorage.getItem('pos_local_session_token')).toBe('cashier-session-token');
   });
 });
