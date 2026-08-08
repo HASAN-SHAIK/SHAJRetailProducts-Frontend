@@ -9,162 +9,149 @@ import logo from '../../Images/logo.png';
 import { getDeviceId } from '../../utils/device';
 import { decodeJwtPayload } from '../../utils/jwt';
 import { setTenantIdentity } from '../../store/tenantSlice';
-import { getAuthToken, getSessionInfo } from '../../utils/sessionStorage';
-import { login as sqlLogin } from '../../services/authService';
+import { getSessionInfo } from '../../utils/sessionStorage';
+import { login as sqlLogin, issueOfflinePosGrant } from '../../services/authService';
+import {
+  enrollLocalPosUser,
+  getCachedLocalPosUserId,
+  isLocalPosEnabled,
+  loginLocalPosUser,
+} from '../../Repositories/local/posLocalApiClient';
 
-const Login = ( ) => {
+const validPin = (value) => /^\d{4,8}$/.test(String(value || ''));
+
+const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ email: '', password: '', posPin: '' });
   const [error, setError] = useState('');
   const [offlineSessionUser, setOfflineSessionUser] = useState(null);
+  const posEnabled = isLocalPosEnabled();
   const resumeEmail = process.env.REACT_APP_RESUME_EMAIL || 'admin@hasan.com';
   const resumePassword = process.env.REACT_APP_RESUME_PASSWORD || 'admin';
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+
+  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+
+  const applyUser = (userPayload, decoded = null) => {
+    if (decoded) {
+      dispatch(setTenantIdentity({ tenantId: decoded.tenant_id, role: decoded.role, userId: decoded.user_id }));
+    } else if (userPayload) {
+      dispatch(setTenantIdentity({ tenantId: userPayload.tenant_id, role: userPayload.role, userId: userPayload.id }));
+    }
+    dispatch(setUserDetails(userPayload));
   };
 
   const handleSubmit = async (e) => {
-    setIsLoading(true);
     e.preventDefault();
     setError('');
+    if (posEnabled && !validPin(form.posPin)) {
+      setError('Enter a 4–8 digit POS PIN. This PIN is used only for verified offline cashier login on this device.');
+      return;
+    }
+    setIsLoading(true);
 
     try {
       const deviceId = getDeviceId();
-      const data = await sqlLogin({
-        device_id: deviceId,
-        remember_me: true,
-        ...form,
-      });
+      const data = await sqlLogin({ device_id: deviceId, remember_me: true, email: form.email, password: form.password });
+
       let decoded = null;
       if (data?.token && typeof window !== 'undefined') {
-        try {
-          decoded = decodeJwtPayload(data.token);
-        } catch (err) {
-          // Ignore decode failures
-        }
+        try { decoded = decodeJwtPayload(data.token); } catch { decoded = null; }
       }
-      if (decoded) {
-        dispatch(setTenantIdentity({
-          tenantId: decoded.tenant_id,
-          role: decoded.role,
-          userId: decoded.user_id,
-        }));
-      }
-      const userPayload = data.user || (decoded ? {
-        id: decoded.user_id,
-        role: decoded.role,
-        tenant_id: decoded.tenant_id,
-      } : null);
-      dispatch(setUserDetails(userPayload));
+      const userPayload = data.user || (decoded ? { id: decoded.user_id, role: decoded.role, tenant_id: decoded.tenant_id } : null);
+      if (!userPayload?.id) throw new Error('authenticated_user_missing');
 
-      setIsLoading(false);
+      if (posEnabled) {
+        const grantPayload = await issueOfflinePosGrant({ deviceId });
+        if (!grantPayload?.offline_grant) throw new Error('offline_pos_grant_missing');
+        await enrollLocalPosUser({ offlineGrant: grantPayload.offline_grant, pin: form.posPin });
+        await loginLocalPosUser({ userId: userPayload.id, pin: form.posPin });
+      }
+
+      applyUser(userPayload, decoded);
       navigate('/setup');
     } catch (err) {
-      setIsLoading(false);
       console.error('Login error:', err);
       const status = err?.response?.status;
-      const networkDown = status === 0 || err?.isNetworkError;
-      if (networkDown) {
+      const networkDown = status === 0 || err?.isNetworkError || err?.code === 'ERR_NETWORK';
+      if (networkDown && posEnabled) {
         const session = await getSessionInfo().catch(() => null);
         const cachedUser = session?.user || null;
-        if (cachedUser) {
+        const cachedLocalUserId = getCachedLocalPosUserId();
+        if (cachedUser && cachedLocalUserId) {
           setOfflineSessionUser(cachedUser);
-          setError('Server is offline. You can continue in offline mode using the last signed-in account on this device.');
-          return;
+          setError('Central server is offline. Enter your POS PIN and choose Continue Offline.');
+        } else {
+          setError('Central server is offline and this device has no enrolled offline cashier. Connect once and sign in online to enroll a POS PIN.');
         }
-        setError('Server is offline and no previous local session is available on this device.');
-        return;
+      } else {
+        setError(err?.response?.data?.message || err?.payload?.error || err?.message || 'Login failed');
       }
-      setError(err.response?.data?.message || 'Login failed');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleContinueOffline = async () => {
+    setError('');
     if (!offlineSessionUser) return;
-    const enteredEmail = String(form.email || '').trim().toLowerCase();
-    const cachedEmail = String(offlineSessionUser?.email || '').trim().toLowerCase();
-    if (cachedEmail && enteredEmail && enteredEmail !== cachedEmail) {
-      setError(`Offline mode is only available for the last signed-in account (${cachedEmail}).`);
-      return;
+    if (!validPin(form.posPin)) { setError('Enter your 4–8 digit POS PIN.'); return; }
+    const cachedUserId = getCachedLocalPosUserId();
+    if (!cachedUserId) { setError('No offline cashier is enrolled on this device.'); return; }
+    try {
+      const local = await loginLocalPosUser({ userId: cachedUserId, pin: form.posPin });
+      const localUser = local?.user || {};
+      const userPayload = {
+        ...offlineSessionUser,
+        id: localUser.user_id || offlineSessionUser.id,
+        tenant_id: localUser.tenant_id || offlineSessionUser.tenant_id,
+        role: localUser.role || offlineSessionUser.role,
+        branch_id: localUser.branch_id || offlineSessionUser.branch_id,
+        permissions: localUser.permissions || offlineSessionUser.permissions || [],
+        email: offlineSessionUser?.email || '',
+        offline: true,
+      };
+      applyUser(userPayload);
+      navigate('/setup');
+    } catch (err) {
+      if (err?.status === 429 || err?.payload?.error === 'local_auth_temporarily_locked') {
+        setError('Too many incorrect POS PIN attempts. Offline login is temporarily locked; try again in a few minutes.');
+      } else if (err?.payload?.error === 'offline_grant_expired') {
+        setError('Offline authorization has expired. Connect to the central server and sign in again.');
+      } else {
+        setError('Invalid POS PIN or offline authorization is no longer valid.');
+      }
     }
-    dispatch(setUserDetails(offlineSessionUser));
-    let tenantId = offlineSessionUser?.tenant_id || null;
-    let role = offlineSessionUser?.role || null;
-    let userId = offlineSessionUser?.id || null;
-    if (!tenantId || !role || !userId) {
-      const token = await getAuthToken().catch(() => null);
-      const decoded = decodeJwtPayload(token);
-      tenantId = tenantId || decoded?.tenant_id || null;
-      role = role || decoded?.role || null;
-      userId = userId || decoded?.user_id || null;
-    }
-    if (tenantId || role || userId) {
-      dispatch(setTenantIdentity({ tenantId, role, userId }));
-    }
-    navigate('/setup');
   };
 
   return (
     <div className="login-wrapper">
-       <img className='companyLogo' src={logo} alt="SHAJ Logo" width="30%" height="20%"/>
+      <img className='companyLogo' src={logo} alt="SHAJ Logo" width="30%" height="20%"/>
       <div className="login-container">
         <h2 className="tenant-name">SHAJ NextGen Technologies</h2>
-        {process.env.REACT_APP_FOR_RESUME && (
-          <p className='demoCredentials'>
-            Demo credentials: {resumeEmail} / {resumePassword}
-          </p>
-        )}
-        {/* <p className='disabled'>Use password 'admin'</p> */}
-      <div className="floating-shape logincube green"></div>
-      <div className="floating-shape logincircle red"></div>
+        {process.env.REACT_APP_FOR_RESUME && <p className='demoCredentials'>Demo credentials: {resumeEmail} / {resumePassword}</p>}
+        <div className="floating-shape logincube green"></div>
+        <div className="floating-shape logincircle red"></div>
         {error && <div className="alert text-danger text-center loginErrorMessage">{error}</div>}
         <form onSubmit={handleSubmit}>
           <label className='form-label'>Email</label>
-          <input
-            className='form-control loginzindex'
-            type="email"
-            name="email"
-            value={form.email}
-            onChange={handleChange}
-            required
-            placeholder="admin@example.com"
-          />
-
+          <input className='form-control loginzindex' type="email" name="email" value={form.email} onChange={handleChange} required placeholder="admin@example.com" />
           <label className='form-label'>Password</label>
-          <input
-            className='form-control loginpasswordinput'
-            name="password"
-            type="password"
-            value={form.password}
-            onChange={handleChange}
-            required
-            placeholder="••••••"
-            style={{zIndex: '1000 !important'}}
-          />
-         <div className="floating-shape loginring orange"></div>
-          <button style={{zIndex: 1000}} type="submit" className='letsgo'>{ isLoading ? <div class="spinner-border spinner-style text-light" role="status"></div> : `Let's Go`}</button>
-          {offlineSessionUser && (
-            <button
-              style={{ zIndex: 1000, marginTop: 10 }}
-              type="button"
-              className='letsgo'
-              onClick={handleContinueOffline}
-            >
-              Continue Offline
-            </button>
-          )}
+          <input className='form-control loginpasswordinput' name="password" type="password" value={form.password} onChange={handleChange} required placeholder="••••••" />
+          {posEnabled && <>
+            <label className='form-label'>POS PIN</label>
+            <input className='form-control loginpasswordinput' name="posPin" type="password" inputMode="numeric" pattern="[0-9]{4,8}" autoComplete="off" value={form.posPin} onChange={handleChange} placeholder="4–8 digits" required />
+            <small className="form-text text-muted">Used for cashier login when this POS is offline. Your central password is never stored locally.</small>
+          </>}
+          <div className="floating-shape loginring orange"></div>
+          <button style={{zIndex: 1000}} type="submit" className='letsgo'>
+            {isLoading ? <div className="spinner-border spinner-style text-light" role="status"></div> : `Let's Go`}
+          </button>
+          {offlineSessionUser && posEnabled && <button style={{ zIndex: 1000, marginTop: 10 }} type="button" className='letsgo' onClick={handleContinueOffline}>Continue Offline</button>}
         </form>
       </div>
-
-      {/* Floating decorative shapes */}
-      <div className="floating-shape circle red"></div>
-      <div className="floating-shape triangle purple"></div>
-      <div className="floating-shape square yellow"></div>
-      <div className="floating-shape wave pink"></div>
-      <div className="floating-shape ring orange"></div>
-      <div className="floating-shape cube green"></div>
+      <div className="floating-shape circle red"></div><div className="floating-shape triangle purple"></div><div className="floating-shape square yellow"></div><div className="floating-shape wave pink"></div><div className="floating-shape ring orange"></div><div className="floating-shape cube green"></div>
     </div>
   );
 };

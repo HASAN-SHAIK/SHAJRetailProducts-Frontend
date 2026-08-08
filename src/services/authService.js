@@ -16,9 +16,7 @@ export const login = async ({ email, password, device_id, branch_id, remember_me
     remember_me,
   });
 
-  if (res.data?.token) {
-    await saveAuthToken(res.data.token);
-  }
+  if (res.data?.token) await saveAuthToken(res.data.token);
 
   const userPayload = res.data?.user || null;
   if (userPayload) {
@@ -30,7 +28,11 @@ export const login = async ({ email, password, device_id, branch_id, remember_me
       remember_me: res.data?.remember_me === true,
     });
   }
+  return res.data;
+};
 
+export const issueOfflinePosGrant = async ({ deviceId }) => {
+  const res = await api.post('/auth/offline-grant', { device_id: deviceId });
   return res.data;
 };
 
@@ -45,15 +47,13 @@ export const logout = async () => {
 
 export const refreshSession = async () => {
   const res = await api.post('/auth/refresh');
-  if (res.data?.token) {
-    await saveAuthToken(res.data.token);
-  }
+  if (res.data?.token) await saveAuthToken(res.data.token);
   if (res.data?.user) {
     await saveSessionInfo({
       token: res.data?.token || null,
       user: res.data.user,
       permissions: res.data?.permissions || res.data.user?.permissions || [],
-      store_permissions: res.data?.store_permissions || res.data.user?.store_permissions || null,
+      store_permissions: res.data?.store_permissions || res.data.user.store_permissions || null,
       remember_me: res.data?.remember_me === true,
     });
   }
