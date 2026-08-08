@@ -43,7 +43,11 @@ const createApprovalDialog = ({ permission }) => {
     const help = document.createElement('p');
     help.textContent = permission === 'pos:discount'
       ? 'A manager must approve this discount. The cashier session will remain active.'
-      : `A manager must approve ${permission}. The cashier session will remain active.`;
+      : permission === 'pos:void'
+        ? 'A manager must approve this order void. The cashier session will remain active.'
+        : permission === 'pos:refund'
+          ? 'A manager must approve this refund. The cashier session will remain active.'
+          : `A manager must approve ${permission}. The cashier session will remain active.`;
     help.style.margin = '0 0 16px';
 
     const managerLabel = document.createElement('label');
@@ -66,11 +70,13 @@ const createApprovalDialog = ({ permission }) => {
     pinInput.maxLength = 8;
     Object.assign(pinInput.style, { width: '100%', margin: '6px 0 12px', padding: '10px' });
 
+    const reasonRequired = permission === 'pos:void' || permission === 'pos:refund';
     const reasonLabel = document.createElement('label');
-    reasonLabel.textContent = 'Reason (optional)';
+    reasonLabel.textContent = reasonRequired ? 'Reason' : 'Reason (optional)';
     const reasonInput = document.createElement('input');
     reasonInput.name = 'reason';
     reasonInput.maxLength = 240;
+    reasonInput.required = reasonRequired;
     Object.assign(reasonInput.style, { width: '100%', margin: '6px 0 16px', padding: '10px' });
 
     const errorText = document.createElement('div');
