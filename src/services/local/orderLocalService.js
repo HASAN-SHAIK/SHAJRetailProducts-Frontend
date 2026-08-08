@@ -127,6 +127,41 @@ export const deleteOrder = async (orderId, options = {}) => {
   }
 };
 
+const localRefundReason = (options = {}) => String(options.reason || '').trim();
+
+const runLocalRefund = (orderId, options = {}) =>
+  localPosRequest(`/orders/${encodeURIComponent(String(orderId))}/refund`, {
+    method: 'POST',
+    body: { reason: localRefundReason(options) },
+    approvalToken: options.approvalToken || null,
+  });
+
+export const refundOrder = async (orderId, options = {}) => {
+  if (!isLocalPosEnabled()) throw new Error('local_pos_refund_not_enabled');
+  if (!orderId) throw new Error('order_id_required');
+  if (!localRefundReason(options)) throw new Error('refund_reason_required');
+
+  try {
+    return await runLocalRefund(orderId, options);
+  } catch (error) {
+    const code = error?.payload?.error || error?.response?.data?.error || error?.message;
+    const requiredPermission =
+      error?.payload?.required_permission ||
+      error?.response?.data?.required_permission ||
+      'pos:refund';
+
+    if (code !== 'manager_approval_required' || options?.approvalToken) {
+      throw error;
+    }
+
+    const approval = await requestManagerApproval(requiredPermission);
+    return runLocalRefund(orderId, {
+      ...options,
+      approvalToken: approval.approval_token,
+    });
+  }
+};
+
 const orderCacheApi = {
   upsertOrders,
   replaceAllOrders,
