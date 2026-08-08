@@ -1,6 +1,6 @@
-import { getSessionInfo } from '../../utils/sessionStorage';
-
 const DEFAULT_BASE_URL = 'http://127.0.0.1:4782/api/v1';
+const POS_SESSION_KEY = 'pos_local_session_token';
+const POS_USER_KEY = 'pos_local_user_id';
 
 export const isLocalPosEnabled = () =>
   String(process.env.REACT_APP_POS_LOCAL_API_ENABLED || 'false').toLowerCase() === 'true';
@@ -11,9 +11,7 @@ const getBaseUrl = () =>
 if (isLocalPosEnabled()) {
   try {
     const url = new URL(getBaseUrl());
-    if (!['http:', 'https:'].includes(url.protocol)) {
-      throw new Error('unsupported protocol');
-    }
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('unsupported protocol');
   } catch (error) {
     console.warn('[config] REACT_APP_POS_LOCAL_API_URL must be a valid HTTP(S) URL.');
   }
@@ -26,9 +24,7 @@ const getRuntimeToken = async () => {
       const token = await bridge.getLocalApiToken();
       if (token) return String(token);
     }
-    if (window.__SHAJ_POS_LOCAL_API_TOKEN__) {
-      return String(window.__SHAJ_POS_LOCAL_API_TOKEN__);
-    }
+    if (window.__SHAJ_POS_LOCAL_API_TOKEN__) return String(window.__SHAJ_POS_LOCAL_API_TOKEN__);
   }
   if (process.env.NODE_ENV !== 'production' && process.env.REACT_APP_POS_LOCAL_API_TOKEN) {
     return process.env.REACT_APP_POS_LOCAL_API_TOKEN;
@@ -36,38 +32,40 @@ const getRuntimeToken = async () => {
   throw new Error('local_pos_token_unavailable');
 };
 
-const getUserContextHeaders = async () => {
-  const session = await getSessionInfo().catch(() => null);
-  const user = session?.user || {};
-  const permissions = Array.isArray(session?.permissions)
-    ? session.permissions
-    : Array.isArray(user?.permissions)
-      ? user.permissions
-      : [];
-  const headers = {};
-  if (user?.id) headers['X-POS-User-ID'] = String(user.id);
-  if (user?.role) headers['X-POS-User-Role'] = String(user.role);
-  if (user?.tenant_id) headers['X-POS-Tenant-ID'] = String(user.tenant_id);
-  if (user?.branch_id) headers['X-POS-Branch-ID'] = String(user.branch_id);
-  if (permissions.length) headers['X-POS-Permissions'] = permissions.join(',');
-  return headers;
+const getLocalSessionToken = () => {
+  if (typeof window === 'undefined') return null;
+  try { return window.sessionStorage.getItem(POS_SESSION_KEY); } catch { return null; }
 };
 
-export const localPosRequest = async (path, { method = 'GET', body, signal } = {}) => {
-  const token = await getRuntimeToken();
-  const userHeaders = await getUserContextHeaders();
+const setLocalSession = (token, userId) => {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(POS_SESSION_KEY, token);
+  if (userId) window.localStorage.setItem(POS_USER_KEY, String(userId));
+};
+
+export const clearLocalPosSession = () => {
+  if (typeof window === 'undefined') return;
+  try { window.sessionStorage.removeItem(POS_SESSION_KEY); } catch {}
+};
+
+export const getCachedLocalPosUserId = () => {
+  if (typeof window === 'undefined') return null;
+  try { return window.localStorage.getItem(POS_USER_KEY); } catch { return null; }
+};
+
+const request = async (path, { method = 'GET', body, signal, requireSession = true } = {}) => {
+  const machineToken = await getRuntimeToken();
+  const sessionToken = requireSession ? getLocalSessionToken() : null;
+  if (requireSession && !sessionToken) throw new Error('local_pos_session_unavailable');
   const url = `${getBaseUrl()}${path}`;
-  if (process.env.NODE_ENV === 'development') {
-    console.log(`[POS_LOCAL_API] ${method} ${url}`);
-  }
   const response = await fetch(url, {
     method,
     signal,
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      'X-POS-Local-Token': token,
-      ...userHeaders,
+      'X-POS-Local-Token': machineToken,
+      ...(sessionToken ? { 'X-POS-Session-Token': sessionToken } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -75,11 +73,6 @@ export const localPosRequest = async (path, { method = 'GET', body, signal } = {
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    if (process.env.NODE_ENV === 'development') {
-      console.warn(
-        `[POS_LOCAL_API] request failed ${method} ${url} status=${response.status} error=${payload?.error || ''}`
-      );
-    }
     const error = new Error(payload?.error || `local_pos_http_${response.status}`);
     error.status = response.status;
     error.payload = payload;
@@ -87,6 +80,22 @@ export const localPosRequest = async (path, { method = 'GET', body, signal } = {
   }
   return payload;
 };
+
+export const enrollLocalPosUser = async ({ offlineGrant, pin }) =>
+  request('/auth/enroll', { method: 'POST', requireSession: false, body: { offline_grant: offlineGrant, pin } });
+
+export const loginLocalPosUser = async ({ userId, pin }) => {
+  const payload = await request('/auth/login', { method: 'POST', requireSession: false, body: { user_id: String(userId), pin } });
+  if (!payload?.session_token) throw new Error('local_pos_session_missing');
+  setLocalSession(payload.session_token, payload?.user?.user_id || userId);
+  return payload;
+};
+
+export const logoutLocalPosUser = async () => {
+  try { await request('/auth/logout', { method: 'POST' }); } finally { clearLocalPosSession(); }
+};
+
+export const localPosRequest = async (path, options = {}) => request(path, options);
 
 export const localPosHealth = async () => {
   const response = await fetch(`${getBaseUrl()}/health`, { method: 'GET' });
