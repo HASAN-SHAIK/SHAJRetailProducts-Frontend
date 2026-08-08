@@ -1,3 +1,5 @@
+import { getSessionInfo } from '../../utils/sessionStorage';
+
 const DEFAULT_BASE_URL = 'http://127.0.0.1:4782/api/v1';
 
 export const isLocalPosEnabled = () =>
@@ -28,16 +30,32 @@ const getRuntimeToken = async () => {
       return String(window.__SHAJ_POS_LOCAL_API_TOKEN__);
     }
   }
-  // Development-only fallback. Production installers should inject the token
-  // through a desktop/native bridge instead of compiling it into the bundle.
   if (process.env.NODE_ENV !== 'production' && process.env.REACT_APP_POS_LOCAL_API_TOKEN) {
     return process.env.REACT_APP_POS_LOCAL_API_TOKEN;
   }
   throw new Error('local_pos_token_unavailable');
 };
 
+const getUserContextHeaders = async () => {
+  const session = await getSessionInfo().catch(() => null);
+  const user = session?.user || {};
+  const permissions = Array.isArray(session?.permissions)
+    ? session.permissions
+    : Array.isArray(user?.permissions)
+      ? user.permissions
+      : [];
+  const headers = {};
+  if (user?.id) headers['X-POS-User-ID'] = String(user.id);
+  if (user?.role) headers['X-POS-User-Role'] = String(user.role);
+  if (user?.tenant_id) headers['X-POS-Tenant-ID'] = String(user.tenant_id);
+  if (user?.branch_id) headers['X-POS-Branch-ID'] = String(user.branch_id);
+  if (permissions.length) headers['X-POS-Permissions'] = permissions.join(',');
+  return headers;
+};
+
 export const localPosRequest = async (path, { method = 'GET', body, signal } = {}) => {
   const token = await getRuntimeToken();
+  const userHeaders = await getUserContextHeaders();
   const url = `${getBaseUrl()}${path}`;
   if (process.env.NODE_ENV === 'development') {
     console.log(`[POS_LOCAL_API] ${method} ${url}`);
@@ -49,6 +67,7 @@ export const localPosRequest = async (path, { method = 'GET', body, signal } = {
       Accept: 'application/json',
       'Content-Type': 'application/json',
       'X-POS-Local-Token': token,
+      ...userHeaders,
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
