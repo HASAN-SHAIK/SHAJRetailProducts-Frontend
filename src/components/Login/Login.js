@@ -138,9 +138,13 @@ const Login = () => {
       applyUser(userPayload);
       navigate('/setup');
     } catch (err) {
-      setError(err?.payload?.error === 'offline_grant_expired'
-        ? 'Offline authorization has expired. Connect to the central server and sign in again.'
-        : 'Invalid POS PIN or offline authorization is no longer valid.');
+      if (err?.status === 429 || err?.payload?.error === 'local_auth_temporarily_locked') {
+        setError('Too many incorrect POS PIN attempts. Offline login is temporarily locked; try again in a few minutes.');
+      } else if (err?.payload?.error === 'offline_grant_expired') {
+        setError('Offline authorization has expired. Connect to the central server and sign in again.');
+      } else {
+        setError('Invalid POS PIN or offline authorization is no longer valid.');
+      }
     }
   };
 
