@@ -35,17 +35,9 @@ const Login = () => {
 
   const applyUser = (userPayload, decoded = null) => {
     if (decoded) {
-      dispatch(setTenantIdentity({
-        tenantId: decoded.tenant_id,
-        role: decoded.role,
-        userId: decoded.user_id,
-      }));
+      dispatch(setTenantIdentity({ tenantId: decoded.tenant_id, role: decoded.role, userId: decoded.user_id }));
     } else if (userPayload) {
-      dispatch(setTenantIdentity({
-        tenantId: userPayload.tenant_id,
-        role: userPayload.role,
-        userId: userPayload.id,
-      }));
+      dispatch(setTenantIdentity({ tenantId: userPayload.tenant_id, role: userPayload.role, userId: userPayload.id }));
     }
     dispatch(setUserDetails(userPayload));
   };
@@ -60,26 +52,18 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      const data = await sqlLogin({
-        device_id: getDeviceId(),
-        remember_me: true,
-        email: form.email,
-        password: form.password,
-      });
+      const deviceId = getDeviceId();
+      const data = await sqlLogin({ device_id: deviceId, remember_me: true, email: form.email, password: form.password });
 
       let decoded = null;
       if (data?.token && typeof window !== 'undefined') {
         try { decoded = decodeJwtPayload(data.token); } catch { decoded = null; }
       }
-      const userPayload = data.user || (decoded ? {
-        id: decoded.user_id,
-        role: decoded.role,
-        tenant_id: decoded.tenant_id,
-      } : null);
+      const userPayload = data.user || (decoded ? { id: decoded.user_id, role: decoded.role, tenant_id: decoded.tenant_id } : null);
       if (!userPayload?.id) throw new Error('authenticated_user_missing');
 
       if (posEnabled) {
-        const grantPayload = await issueOfflinePosGrant();
+        const grantPayload = await issueOfflinePosGrant({ deviceId });
         if (!grantPayload?.offline_grant) throw new Error('offline_pos_grant_missing');
         await enrollLocalPosUser({ offlineGrant: grantPayload.offline_grant, pin: form.posPin });
         await loginLocalPosUser({ userId: userPayload.id, pin: form.posPin });
@@ -112,19 +96,12 @@ const Login = () => {
   const handleContinueOffline = async () => {
     setError('');
     if (!offlineSessionUser) return;
-    if (!validPin(form.posPin)) {
-      setError('Enter your 4–8 digit POS PIN.');
-      return;
-    }
+    if (!validPin(form.posPin)) { setError('Enter your 4–8 digit POS PIN.'); return; }
     const cachedUserId = getCachedLocalPosUserId();
-    if (!cachedUserId) {
-      setError('No offline cashier is enrolled on this device.');
-      return;
-    }
+    if (!cachedUserId) { setError('No offline cashier is enrolled on this device.'); return; }
     try {
       const local = await loginLocalPosUser({ userId: cachedUserId, pin: form.posPin });
       const localUser = local?.user || {};
-      const cachedEmail = offlineSessionUser?.email || '';
       const userPayload = {
         ...offlineSessionUser,
         id: localUser.user_id || offlineSessionUser.id,
@@ -132,7 +109,7 @@ const Login = () => {
         role: localUser.role || offlineSessionUser.role,
         branch_id: localUser.branch_id || offlineSessionUser.branch_id,
         permissions: localUser.permissions || offlineSessionUser.permissions || [],
-        email: cachedEmail,
+        email: offlineSessionUser?.email || '',
         offline: true,
       };
       applyUser(userPayload);
@@ -153,56 +130,28 @@ const Login = () => {
       <img className='companyLogo' src={logo} alt="SHAJ Logo" width="30%" height="20%"/>
       <div className="login-container">
         <h2 className="tenant-name">SHAJ NextGen Technologies</h2>
-        {process.env.REACT_APP_FOR_RESUME && (
-          <p className='demoCredentials'>Demo credentials: {resumeEmail} / {resumePassword}</p>
-        )}
+        {process.env.REACT_APP_FOR_RESUME && <p className='demoCredentials'>Demo credentials: {resumeEmail} / {resumePassword}</p>}
         <div className="floating-shape logincube green"></div>
         <div className="floating-shape logincircle red"></div>
         {error && <div className="alert text-danger text-center loginErrorMessage">{error}</div>}
         <form onSubmit={handleSubmit}>
           <label className='form-label'>Email</label>
           <input className='form-control loginzindex' type="email" name="email" value={form.email} onChange={handleChange} required placeholder="admin@example.com" />
-
           <label className='form-label'>Password</label>
           <input className='form-control loginpasswordinput' name="password" type="password" value={form.password} onChange={handleChange} required placeholder="••••••" />
-
-          {posEnabled && (
-            <>
-              <label className='form-label'>POS PIN</label>
-              <input
-                className='form-control loginpasswordinput'
-                name="posPin"
-                type="password"
-                inputMode="numeric"
-                pattern="[0-9]{4,8}"
-                autoComplete="off"
-                value={form.posPin}
-                onChange={handleChange}
-                placeholder="4–8 digits"
-                required
-              />
-              <small className="form-text text-muted">Used for cashier login when this POS is offline. Your central password is never stored locally.</small>
-            </>
-          )}
-
+          {posEnabled && <>
+            <label className='form-label'>POS PIN</label>
+            <input className='form-control loginpasswordinput' name="posPin" type="password" inputMode="numeric" pattern="[0-9]{4,8}" autoComplete="off" value={form.posPin} onChange={handleChange} placeholder="4–8 digits" required />
+            <small className="form-text text-muted">Used for cashier login when this POS is offline. Your central password is never stored locally.</small>
+          </>}
           <div className="floating-shape loginring orange"></div>
           <button style={{zIndex: 1000}} type="submit" className='letsgo'>
             {isLoading ? <div className="spinner-border spinner-style text-light" role="status"></div> : `Let's Go`}
           </button>
-          {offlineSessionUser && posEnabled && (
-            <button style={{ zIndex: 1000, marginTop: 10 }} type="button" className='letsgo' onClick={handleContinueOffline}>
-              Continue Offline
-            </button>
-          )}
+          {offlineSessionUser && posEnabled && <button style={{ zIndex: 1000, marginTop: 10 }} type="button" className='letsgo' onClick={handleContinueOffline}>Continue Offline</button>}
         </form>
       </div>
-
-      <div className="floating-shape circle red"></div>
-      <div className="floating-shape triangle purple"></div>
-      <div className="floating-shape square yellow"></div>
-      <div className="floating-shape wave pink"></div>
-      <div className="floating-shape ring orange"></div>
-      <div className="floating-shape cube green"></div>
+      <div className="floating-shape circle red"></div><div className="floating-shape triangle purple"></div><div className="floating-shape square yellow"></div><div className="floating-shape wave pink"></div><div className="floating-shape ring orange"></div><div className="floating-shape cube green"></div>
     </div>
   );
 };
