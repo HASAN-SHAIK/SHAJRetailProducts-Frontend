@@ -228,7 +228,11 @@ export class LocalPosOrderRepository extends ApiOrderRepository {
         })),
       }));
     }
-    const order = normalizeLocalOrder(await localPosRequest('/orders', { method: 'POST', body: createPayload }));
+    const order = normalizeLocalOrder(await localPosRequest('/orders', {
+      method: 'POST',
+      body: createPayload,
+      approvalToken: options.approvalToken || null,
+    }));
     const orderId = order?.id;
     if (!orderId) throw new Error('local_pos_order_id_missing');
 
