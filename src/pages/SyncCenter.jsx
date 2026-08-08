@@ -14,6 +14,7 @@ import api from '../utils/axios';
 import { buildFullBackup, restoreLocalFromBackup, verifyBackup } from '../utils/backupRestore';
 import { backfillPurchasePayments } from '../services/accountingService';
 import { getTransactionById } from '../services/local/transactionLocalService';
+import { isLocalPosEnabled, localPosRequest } from '../Repositories/local/posLocalApiClient';
 import './SyncCenter.css';
 
 const isQueuePending = (status) => {
@@ -33,6 +34,18 @@ const formatDateTime = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString();
+};
+
+const formatJsonBlock = (value) => {
+  if (value === null || value === undefined || value === '') return '';
+  try {
+    if (typeof value === 'string') {
+      return JSON.stringify(JSON.parse(value), null, 2);
+    }
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 };
 
 const SyncCenter = () => {
@@ -63,6 +76,12 @@ const SyncCenter = () => {
   const [backfillBusy, setBackfillBusy] = useState(false);
   const [backfillPreviewBusy, setBackfillPreviewBusy] = useState(false);
   const [backfillOrderIdsInput, setBackfillOrderIdsInput] = useState('');
+  const [posDiagnostics, setPosDiagnostics] = useState(null);
+  const [posDiagnosticsError, setPosDiagnosticsError] = useState('');
+  const [posSyncDetailsOpen, setPosSyncDetailsOpen] = useState(false);
+  const [posSyncDetailsLoading, setPosSyncDetailsLoading] = useState(false);
+  const [posSyncDetails, setPosSyncDetails] = useState(null);
+  const [posSyncDetailsError, setPosSyncDetailsError] = useState('');
 
   const loadQueues = useCallback(async (silent = false) => {
     if (silent) {
@@ -71,7 +90,15 @@ const SyncCenter = () => {
       setLoading(true);
     }
     try {
-      const [orders, queueItems] = await Promise.all([getOfflineOrderQueue(), getSyncQueueItems()]);
+      const [orders, queueItems, diagnosticsResult] = await Promise.all([
+        getOfflineOrderQueue(),
+        getSyncQueueItems(),
+        isLocalPosEnabled()
+          ? localPosRequest('/diagnostics')
+              .then((payload) => ({ ok: true, payload }))
+              .catch((error) => ({ ok: false, error }))
+          : Promise.resolve({ ok: false, disabled: true }),
+      ]);
       const hydratedQueueItems = await Promise.all(
         (Array.isArray(queueItems) ? queueItems : []).map(async (entry) => {
           if (entry?.last_error || entry?.lastError || entry?.type !== 'accounting_txn' || !entry?.entityId) {
@@ -88,6 +115,13 @@ const SyncCenter = () => {
       );
       setOfflineOrders(Array.isArray(orders) ? orders : []);
       setSyncQueue(hydratedQueueItems);
+      if (diagnosticsResult.ok) {
+        setPosDiagnostics(diagnosticsResult.payload);
+        setPosDiagnosticsError('');
+      } else {
+        setPosDiagnostics(null);
+        setPosDiagnosticsError(diagnosticsResult.disabled ? 'Local POS mode disabled' : 'Local POS diagnostics unavailable');
+      }
     } catch (err) {
       showPopup('Unable to load sync queues right now.', 'Sync Center');
     } finally {
@@ -177,6 +211,56 @@ const SyncCenter = () => {
       queueFailed: failedQueue,
     };
   }, [offlineOrders, syncQueue]);
+
+  const posStats = useMemo(() => {
+    const outbox = posDiagnostics?.outbox || {};
+    const pending = Number(outbox.pending || 0);
+    const processing = Number(outbox.processing || 0);
+    const failed = Number(outbox.failed || 0);
+    const deadLetter = Number(outbox.dead_letter || 0);
+    return {
+      needsSync: pending + processing + failed + deadLetter,
+      pending,
+      processing,
+      failed,
+      deadLetter,
+      published: Number(outbox.published || 0),
+      inboxReceived: Number(posDiagnostics?.inbox_received || 0),
+      inboxFailed: Number(posDiagnostics?.inbox_failed || 0),
+      customerConflicts: Number(posDiagnostics?.customer_conflicts || 0),
+      unsyncedCustomers: Number(posDiagnostics?.unsynced_customers || 0),
+      oldestPendingAt: outbox.oldest_pending_at || null,
+      collectedAt: posDiagnostics?.collected_at || null,
+      databaseOK: posDiagnostics?.database_ok === true,
+    };
+  }, [posDiagnostics]);
+
+  const loadPosSyncDetails = useCallback(async () => {
+    if (!isLocalPosEnabled()) {
+      setPosSyncDetails(null);
+      setPosSyncDetailsError('Local POS mode disabled');
+      return;
+    }
+    setPosSyncDetailsLoading(true);
+    try {
+      const payload = await localPosRequest('/diagnostics/sync-events?limit=100');
+      setPosSyncDetails(payload);
+      setPosSyncDetailsError('');
+    } catch (err) {
+      setPosSyncDetails(null);
+      setPosSyncDetailsError(err?.message || 'Unable to load stuck sync event details.');
+    } finally {
+      setPosSyncDetailsLoading(false);
+    }
+  }, []);
+
+  const handleNeedsSyncClick = async () => {
+    const nextOpen = !posSyncDetailsOpen;
+    setPosSyncDetailsOpen(nextOpen);
+    if (nextOpen && !posSyncDetails) {
+      await loadPosSyncDetails();
+    }
+  };
 
   const getBranchLabel = useCallback((entry) => {
     const rawBranchId = entry?.branch_id ?? entry?.branchId ?? entry?.payload?.branch_id ?? entry?.payload?.branchId;
@@ -587,6 +671,187 @@ const SyncCenter = () => {
             {backfillBusy ? 'Backfilling...' : 'Backfill Purchase Payments'}
           </button>
         </div>
+      </div>
+
+      <div className="sync-local-panel">
+        <div className="sync-local-panel-head">
+          <div>
+            <h5>Local POS Sync Queues</h5>
+            <small className="text-secondary">
+              SQLite outbox and inbox status from POSService.
+              {posStats.collectedAt ? ` Updated ${formatDateTime(posStats.collectedAt)}.` : ''}
+            </small>
+          </div>
+          <span className={`sync-status-badge ${posStats.databaseOK ? 'status-synced' : 'status-error'}`}>
+            {posStats.databaseOK ? 'SQLite OK' : posDiagnosticsError || 'Unavailable'}
+          </span>
+        </div>
+        <div className="sync-local-stats">
+          <button
+            type="button"
+            className={`sync-stat-card sync-stat-primary sync-stat-clickable ${posSyncDetailsOpen ? 'active' : ''}`}
+            onClick={handleNeedsSyncClick}
+            disabled={!posDiagnostics || posSyncDetailsLoading}
+          >
+            <span>Needs Sync</span>
+            <strong>{posDiagnostics ? posStats.needsSync : '-'}</strong>
+            <small>{posSyncDetailsLoading ? 'Loading details...' : 'click for stuck details'}</small>
+          </button>
+          <div className="sync-stat-card">
+            <span>Outbox Pending</span>
+            <strong>{posDiagnostics ? posStats.pending : '-'}</strong>
+            <small>{posStats.oldestPendingAt ? `Oldest ${formatDateTime(posStats.oldestPendingAt)}` : 'Waiting to publish'}</small>
+          </div>
+          <div className="sync-stat-card">
+            <span>Outbox Processing</span>
+            <strong>{posDiagnostics ? posStats.processing : '-'}</strong>
+            <small>claimed by sync worker</small>
+          </div>
+          <div className="sync-stat-card">
+            <span>Outbox Failed</span>
+            <strong>{posDiagnostics ? posStats.failed : '-'}</strong>
+            <small>{posStats.deadLetter ? `${posStats.deadLetter} dead-lettered` : 'retryable failures'}</small>
+          </div>
+          <div className="sync-stat-card">
+            <span>Inbox Received</span>
+            <strong>{posDiagnostics ? posStats.inboxReceived : '-'}</strong>
+            <small>HQ changes waiting/applied locally</small>
+          </div>
+          <div className="sync-stat-card">
+            <span>Inbox Failed</span>
+            <strong>{posDiagnostics ? posStats.inboxFailed : '-'}</strong>
+            <small>change-feed apply errors</small>
+          </div>
+          <div className="sync-stat-card">
+            <span>Customer Conflicts</span>
+            <strong>{posDiagnostics ? posStats.customerConflicts : '-'}</strong>
+            <small>{posStats.unsyncedCustomers} customer edit(s) pending</small>
+          </div>
+        </div>
+        {posSyncDetailsOpen && (
+          <div className="sync-details-panel">
+            <div className="sync-details-head">
+              <div>
+                <h5>Needs Sync Details</h5>
+                <small className="text-secondary">
+                  Outbox and inbox records that are pending, processing, failed, or dead-lettered.
+                  {posSyncDetails?.collected_at ? ` Updated ${formatDateTime(posSyncDetails.collected_at)}.` : ''}
+                </small>
+              </div>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={loadPosSyncDetails}
+                disabled={posSyncDetailsLoading}
+              >
+                {posSyncDetailsLoading ? 'Refreshing...' : 'Refresh Details'}
+              </button>
+            </div>
+            {posSyncDetailsError ? (
+              <div className="sync-details-error">{posSyncDetailsError}</div>
+            ) : null}
+            {!posSyncDetailsError && posSyncDetailsLoading && !posSyncDetails ? (
+              <div className="text-secondary">Loading stuck sync records...</div>
+            ) : null}
+            {!posSyncDetailsError && posSyncDetails ? (
+              <>
+                <div className="sync-details-section">
+                  <h6>Outbox Events</h6>
+                  <div className="table-responsive">
+                    <table className="table table-sm align-middle sync-detail-table">
+                      <thead>
+                        <tr>
+                          <th>Status</th>
+                          <th>Event</th>
+                          <th>Aggregate</th>
+                          <th>Attempts</th>
+                          <th>Available</th>
+                          <th>Created</th>
+                          <th>Last Error</th>
+                          <th>Payload</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(posSyncDetails.outbox || []).length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="text-secondary">No stuck outbox events.</td>
+                          </tr>
+                        ) : (posSyncDetails.outbox || []).map((event) => (
+                          <tr key={event.id}>
+                            <td><span className={`sync-status-badge status-${humanizeStatus(event.status)}`}>{humanizeStatus(event.status)}</span></td>
+                            <td>
+                              <div>{event.event_type || '-'}</div>
+                              <small className="text-secondary">{event.id || '-'}</small>
+                            </td>
+                            <td>
+                              <div>{event.aggregate_type || '-'}</div>
+                              <small className="text-secondary">{event.aggregate_id || '-'} v{event.aggregate_version || 0}</small>
+                            </td>
+                            <td>{Number(event.attempt_count || 0)}</td>
+                            <td>{formatDateTime(event.available_at)}</td>
+                            <td>{formatDateTime(event.created_at)}</td>
+                            <td className="sync-detail-error">{event.last_error || '-'}</td>
+                            <td>
+                              <details className="sync-event-payload">
+                                <summary>View JSON</summary>
+                                <pre>{formatJsonBlock({ payload: event.payload, metadata: event.metadata })}</pre>
+                              </details>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div className="sync-details-section">
+                  <h6>Inbox Messages</h6>
+                  <div className="table-responsive">
+                    <table className="table table-sm align-middle sync-detail-table">
+                      <thead>
+                        <tr>
+                          <th>Status</th>
+                          <th>Message</th>
+                          <th>Source</th>
+                          <th>Attempts</th>
+                          <th>Received</th>
+                          <th>Applied</th>
+                          <th>Last Error</th>
+                          <th>Payload</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(posSyncDetails.inbox || []).length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="text-secondary">No stuck inbox messages.</td>
+                          </tr>
+                        ) : (posSyncDetails.inbox || []).map((message) => (
+                          <tr key={message.message_id}>
+                            <td><span className={`sync-status-badge status-${humanizeStatus(message.status)}`}>{humanizeStatus(message.status)}</span></td>
+                            <td>
+                              <div>{message.message_type || '-'}</div>
+                              <small className="text-secondary">{message.message_id || '-'}</small>
+                            </td>
+                            <td>{message.source || '-'}</td>
+                            <td>{Number(message.attempt_count || 0)}</td>
+                            <td>{formatDateTime(message.received_at)}</td>
+                            <td>{formatDateTime(message.applied_at)}</td>
+                            <td className="sync-detail-error">{message.last_error || '-'}</td>
+                            <td>
+                              <details className="sync-event-payload">
+                                <summary>View JSON</summary>
+                                <pre>{formatJsonBlock(message.payload)}</pre>
+                              </details>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div className="sync-center-stats">

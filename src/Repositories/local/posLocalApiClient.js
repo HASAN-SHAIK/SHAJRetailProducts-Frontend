@@ -6,6 +6,17 @@ export const isLocalPosEnabled = () =>
 const getBaseUrl = () =>
   String(process.env.REACT_APP_POS_LOCAL_API_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
 
+if (isLocalPosEnabled()) {
+  try {
+    const url = new URL(getBaseUrl());
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      throw new Error('unsupported protocol');
+    }
+  } catch (error) {
+    console.warn('[config] REACT_APP_POS_LOCAL_API_URL must be a valid HTTP(S) URL.');
+  }
+}
+
 const getRuntimeToken = async () => {
   if (typeof window !== 'undefined') {
     const bridge = window.shajPosBridge;
@@ -27,7 +38,11 @@ const getRuntimeToken = async () => {
 
 export const localPosRequest = async (path, { method = 'GET', body, signal } = {}) => {
   const token = await getRuntimeToken();
-  const response = await fetch(`${getBaseUrl()}${path}`, {
+  const url = `${getBaseUrl()}${path}`;
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[POS_LOCAL_API] ${method} ${url}`);
+  }
+  const response = await fetch(url, {
     method,
     signal,
     headers: {
@@ -41,6 +56,11 @@ export const localPosRequest = async (path, { method = 'GET', body, signal } = {
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(
+        `[POS_LOCAL_API] request failed ${method} ${url} status=${response.status} error=${payload?.error || ''}`
+      );
+    }
     const error = new Error(payload?.error || `local_pos_http_${response.status}`);
     error.status = response.status;
     error.payload = payload;

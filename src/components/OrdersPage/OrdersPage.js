@@ -45,8 +45,9 @@ import { useBranchStore } from '../../store/branchStore';
 import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 import { createReceipt, fetchPaymentEntries, fetchReceiptEntries } from '../../services/accountingService';
 import { enqueueReceipt } from '../../utils/accountingOffline';
+import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 
-const OrdersPage = ({ navigate }) => {
+const OrdersPage = ({ navigate, mode }) => {
   const { showPopup } = usePopup();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const planFeatures = getTenantFeatures(tenantConfig);
@@ -72,7 +73,12 @@ const OrdersPage = ({ navigate }) => {
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const location = useLocation();
-  const routeType = location.pathname.includes('sales') ? 'sale' : 'purchase';
+  const modeType = String(mode || '').toLowerCase().includes('purchase') ? 'purchase' : 'sale';
+  const routeType = location.pathname.includes('/orders/purchases')
+    ? 'purchase'
+    : location.pathname.includes('/orders/sales')
+      ? 'sale'
+      : modeType;
   const normalizedMode = routeType === 'purchase' ? 'purchase' : 'sales';
   const [sortBy, setSortBy] = useState('id');
   const [sortOrder, setSortOrder] = useState('desc');
@@ -341,7 +347,12 @@ const OrdersPage = ({ navigate }) => {
   const projectOrdersForView = useCallback((inputOrders = []) => {
     let filtered = (Array.isArray(inputOrders) ? inputOrders : []).filter(isModeMatch);
     if (selectedBranchId && selectedBranchId !== 'all') {
-      filtered = filtered.filter((order) => String(order?.branch_id || '') === String(selectedBranchId));
+      filtered = filtered.filter((order) => {
+        const branchId = order?.branch_id ?? order?.branchId;
+        const storeId = order?.store_id ?? order?.storeId;
+        return String(branchId || '') === String(selectedBranchId) ||
+          String(storeId || '') === String(selectedBranchId);
+      });
     }
     if (searchQuery) {
       const term = searchQuery.toLowerCase();
@@ -402,6 +413,7 @@ const OrdersPage = ({ navigate }) => {
 
   const loadOrders = useCallback(async (type, options = {}) => {
     const forceServer = options?.forceServer === true;
+    const localPosMode = isLocalPosEnabled();
     const requestId = ++requestIdRef.current;
     setIsLoading(true);
     try {
@@ -539,6 +551,40 @@ const OrdersPage = ({ navigate }) => {
                   : 'pending',
           };
         });
+
+      if (localPosMode && type === 'sale') {
+        const limit = 200;
+        const maxRecords = 5000;
+        let page = 1;
+        const all = [];
+        while (true) {
+          const { list } = await listOrders({
+            page,
+            limit,
+            sortBy: 'created_at',
+            sortOrder: 'asc',
+          });
+          if (!list.length) break;
+          all.push(...list);
+          if (all.length >= maxRecords || list.length < limit) break;
+          page += 1;
+        }
+        if (requestId !== requestIdRef.current) return;
+        const apiRows = normalizeRowsPaymentStatus(all.filter(isModeMatch));
+        setOrdersByType(type, apiRows);
+        await clearSalesOrders();
+        if (apiRows.length) await bulkPutSalesOrders(apiRows);
+        await saveSessionValue('orders_last_sync', new Date().toISOString()).catch(() => {});
+        syncRequestedRef.current = false;
+        setErrorMessage(apiRows.length ? '' : 'No local POS orders found.');
+        return;
+      }
+
+      if (localPosMode && type !== 'sale') {
+        setOrdersByType(type, []);
+        setErrorMessage('Purchase orders are not served by the local POS order store yet.');
+        return;
+      }
 
       const cached = type === 'sale'
         ? await getSalesOrderRecords()
@@ -750,6 +796,9 @@ const OrdersPage = ({ navigate }) => {
       syncRequestedRef.current = false;
     } catch (error) {
       console.error('Failed to load orders:', error);
+      if (localPosMode) {
+        setErrorMessage('Local POS service is unavailable. Orders were not loaded from central backend.');
+      }
     } finally {
       if (requestId === requestIdRef.current) {
         setIsLoading(false);
@@ -865,6 +914,16 @@ const OrdersPage = ({ navigate }) => {
           return (type === 'receipt' || type === 'payment') && String(txn?.order_id || txn?.orderId || '') === String(orderId);
         });
         setDrawerLinkedPayments(receiptTxns);
+      }
+
+      if (isLocalPosEnabled()) {
+        const freshOrder = await getOrderDetail(orderId);
+        const items = freshOrder?.items || freshOrder?.products || [];
+        const payments = freshOrder?.payment_history || freshOrder?.payments || [];
+        await upsertOrderDetailsCache({ order: freshOrder, items, payments }).catch(() => {});
+        setDrawerOrder(freshOrder);
+        setDrawerLinkedPayments(payments);
+        return;
       }
 
       if (!finalOrder) {
@@ -1319,6 +1378,32 @@ const OrdersPage = ({ navigate }) => {
         showPopup('Payment amount exceeds balance', 'Validation');
         return;
       }
+
+      if (isLocalPosEnabled()) {
+        await markOrderPaid({
+          order_id: order.id,
+          client_payment_id: generateLocalTxnId(),
+          payment_mode: paymentMode,
+          amount_paid: parsedAmount,
+          currency: order.currency || 'INR',
+        });
+
+        const freshOrder = await getOrderDetail(order.id);
+        const items = freshOrder?.items || freshOrder?.products || [];
+        const payments = freshOrder?.payment_history || freshOrder?.payments || [];
+        await upsertOrderDetailsCache({ order: freshOrder, items, payments }).catch(() => {});
+        setOrdersByType(routeType, (prev) =>
+          prev.map((row) => (String(row.id) === String(freshOrder.id) ? { ...row, ...freshOrder } : row))
+        );
+        if (drawerOpen && String(drawerOrder?.id) === String(freshOrder.id)) {
+          setDrawerOrder(freshOrder);
+          setDrawerLinkedPayments(payments);
+        }
+        setPaymentAmount('');
+        showPopup('Payment recorded successfully.', 'Success');
+        return;
+      }
+
       const currentOrder = (await getCachedOrderById(order.id)) || order;
       const existingPayments = await getCachedOrderTransactions(currentOrder?.id ?? order.id);
       const totalPaid = sumPayments(existingPayments) + parsedAmount;
@@ -1394,7 +1479,7 @@ const OrdersPage = ({ navigate }) => {
         showPopup('Saved Offline', 'Offline');
         return;
       }
-      showPopup('Failed to mark order as paid.', 'Error');
+      showPopup(err?.payload?.error || err?.message || 'Failed to mark order as paid.', 'Error');
     } finally {
       setPaymentSubmittingId((current) => (current === order.id ? null : current));
     }
@@ -1677,6 +1762,11 @@ const OrdersPage = ({ navigate }) => {
     setReceiptOrder(null);
     openReceipt();
     try {
+      if (isLocalPosEnabled()) {
+        const freshOrder = await getOrderDetail(order.id);
+        setReceiptOrder(freshOrder);
+        return;
+      }
       const cached = await getCachedOrderDetails(order.id);
       const fallbackOrder = orders.find((entry) => String(entry?.id) === String(order.id));
       const resolved = cached || fallbackOrder || null;

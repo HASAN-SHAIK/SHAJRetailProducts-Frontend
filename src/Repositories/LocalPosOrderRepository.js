@@ -19,9 +19,43 @@ const normalizeQuantityMilli = (item) => {
   return Math.max(1, Math.round((Number.isFinite(quantity) ? quantity : 1) * 1000));
 };
 
+const getOrderDiscountMinor = (payload = {}) => {
+  const discount = payload.discount_minor !== undefined
+    ? Math.round(Number(payload.discount_minor) || 0)
+    : toMinor(payload.discount_total ?? payload.discount ?? payload.discount_amount ?? 0);
+  return Math.max(0, discount);
+};
+
+const distributeDiscount = (items, discountMinor) => {
+  if (!discountMinor || !items.length) return items;
+  const grossValues = items.map((item) => Math.max(0, Math.round(item.unit_price_minor * item.quantity_milli / 1000)));
+  const grossTotal = grossValues.reduce((sum, value) => sum + value, 0);
+  if (grossTotal <= 0) return items;
+
+  const cappedDiscount = Math.min(discountMinor, grossTotal);
+  const shares = grossValues.map((gross) => Math.min(gross, Math.floor(cappedDiscount * gross / grossTotal)));
+  let remainder = cappedDiscount - shares.reduce((sum, value) => sum + value, 0);
+  for (let index = 0; index < shares.length && remainder > 0; index += 1) {
+    const capacity = grossValues[index] - shares[index];
+    if (capacity <= 0) continue;
+    const extra = Math.min(capacity, remainder);
+    shares[index] += extra;
+    remainder -= extra;
+  }
+
+  return items.map((item, index) => {
+    const share = shares[index] || 0;
+    if (share <= 0) return item;
+    return {
+      ...item,
+      discount_minor: Math.min(grossValues[index], Math.max(0, Number(item.discount_minor || 0) + share)),
+    };
+  });
+};
+
 const toLocalItems = (payload = {}) => {
   const source = payload.items || payload.products || payload.order_items || [];
-  return source.map((item) => {
+  const items = source.map((item) => {
     const explicitMinor = item.unit_price_minor ?? item.price_minor;
     const priceMinor = explicitMinor !== undefined
       ? Math.round(Number(explicitMinor) || 0)
@@ -42,6 +76,8 @@ const toLocalItems = (payload = {}) => {
       tax_minor: Math.max(0, taxMinor),
     };
   });
+  const hasLineDiscounts = items.some((item) => Number(item.discount_minor || 0) > 0);
+  return hasLineDiscounts ? items : distributeDiscount(items, getOrderDiscountMinor(payload));
 };
 
 const toLocalCreatePayload = (payload = {}) => ({
@@ -65,31 +101,134 @@ const toPaymentInput = (payload = {}, fallbackCurrency = 'INR') => ({
   provider: payload.provider || undefined,
 });
 
+const fromMinor = (value) => Number(value || 0) / 100;
+
+const normalizeLocalPayment = (payment = {}) => ({
+  ...payment,
+  amount: fromMinor(payment.amount_minor),
+  total_price: fromMinor(payment.amount_minor),
+  payment_mode: payment.mode,
+  payment_method: payment.mode,
+  method: payment.mode,
+  date: payment.created_at,
+  paid_at: payment.created_at,
+  txn_type: 'receipt',
+});
+
+const normalizeLocalItem = (item = {}) => ({
+  ...item,
+  name: item.product_name,
+  quantity: Number(item.quantity_milli || 0) / 1000,
+  qty: Number(item.quantity_milli || 0) / 1000,
+  price: fromMinor(item.unit_price_minor),
+  selling_price: fromMinor(item.unit_price_minor),
+  total: fromMinor(item.line_total_minor),
+  line_total: fromMinor(item.line_total_minor),
+});
+
+const normalizeLocalOrder = (order = {}, { payments = [], paymentSummary = null, receipt = null } = {}) => {
+  const normalizedPayments = (Array.isArray(payments) ? payments : []).map(normalizeLocalPayment);
+  const status = paymentSummary?.order_status || order.status;
+  const paidMinor = paymentSummary?.paid_minor ?? normalizedPayments.reduce((sum, payment) => {
+    const amountMinor = Number(payment?.amount_minor || 0);
+    return payment?.direction === 'out' ? sum - amountMinor : sum + amountMinor;
+  }, 0);
+  const effectivePaidMinor = !paymentSummary && paidMinor === 0 && status === 'paid'
+    ? Number(order.total_minor || 0)
+    : paidMinor;
+  const balanceMinor = paymentSummary?.balance_minor ?? Math.max(Number(order.total_minor || 0) - effectivePaidMinor, 0);
+  return {
+    ...order,
+    branch_id: order.branch_id || order.store_id,
+    transaction_type: 'sale',
+    order_type: 'sale',
+    order_status: status,
+    payment_status: balanceMinor <= 0 && Number(order.total_minor || 0) > 0
+      ? 'paid'
+      : paidMinor > 0
+        ? 'partial'
+        : 'pending',
+    payment_mode: normalizedPayments[0]?.payment_mode || 'cash',
+    total_amount: fromMinor(order.total_minor),
+    total_price: fromMinor(order.total_minor),
+    total: fromMinor(order.total_minor),
+    subtotal: fromMinor(order.subtotal_minor),
+    discount: fromMinor(order.discount_minor),
+    tax: fromMinor(order.tax_minor),
+    total_paid: fromMinor(effectivePaidMinor),
+    paid_amount: fromMinor(effectivePaidMinor),
+    balance: fromMinor(balanceMinor),
+    products: (Array.isArray(order.items) ? order.items : []).map(normalizeLocalItem),
+    items: (Array.isArray(order.items) ? order.items : []).map(normalizeLocalItem),
+    payment_history: normalizedPayments,
+    payments: normalizedPayments,
+    receipt: receipt || undefined,
+    receipt_number: receipt?.receipt_number,
+    receipt_snapshot: receipt?.snapshot,
+    receipt_snapshot_sha256: receipt?.snapshot_sha256,
+  };
+};
+
 /**
  * Local-first sales repository. It preserves every existing ApiOrderRepository
  * method and redirects the checkout-critical paths to the store-local POS
- * service only when the feature flag is enabled. Unsupported legacy actions
- * continue to use the existing central API implementation.
+ * service only when the feature flag is enabled.
  */
 export class LocalPosOrderRepository extends ApiOrderRepository {
   async listOrders(options = {}) {
     if (!isLocalPosEnabled()) return super.listOrders(options);
     const params = new URLSearchParams();
     if (options.limit) params.set('limit', String(options.limit));
+    if (options.page) params.set('page', String(options.page));
+    if (options.offset) params.set('offset', String(options.offset));
     if (options.status) params.set('status', String(options.status));
     const payload = await localPosRequest(`/orders${params.toString() ? `?${params}` : ''}`);
-    return { list: Array.isArray(payload?.items) ? payload.items : [], pagination: {} };
+    return {
+      list: (Array.isArray(payload?.items) ? payload.items : []).map((order) => normalizeLocalOrder(order)),
+      pagination: {
+        page: options.page || 1,
+        limit: options.limit || payload?.count || 0,
+        total_records: payload?.count,
+      },
+    };
   }
 
   async getOrderDetail(orderId) {
     if (!isLocalPosEnabled()) return super.getOrderDetail(orderId);
-    return localPosRequest(`/orders/${encodeURIComponent(String(orderId))}`);
+    const encoded = encodeURIComponent(String(orderId));
+    const order = await localPosRequest(`/orders/${encoded}`);
+    const paymentsPayload = await localPosRequest(`/orders/${encoded}/payments`);
+    let receipt = null;
+    try {
+      receipt = await localPosRequest(`/orders/${encoded}/receipt`);
+    } catch (error) {
+      if (error?.status !== 404 && error?.payload?.error !== 'receipt_not_found') throw error;
+    }
+    return normalizeLocalOrder(order, {
+      payments: paymentsPayload?.items || [],
+      paymentSummary: paymentsPayload?.summary || null,
+      receipt,
+    });
   }
 
   async createOrder(payload, options = {}) {
     if (!isLocalPosEnabled()) return super.createOrder(payload, options);
 
-    const order = await localPosRequest('/orders', { method: 'POST', body: toLocalCreatePayload(payload) });
+    const createPayload = toLocalCreatePayload(payload);
+    if (process.env.NODE_ENV === 'development') {
+      console.info('[POS order payload]', JSON.stringify({
+        itemCount: createPayload.items.length,
+        items: createPayload.items.map((item) => ({
+          product_id: item.product_id,
+          barcode: item.barcode || null,
+          quantity_milli: item.quantity_milli,
+          unit_price_minor: item.unit_price_minor,
+          discount_minor: item.discount_minor,
+          tax_minor: item.tax_minor,
+        })),
+      }));
+    }
+    const order = normalizeLocalOrder(await localPosRequest('/orders', { method: 'POST', body: createPayload }));
     const orderId = order?.id;
     if (!orderId) throw new Error('local_pos_order_id_missing');
 
@@ -107,7 +246,7 @@ export class LocalPosOrderRepository extends ApiOrderRepository {
     }
 
     const completed = await localPosRequest(`/orders/${encodeURIComponent(String(orderId))}/complete`, { method: 'POST' });
-    const completedOrder = completed?.order || completed || order;
+    const completedOrder = normalizeLocalOrder(completed?.order || completed || order, { receipt: completed?.receipt || null });
     return {
       order: completedOrder,
       orderId,

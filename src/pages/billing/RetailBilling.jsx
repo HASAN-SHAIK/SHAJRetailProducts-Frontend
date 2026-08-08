@@ -23,6 +23,8 @@ import {
   saveTransactionsBulk,
 } from '../../services/local';
 import { createOrder } from '../../services/orderService';
+import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
+import { getCustomerRepository, getOrderRepository, getProductRepository } from '../../RepositoryFactory';
 import { searchLocalProducts } from '../../utils/localProductSearch';
 import { enqueueOfflineOrder, processOfflineQueue } from '../../utils/offlineOrders';
 import { runDeltaSync } from '../../utils/deltaSync';
@@ -49,6 +51,27 @@ const DEFAULT_BILLING_UPI_ID = 'shajretail@upi';
 const DESKTOP_UPI_PROMPT_KEY = 'desktop_billing_upi_prompted_v1';
 
 const createDraftId = () => `bill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const logPosRoutingDiagnostics = () => {
+  if (process.env.NODE_ENV !== 'development') return;
+  try {
+    console.info('[POS routing]', JSON.stringify({
+      localPosEnabled: isLocalPosEnabled(),
+      localPosUrl: process.env.REACT_APP_POS_LOCAL_API_URL || null,
+      productRepositoryEnv: process.env.REACT_APP_PRODUCT_REPOSITORY || 'api',
+      customerRepositoryEnv: process.env.REACT_APP_CUSTOMER_REPOSITORY || 'api',
+      salesRepositoryEnv: process.env.REACT_APP_SALES_REPOSITORY || 'api',
+      orderRepository: getOrderRepository().constructor.name,
+      customerRepository: getCustomerRepository().constructor.name,
+      productRepository: getProductRepository().constructor.name,
+    }));
+  } catch (error) {
+    console.info('[POS routing]', JSON.stringify({
+      localPosEnabled: isLocalPosEnabled(),
+      error: error?.message || 'routing diagnostic unavailable',
+    }));
+  }
+};
 
 const getNextDraftLabel = (drafts) => {
   const used = drafts
@@ -908,7 +931,7 @@ const RetailBilling = () => {
   const isProductInCurrentBranch = (product) => {
     if (!effectiveBranchId) return true;
     const productBranchId = getProductBranchId(product);
-    if (!productBranchId) return false;
+    if (!productBranchId) return isLocalPosEnabled();
     return String(productBranchId) === String(effectiveBranchId);
   };
 
@@ -1731,7 +1754,8 @@ const RetailBilling = () => {
     };
 
     try {
-      const linkedCustomerId = customerDetails.id || (name || mobile
+      const localPosMode = isLocalPosEnabled();
+      const linkedCustomerId = customerDetails.id || (!localPosMode && (name || mobile)
         ? await withTimeout(
             queueCustomerSync(customerDetails, name, mobile).catch(() => null),
             CUSTOMER_QUEUE_TIMEOUT_MS,
@@ -1847,6 +1871,45 @@ const RetailBilling = () => {
           is_weight_based: item.is_weight_based,
         })),
       };
+      logPosRoutingDiagnostics();
+      if (isLocalPosEnabled()) {
+        let response = null;
+        try {
+          response = await withTimeout(
+            createOrder(payload, { timeout: ORDER_CREATE_TIMEOUT_MS }),
+            ORDER_CREATE_TIMEOUT_MS,
+            null
+          );
+        } catch (error) {
+          const message =
+            error?.payload?.error ||
+            error?.response?.data?.message ||
+            error?.message ||
+            'Local POS service unavailable. Please start POSService and retry checkout.';
+          showPopup(message, 'Local POS unavailable');
+          return;
+        }
+        if (!response) {
+          showPopup('Local POS service unavailable. Please start POSService and retry checkout.', 'Local POS unavailable');
+          return;
+        }
+        const localOrderId =
+          response?.orderId ||
+          response?.order_id ||
+          response?.order?.id ||
+          response?.data?.order_id ||
+          response?.data?.order?.id ||
+          response?.data?.id ||
+          response?.id ||
+          null;
+        resetCheckoutModalState();
+        setLastOrderId(localOrderId);
+        printReceipt(localOrderId).catch(() => {});
+        if (whatsappEnabled) {
+          showPopup('Order saved in local POS. WhatsApp can be sent after sync.', 'Info');
+        }
+        return;
+      }
       if (requiresServerCredit) {
         if (!navigator.onLine) {
           showPopup('Credit transactions require server connection. Please go online and retry.', 'Validation');
@@ -2533,7 +2596,11 @@ const RetailBilling = () => {
                 value={customerDetails.name}
                 onChange={(event) => {
                   const value = event.target.value;
-                  setCustomerDetails((prev) => ({ ...prev, name: value }));
+                  setCustomerDetails((prev) => ({
+                    ...prev,
+                    id: prev.name === value ? prev.id : null,
+                    name: value,
+                  }));
                   if (value.trim()) {
                     setCustomerFieldErrors((prev) => ({ ...prev, name: '' }));
                   }
@@ -2592,7 +2659,11 @@ const RetailBilling = () => {
                 value={customerDetails.mobile}
                 onChange={(event) => {
                   const value = event.target.value;
-                  setCustomerDetails((prev) => ({ ...prev, mobile: value }));
+                  setCustomerDetails((prev) => ({
+                    ...prev,
+                    id: prev.mobile === value ? prev.id : null,
+                    mobile: value,
+                  }));
                   if (value.trim()) {
                     setCustomerFieldErrors((prev) => ({ ...prev, mobile: '' }));
                   }

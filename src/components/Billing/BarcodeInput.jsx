@@ -66,7 +66,7 @@ const BarcodeInput = ({
             }}
           />
         </label>
-        <button className="btn btn-primary w-100" type="button" onClick={onSubmit} disabled={isAdding}>
+        <button className="btn btn-primary w-100" type="button" onClick={() => onSubmit()} disabled={isAdding}>
           {isAdding ? 'Item Adding...' : 'Add Item'}
         </button>
       </div>

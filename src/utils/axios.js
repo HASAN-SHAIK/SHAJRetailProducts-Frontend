@@ -3,6 +3,16 @@ import { getDeviceId } from './device';
 import { getAuthToken, saveAuthToken, saveSessionInfo } from './sessionStorage';
 
 const isDev = process.env.NODE_ENV === 'development';
+const centralApiUrl =
+  process.env.REACT_APP_CENTRAL_API_URL ||
+  process.env.REACT_APP_API_URL ||
+  'http://localhost:5001/api';
+
+if (isDev && !process.env.REACT_APP_CENTRAL_API_URL && process.env.REACT_APP_API_URL) {
+  console.warn(
+    '[config] REACT_APP_API_URL is deprecated; use REACT_APP_CENTRAL_API_URL for the central backend.'
+  );
+}
 
 // Lazy import breaks circular dependency:
 // axios -> indexedDb -> productLocalService -> RepositoryFactory -> ApiProductRepository -> productApiClient -> axios
@@ -15,7 +25,7 @@ if (isDev) {
 
 
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5001/api',
+  baseURL: centralApiUrl,
   withCredentials: true,
 });
 
