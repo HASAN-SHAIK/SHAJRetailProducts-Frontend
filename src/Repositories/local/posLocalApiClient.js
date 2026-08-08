@@ -53,7 +53,7 @@ export const getCachedLocalPosUserId = () => {
   try { return window.localStorage.getItem(POS_USER_KEY); } catch { return null; }
 };
 
-const request = async (path, { method = 'GET', body, signal, requireSession = true } = {}) => {
+const request = async (path, { method = 'GET', body, signal, requireSession = true, approvalToken = null } = {}) => {
   const machineToken = await getRuntimeToken();
   const sessionToken = requireSession ? getLocalSessionToken() : null;
   if (requireSession && !sessionToken) throw new Error('local_pos_session_unavailable');
@@ -66,6 +66,7 @@ const request = async (path, { method = 'GET', body, signal, requireSession = tr
       'Content-Type': 'application/json',
       'X-POS-Local-Token': machineToken,
       ...(sessionToken ? { 'X-POS-Session-Token': sessionToken } : {}),
+      ...(approvalToken ? { 'X-POS-Approval-Token': String(approvalToken) } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -93,6 +94,20 @@ export const loginLocalPosUser = async ({ userId, pin }) => {
 
 export const logoutLocalPosUser = async () => {
   try { await request('/auth/logout', { method: 'POST' }); } finally { clearLocalPosSession(); }
+};
+
+export const requestLocalManagerApproval = async ({ managerUserId, pin, permission, reason = '' }) => {
+  const payload = await request('/auth/approvals', {
+    method: 'POST',
+    body: {
+      manager_user_id: String(managerUserId),
+      pin: String(pin),
+      permission: String(permission),
+      reason: String(reason || ''),
+    },
+  });
+  if (!payload?.approval_token) throw new Error('local_pos_approval_missing');
+  return payload;
 };
 
 export const localPosRequest = async (path, options = {}) => request(path, options);
