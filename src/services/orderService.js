@@ -3,6 +3,7 @@ import {
   upsertOrderDetailsCache,
 } from './local/orderLocalService';
 import { buildLocalOrderFromEntry } from '../utils/offlineOrders';
+import { requestManagerApproval } from './managerApprovalService';
 
 const createClientOrderId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -20,13 +21,35 @@ const emitOrdersCacheUpdated = () => {
   }
 };
 
+const createWithManagerApproval = async (payload, options) => {
+  try {
+    return await createOrderRemote(payload, options);
+  } catch (error) {
+    const code = error?.payload?.error || error?.response?.data?.error || error?.message;
+    const requiredPermission =
+      error?.payload?.required_permission ||
+      error?.response?.data?.required_permission ||
+      'pos:discount';
+
+    if (code !== 'manager_approval_required' || options?.approvalToken) {
+      throw error;
+    }
+
+    const approval = await requestManagerApproval(requiredPermission);
+    return createOrderRemote(payload, {
+      ...options,
+      approvalToken: approval.approval_token,
+    });
+  }
+};
+
 export const createOrder = async (payload, options = {}) => {
   const payloadWithClientId = {
     ...payload,
     client_order_id: payload?.client_order_id || createClientOrderId(),
     client_created_at: payload?.client_created_at || new Date().toISOString(),
   };
-  const result = await createOrderRemote(payloadWithClientId, options);
+  const result = await createWithManagerApproval(payloadWithClientId, options);
   const normalized = result?.data ?? result;
   const orderId =
     normalized?.orderId ||
