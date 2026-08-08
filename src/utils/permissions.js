@@ -1,5 +1,15 @@
+export const POS_PERMISSIONS = Object.freeze({
+  SALE: 'pos:sale',
+  DISCOUNT: 'pos:discount',
+  VOID: 'pos:void',
+  REFUND: 'pos:refund',
+  APPROVE: 'pos:approve',
+});
+
 export const MODULE_PERMISSIONS = {
-  pos: ['orders:read', 'orders:write'],
+  // orders:* stays as a temporary compatibility path for previously issued
+  // sessions; new cashier/manager grants use explicit pos:* capabilities.
+  pos: [POS_PERMISSIONS.SALE, 'orders:read', 'orders:write'],
   customers: ['customers:read'],
   inventory: ['inventory:read', 'products:read'],
   purchase: ['suppliers:read', 'suppliers:write'],
@@ -23,6 +33,12 @@ export const hasAnyPermission = (userOrPermissions, required = []) => {
   const permissions = normalizePermissions(userOrPermissions);
   if (permissions.includes('*')) return true;
   return required.some((permission) => permissions.includes(permission));
+};
+
+export const canPerformPosAction = (userOrPermissions, action) => {
+  const permission = POS_PERMISSIONS[String(action || '').toUpperCase()];
+  if (!permission) return false;
+  return hasPermission(userOrPermissions, permission);
 };
 
 export const canAccessModule = (user, moduleName) => {
