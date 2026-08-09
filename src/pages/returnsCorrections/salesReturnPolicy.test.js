@@ -44,6 +44,31 @@ describe('sales return local POS refund policy', () => {
     })).toBe(false);
   });
 
+  test('treats separate batches of the same product as distinct sale lines', () => {
+    const batchItems = [
+      { productId: 'p1', batchId: 'b1', soldQty: 1, returnedQty: 0 },
+      { productId: 'p1', batchId: 'b2', soldQty: 2, returnedQty: 0 },
+    ];
+
+    expect(isEligibleForLocalFullRefund({
+      order,
+      items: batchItems,
+      selectedItems: [
+        { productId: 'p1', batchId: 'b1', quantity: 1 },
+        { productId: 'p1', batchId: 'b2', quantity: 2 },
+      ],
+    })).toBe(true);
+
+    expect(isEligibleForLocalFullRefund({
+      order,
+      items: batchItems,
+      selectedItems: [
+        { productId: 'p1', batchId: 'b1', quantity: 2 },
+        { productId: 'p1', batchId: 'b2', quantity: 1 },
+      ],
+    })).toBe(false);
+  });
+
   test('rejects non-completed sales', () => {
     expect(isEligibleForLocalFullRefund({
       order: { id: 'ord-1', order_status: 'pending' },
