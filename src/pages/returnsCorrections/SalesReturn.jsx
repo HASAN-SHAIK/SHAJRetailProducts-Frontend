@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
-import { getBatchCacheById, getLocalSalesReturns, getAllOrderRecords, getOrderItemsByOrderId, upsertLocalCorrection, upsertLocalSalesReturn, upsertLocalGstEntry } from '../../services/local';
+import { getBatchCacheById, getLocalSalesReturns, getAllOrderRecords, getOrderItemsByOrderId, upsertLocalCorrection, upsertLocalSalesReturn, upsertLocalGstEntry, refundOrder } from '../../services/local';
 import { createCorrection, createOrderReturn, fetchAllSalesOrders } from '../../services/returnsCorrectionsApi';
+import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
+import { getOrderRepository } from '../../RepositoryFactory';
+import { isEligibleForLocalFullRefund } from './salesReturnPolicy';
 import './ReturnsCorrections.css';
 
 const SalesReturn = () => {
@@ -15,8 +18,14 @@ const SalesReturn = () => {
   const [submitting, setSubmitting] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [autoAdjustBill, setAutoAdjustBill] = useState(true);
+  const localPosMode = isLocalPosEnabled();
+  const selectedOrder = useMemo(
+    () => orders.find((order) => String(order?.id) === String(selectedOrderId)) || null,
+    [orders, selectedOrderId]
+  );
+
   const getBillOptionLabel = (order) => {
-    const status = String(order?.order_status || '').toLowerCase();
+    const status = String(order?.order_status || order?.status || '').toLowerCase();
     const returnedAmount = Number(order?.returned_amount || 0);
     const totalAmount = Number(order?.total_amount || order?.total_price || 0);
     const isFullyReturned = status === 'returned' || (totalAmount > 0 && returnedAmount >= totalAmount);
@@ -28,6 +37,17 @@ const SalesReturn = () => {
   };
 
   const loadOrders = useCallback(async () => {
+    if (localPosMode) {
+      try {
+        const result = await getOrderRepository().listOrders({ limit: 200 });
+        const list = Array.isArray(result?.list) ? result.list : [];
+        setOrders(list);
+        return;
+      } catch {
+        // Fall back to the local browser cache if the loopback POS service is unavailable.
+      }
+    }
+
     if (navigator.onLine) {
       try {
         const list = await fetchAllSalesOrders();
@@ -39,7 +59,7 @@ const SalesReturn = () => {
     }
     const localList = await getAllOrderRecords();
     setOrders(localList);
-  }, []);
+  }, [localPosMode]);
 
   const loadItems = useCallback(async () => {
     if (!selectedOrderId) {
@@ -48,7 +68,21 @@ const SalesReturn = () => {
     }
     setItemsLoading(true);
     try {
-      const orderItems = await getOrderItemsByOrderId(selectedOrderId);
+      let orderItems = [];
+      if (localPosMode) {
+        try {
+          const detail = await getOrderRepository().getOrderDetail(selectedOrderId);
+          orderItems = Array.isArray(detail?.items)
+            ? detail.items
+            : Array.isArray(detail?.products)
+              ? detail.products
+              : [];
+        } catch {
+          orderItems = await getOrderItemsByOrderId(selectedOrderId);
+        }
+      } else {
+        orderItems = await getOrderItemsByOrderId(selectedOrderId);
+      }
 
       const existingReturns = await getLocalSalesReturns({ billId: selectedOrderId });
       const returnedMap = new Map();
@@ -72,13 +106,14 @@ const SalesReturn = () => {
             const cachedBatch = await getBatchCacheById(batchId).catch(() => null);
             batchNumber = cachedBatch?.batch_number || cachedBatch?.batchNumber || null;
           }
+          const productId = row.product_id ?? row.productId ?? row.id;
           return {
-            productId: row.product_id ?? row.productId,
-            name: row.product_name || row.name || `Product ${row.product_id}`,
-            soldQty: Number(row.quantity || 0),
+            productId,
+            name: row.product_name || row.name || `Product ${productId}`,
+            soldQty: Number(row.quantity ?? row.qty ?? 0),
             returnedQty: Math.max(
               Number(row.returned_quantity || row.returnedQty || 0),
-              Number(returnedMap.get(String(row.product_id ?? row.productId)) || 0)
+              Number(returnedMap.get(String(productId)) || 0)
             ),
             qty: '',
             price: Number(row.selling_price || row.price || row.unit_price || 0),
@@ -92,7 +127,7 @@ const SalesReturn = () => {
     } finally {
       setItemsLoading(false);
     }
-  }, [selectedOrderId]);
+  }, [selectedOrderId, localPosMode]);
 
   useEffect(() => {
     loadOrders();
@@ -149,6 +184,43 @@ const SalesReturn = () => {
     if (!selectedItems.length) {
       showPopup('Select at least one item to return', 'Validation');
       return;
+    }
+
+    const useLocalFullRefund = localPosMode && isEligibleForLocalFullRefund({
+      order: selectedOrder,
+      items,
+      selectedItems,
+    });
+
+    if (useLocalFullRefund) {
+      const refundReason = reason.trim();
+      if (!refundReason) {
+        showPopup('Reason is required for a full POS refund.', 'Validation');
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await refundOrder(selectedOrderId, { reason: refundReason });
+        showPopup('Full sale refunded successfully. Payment and inventory were reversed atomically.', 'Success');
+        setReason('');
+        setItems([]);
+        await loadOrders();
+        await loadItems();
+        return;
+      } catch (error) {
+        const code = error?.payload?.error || error?.response?.data?.error || error?.message;
+        const message =
+          code === 'refund_reconciliation_required'
+            ? 'This sale has an existing payment reversal and requires reconciliation before another refund.'
+            : code === 'refund_reason_required'
+              ? 'Reason is required for this refund.'
+              : code || 'Unable to complete the POS refund.';
+        showPopup(message, 'Refund Failed');
+        return;
+      } finally {
+        setSubmitting(false);
+      }
     }
 
     const returnId = uuidv4();
@@ -281,6 +353,11 @@ const SalesReturn = () => {
             Auto-adjust bill after return (create correction record)
           </label>
         </div>
+        {localPosMode && (
+          <div className="small text-secondary mt-2">
+            A completed sale is refunded through the local POS only when every original item and quantity is returned and the bill has no prior partial return. Partial returns continue through the existing Central return workflow.
+          </div>
+        )}
       </div>
 
       <div className="returns-card">
