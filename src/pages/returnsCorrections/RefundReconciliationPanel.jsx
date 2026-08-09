@@ -72,11 +72,23 @@ const RefundReconciliationPanel = ({ orderId, enabled, refreshKey = 0 }) => {
             <div className="col-md-4"><strong>Inventory remaining:</strong> {summary.inventoryDelta}</div>
             <div className="col-md-4"><strong>Partial returns:</strong> {summary.partialReturnOperations}</div>
             <div className="col-md-4"><strong>Partial refund total:</strong> {summary.partialRefundAmount.toFixed(2)}</div>
+            <div className="col-md-4"><strong>Unpublished sync facts:</strong> {summary.unpublishedSyncFacts}</div>
+            <div className="col-md-4"><strong>Dead-letter sync facts:</strong> {summary.deadLetterSyncFacts}</div>
           </div>
 
+          {summary.hasDeadLetterSyncFacts && (
+            <div className="small text-danger mt-2" role="alert">
+              Refund sync is blocked by a dead-lettered durable fact. Do not retry or correct the refund from this screen; escalate for reconciliation.
+            </div>
+          )}
           {hasMismatch && (
             <div className="small text-danger mt-2" role="alert">
               Local durable facts contain an impossible over-reversal or over-restoration. Do not retry the refund until the sale is reconciled.
+            </div>
+          )}
+          {!summary.hasDeadLetterSyncFacts && !hasMismatch && summary.unpublishedSyncFacts > 0 && (
+            <div className="small text-secondary mt-2">
+              Refund facts are still awaiting Central sync; this panel is read-only.
             </div>
           )}
           {!hasMismatch && (summary.paymentDelta !== 0 || summary.inventoryDelta !== 0) && (

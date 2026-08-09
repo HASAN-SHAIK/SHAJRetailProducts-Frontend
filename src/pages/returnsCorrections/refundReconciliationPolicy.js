@@ -7,6 +7,8 @@ export const summarizeRefundReconciliation = (snapshot = {}) => {
   const issuedQuantity = toQuantity(snapshot.sale_issued_quantity_milli);
   const restoredQuantity = toQuantity(snapshot.restored_quantity_milli);
   const partialRefundAmount = toAmount(snapshot.partial_return_refund_minor);
+  const unpublishedSyncFacts = Number(snapshot.unpublished_sync_facts || 0);
+  const deadLetterSyncFacts = Number(snapshot.dead_letter_sync_facts || 0);
   const paymentDelta = capturedAmount - reversedAmount;
   const inventoryDelta = issuedQuantity - restoredQuantity;
 
@@ -19,9 +21,12 @@ export const summarizeRefundReconciliation = (snapshot = {}) => {
     restoredQuantity,
     partialReturnOperations: Number(snapshot.partial_return_operations || 0),
     partialRefundAmount,
+    unpublishedSyncFacts,
+    deadLetterSyncFacts,
     paymentDelta,
     inventoryDelta,
     hasPaymentMismatch: reversedAmount > capturedAmount,
     hasInventoryMismatch: restoredQuantity > issuedQuantity,
+    hasDeadLetterSyncFacts: deadLetterSyncFacts > 0,
   };
 };
