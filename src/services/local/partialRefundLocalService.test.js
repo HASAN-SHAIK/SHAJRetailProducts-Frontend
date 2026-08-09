@@ -7,8 +7,13 @@ jest.mock('../managerApprovalService', () => ({
   requestManagerApproval: jest.fn(),
 }));
 
+jest.mock('./refundDiagnosticsEvents', () => ({
+  signalRefundDiagnosticsRefresh: jest.fn(),
+}));
+
 import { localPosRequest } from '../../Repositories/local/posLocalApiClient';
 import { requestManagerApproval } from '../managerApprovalService';
+import { signalRefundDiagnosticsRefresh } from './refundDiagnosticsEvents';
 import { refundOrderPartial } from './partialRefundLocalService';
 
 describe('local POS partial-refund contract', () => {
@@ -55,6 +60,25 @@ describe('local POS partial-refund contract', () => {
     expect(requestManagerApproval).toHaveBeenCalledWith('pos:refund');
     expect(localPosRequest).toHaveBeenCalledTimes(2);
     expect(localPosRequest.mock.calls[1][1].approvalToken).toBe('partial-refund-token');
+  });
+
+  test('signals reconciliation diagnostics when a partial refund is blocked', async () => {
+    const rejected = Object.assign(new Error('refund_reconciliation_required'), {
+      payload: { error: 'refund_reconciliation_required' },
+    });
+    localPosRequest.mockRejectedValueOnce(rejected);
+
+    await expect(refundOrderPartial('ord-reconcile', {
+      reason: 'Damaged item',
+      returnId: 'ret-reconcile',
+      lines: [{ orderItemId: 'item-1', quantityMilli: 250 }],
+    })).rejects.toThrow('refund_reconciliation_required');
+
+    expect(signalRefundDiagnosticsRefresh).toHaveBeenCalledWith(
+      'ord-reconcile',
+      'refund_reconciliation_required'
+    );
+    expect(requestManagerApproval).not.toHaveBeenCalled();
   });
 
   test('rejects malformed partial returns before consuming manager approval', async () => {
