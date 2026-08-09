@@ -21,6 +21,7 @@ export * from './orderLocalService';
 export * from './partialRefundLocalService';
 export * from './returnHistoryLocalService';
 export * from './refundReconciliationLocalService';
+export * from './refundSyncRecoveryLocalService';
 export * from './reportLocalService';
 export * from './applicationSettingsLocalService';
 export * from './mobileLocalService';
