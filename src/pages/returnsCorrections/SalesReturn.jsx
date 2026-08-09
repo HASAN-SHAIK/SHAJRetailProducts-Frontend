@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
-import { getBatchCacheById, getLocalSalesReturns, getAllOrderRecords, getOrderItemsByOrderId, upsertLocalCorrection, upsertLocalSalesReturn, upsertLocalGstEntry, refundOrder } from '../../services/local';
+import { getBatchCacheById, getLocalSalesReturns, getAllOrderRecords, getOrderItemsByOrderId, upsertLocalCorrection, upsertLocalSalesReturn, upsertLocalGstEntry, refundOrder, refundOrderPartial } from '../../services/local';
 import { createCorrection, createOrderReturn, fetchAllSalesOrders } from '../../services/returnsCorrectionsApi';
 import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 import { getOrderRepository } from '../../RepositoryFactory';
 import { isEligibleForLocalFullRefund } from './salesReturnPolicy';
+import { buildLocalPartialReturnLines } from './salesReturnPartialPolicy';
 import './ReturnsCorrections.css';
 
 const SalesReturn = () => {
@@ -106,17 +107,36 @@ const SalesReturn = () => {
             const cachedBatch = await getBatchCacheById(batchId).catch(() => null);
             batchNumber = cachedBatch?.batch_number || cachedBatch?.batchNumber || null;
           }
-          const productId = row.product_id ?? row.productId ?? row.id;
+          const orderItemId = localPosMode
+            ? row.order_item_id ?? row.orderItemId ?? row.id ?? null
+            : row.order_item_id ?? row.orderItemId ?? null;
+          const productId = row.product_id ?? row.productId ?? row.product?.id ?? row.id;
+          const soldQty = row.quantity != null
+            ? Number(row.quantity)
+            : row.qty != null
+              ? Number(row.qty)
+              : Number(row.quantity_milli || row.quantityMilli || 0) / 1000;
+          const posReturnedQty = row.returned_quantity != null
+            ? Number(row.returned_quantity)
+            : row.returnedQty != null
+              ? Number(row.returnedQty)
+              : Number(row.returned_quantity_milli || row.returnedQuantityMilli || 0) / 1000;
           return {
+            orderItemId,
             productId,
-            name: row.product_name || row.name || `Product ${productId}`,
-            soldQty: Number(row.quantity ?? row.qty ?? 0),
+            name: row.product_name || row.name || row.product?.name || `Product ${productId}`,
+            soldQty,
             returnedQty: Math.max(
-              Number(row.returned_quantity || row.returnedQty || 0),
+              posReturnedQty,
               Number(returnedMap.get(String(productId)) || 0)
             ),
             qty: '',
-            price: Number(row.selling_price || row.price || row.unit_price || 0),
+            price: Number(
+              row.selling_price ??
+              row.price ??
+              row.unit_price ??
+              ((row.selling_price_minor ?? row.unit_price_minor ?? 0) / 100)
+            ),
             gstPercent: Number(row.gst_percent || row.gstPercent || 0),
             batchId,
             batchNumber,
@@ -173,6 +193,7 @@ const SalesReturn = () => {
 
     const selectedItems = items
       .map((row) => ({
+        orderItemId: row.orderItemId,
         productId: row.productId,
         batchId: row.batchId,
         quantity: Number(row.qty || 0),
@@ -224,6 +245,54 @@ const SalesReturn = () => {
     }
 
     const returnId = uuidv4();
+
+    if (localPosMode) {
+      const refundReason = reason.trim();
+      if (!refundReason) {
+        showPopup('Reason is required for a partial POS refund.', 'Validation');
+        return;
+      }
+
+      let partialLines;
+      try {
+        partialLines = buildLocalPartialReturnLines(selectedItems);
+      } catch (error) {
+        const message = error?.message === 'partial_refund_line_identity_required'
+          ? 'This local sale is missing an authoritative POS item ID. Refresh the bill from the local POS before returning items.'
+          : error?.message || 'Invalid partial return selection.';
+        showPopup(message, 'Return Validation');
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await refundOrderPartial(selectedOrderId, {
+          reason: refundReason,
+          returnId,
+          lines: partialLines,
+        });
+        showPopup('Partial return completed. Refund and inventory were adjusted atomically.', 'Success');
+        setReason('');
+        await loadOrders();
+        await loadItems();
+        return;
+      } catch (error) {
+        const code = error?.payload?.error || error?.response?.data?.error || error?.message;
+        const message =
+          code === 'refund_reconciliation_required'
+            ? 'This sale has conflicting refund history and requires reconciliation before another return.'
+            : code === 'partial_refund_replay_mismatch'
+              ? 'This return identity conflicts with an existing return. Refresh the bill before retrying.'
+              : code === 'partial_refund_quantity_exceeded'
+                ? 'The selected quantity exceeds the remaining returnable quantity.'
+                : code || 'Unable to complete the partial POS refund.';
+        showPopup(message, 'Partial Refund Failed');
+        return;
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
     const nowIso = new Date().toISOString();
     const correctionPayload = {
       correctionId: uuidv4(),
@@ -355,7 +424,7 @@ const SalesReturn = () => {
         </div>
         {localPosMode && (
           <div className="small text-secondary mt-2">
-            A completed sale is refunded through the local POS only when every original item and quantity is returned and the bill has no prior partial return. Partial returns continue through the existing Central return workflow.
+            Local POS returns are executed atomically at the edge: full selections use full refund, while item-level selections use the certified partial-return flow with manager approval when required.
           </div>
         )}
       </div>
@@ -387,7 +456,7 @@ const SalesReturn = () => {
               </tr>
             )}
             {items.map((row, idx) => (
-              <tr key={`${row.productId}-${idx}`}>
+              <tr key={`${row.orderItemId || row.productId}-${idx}`}>
                 <td>{row.name}</td>
                 <td>{row.soldQty}</td>
                 <td>{row.returnedQty}</td>
@@ -397,7 +466,7 @@ const SalesReturn = () => {
                     className="form-control form-control-sm"
                     value={row.qty}
                     min="0"
-                    step="0.01"
+                    step="0.001"
                     onChange={(event) => handleQtyChange(idx, event.target.value)}
                   />
                 </td>
