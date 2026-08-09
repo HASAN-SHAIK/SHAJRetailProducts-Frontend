@@ -1,5 +1,6 @@
 import { isLocalPosEnabled, localPosRequest } from '../../Repositories/local/posLocalApiClient';
 import { requestManagerApproval } from '../managerApprovalService';
+import { signalRefundDiagnosticsRefresh } from './refundDiagnosticsEvents';
 
 const normalizeReason = (value) => String(value || '').trim();
 
@@ -30,6 +31,14 @@ const runLocalPartialRefund = (orderId, options = {}) =>
     approvalToken: options.approvalToken || null,
   });
 
+const signalIfReconciliationRequired = (orderId, error) => {
+  const code = error?.payload?.error || error?.response?.data?.error || error?.message;
+  if (code === 'refund_reconciliation_required') {
+    signalRefundDiagnosticsRefresh(orderId, code);
+  }
+  return code;
+};
+
 export const refundOrderPartial = async (orderId, options = {}) => {
   if (!isLocalPosEnabled()) throw new Error('local_pos_refund_not_enabled');
   if (!orderId) throw new Error('order_id_required');
@@ -40,7 +49,7 @@ export const refundOrderPartial = async (orderId, options = {}) => {
   try {
     return await runLocalPartialRefund(orderId, options);
   } catch (error) {
-    const code = error?.payload?.error || error?.response?.data?.error || error?.message;
+    const code = signalIfReconciliationRequired(orderId, error);
     const requiredPermission =
       error?.payload?.required_permission ||
       error?.response?.data?.required_permission ||
@@ -51,9 +60,14 @@ export const refundOrderPartial = async (orderId, options = {}) => {
     }
 
     const approval = await requestManagerApproval(requiredPermission);
-    return runLocalPartialRefund(orderId, {
-      ...options,
-      approvalToken: approval.approval_token,
-    });
+    try {
+      return await runLocalPartialRefund(orderId, {
+        ...options,
+        approvalToken: approval.approval_token,
+      });
+    } catch (approvedError) {
+      signalIfReconciliationRequired(orderId, approvedError);
+      throw approvedError;
+    }
   }
 };

@@ -2,6 +2,7 @@ import { getOrderRepository } from '../../RepositoryFactory';
 import { createRepositoryFacade } from './createRepositoryFacade';
 import { isLocalPosEnabled, localPosRequest } from '../../Repositories/local/posLocalApiClient';
 import { requestManagerApproval } from '../managerApprovalService';
+import { signalRefundDiagnosticsRefresh } from './refundDiagnosticsEvents';
 
 const orderFacade = createRepositoryFacade(() => getOrderRepository(), [
   'upsertOrders',
@@ -136,13 +137,27 @@ const runLocalRefund = (orderId, options = {}) =>
     approvalToken: options.approvalToken || null,
   });
 
+const runFullRefundAndSignal = async (orderId, options = {}) => {
+  try {
+    const result = await runLocalRefund(orderId, options);
+    signalRefundDiagnosticsRefresh(orderId, 'full_refund_succeeded');
+    return result;
+  } catch (error) {
+    const code = error?.payload?.error || error?.response?.data?.error || error?.message;
+    if (code === 'refund_reconciliation_required') {
+      signalRefundDiagnosticsRefresh(orderId, code);
+    }
+    throw error;
+  }
+};
+
 export const refundOrder = async (orderId, options = {}) => {
   if (!isLocalPosEnabled()) throw new Error('local_pos_refund_not_enabled');
   if (!orderId) throw new Error('order_id_required');
   if (!localRefundReason(options)) throw new Error('refund_reason_required');
 
   try {
-    return await runLocalRefund(orderId, options);
+    return await runFullRefundAndSignal(orderId, options);
   } catch (error) {
     const code = error?.payload?.error || error?.response?.data?.error || error?.message;
     const requiredPermission =
@@ -155,7 +170,7 @@ export const refundOrder = async (orderId, options = {}) => {
     }
 
     const approval = await requestManagerApproval(requiredPermission);
-    return runLocalRefund(orderId, {
+    return runFullRefundAndSignal(orderId, {
       ...options,
       approvalToken: approval.approval_token,
     });

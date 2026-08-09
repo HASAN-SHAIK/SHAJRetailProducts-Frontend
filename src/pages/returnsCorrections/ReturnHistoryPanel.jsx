@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { getLocalOrderReturnHistory } from '../../services/local';
+import { REFUND_DIAGNOSTICS_REFRESH_EVENT } from '../../services/local/refundDiagnosticsEvents';
 import RefundReconciliationPanel from './RefundReconciliationPanel';
 import { summarizeReturnHistory } from './returnHistoryPolicy';
 
@@ -7,6 +8,20 @@ const ReturnHistoryPanel = ({ orderId, enabled, refreshKey = 0 }) => {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [eventRefreshKey, setEventRefreshKey] = useState(0);
+  const effectiveRefreshKey = refreshKey + eventRefreshKey;
+
+  useEffect(() => {
+    if (!enabled || !orderId || typeof window === 'undefined') return undefined;
+
+    const onRefundFactsChanged = (event) => {
+      if (String(event?.detail?.orderId || '') !== String(orderId)) return;
+      setEventRefreshKey((value) => value + 1);
+    };
+
+    window.addEventListener(REFUND_DIAGNOSTICS_REFRESH_EVENT, onRefundFactsChanged);
+    return () => window.removeEventListener(REFUND_DIAGNOSTICS_REFRESH_EVENT, onRefundFactsChanged);
+  }, [enabled, orderId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,7 +50,7 @@ const ReturnHistoryPanel = ({ orderId, enabled, refreshKey = 0 }) => {
       });
 
     return () => { cancelled = true; };
-  }, [enabled, orderId, refreshKey]);
+  }, [enabled, orderId, effectiveRefreshKey]);
 
   const history = useMemo(() => summarizeReturnHistory(records), [records]);
 
@@ -46,7 +61,7 @@ const ReturnHistoryPanel = ({ orderId, enabled, refreshKey = 0 }) => {
       <RefundReconciliationPanel
         orderId={orderId}
         enabled={enabled}
-        refreshKey={refreshKey}
+        refreshKey={effectiveRefreshKey}
       />
 
       <div className="returns-card" data-testid="local-pos-return-history">
