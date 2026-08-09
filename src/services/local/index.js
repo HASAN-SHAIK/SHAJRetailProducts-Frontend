@@ -18,6 +18,7 @@ export * from './staffLocalService';
 export * from './returnsLocalService';
 export * from './backupLocalService';
 export * from './orderLocalService';
+export * from './partialRefundLocalService';
 export * from './reportLocalService';
 export * from './applicationSettingsLocalService';
 export * from './mobileLocalService';
