@@ -20,6 +20,7 @@ export * from './backupLocalService';
 export * from './orderLocalService';
 export * from './partialRefundLocalService';
 export * from './returnHistoryLocalService';
+export * from './refundReconciliationLocalService';
 export * from './reportLocalService';
 export * from './applicationSettingsLocalService';
 export * from './mobileLocalService';
