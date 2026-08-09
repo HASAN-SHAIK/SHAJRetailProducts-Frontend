@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { usePopup } from '../../components/common/PopUp/PopupProvider';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
+import ReturnHistoryPanel from './ReturnHistoryPanel';
 import { getBatchCacheById, getLocalSalesReturns, getAllOrderRecords, getOrderItemsByOrderId, upsertLocalCorrection, upsertLocalSalesReturn, upsertLocalGstEntry, refundOrder, refundOrderPartial } from '../../services/local';
 import { createCorrection, createOrderReturn, fetchAllSalesOrders } from '../../services/returnsCorrectionsApi';
 import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
@@ -20,6 +21,7 @@ const SalesReturn = () => {
   const [submitting, setSubmitting] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [autoAdjustBill, setAutoAdjustBill] = useState(true);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const localPosMode = isLocalPosEnabled();
   const selectedOrder = useMemo(
     () => orders.find((order) => String(order?.id) === String(selectedOrderId)) || null,
@@ -277,6 +279,7 @@ const SalesReturn = () => {
         setReason('');
         await loadOrders();
         await loadItems();
+        setHistoryRefreshKey((value) => value + 1);
         return;
       } catch (error) {
         const code = error?.payload?.error || error?.response?.data?.error || error?.message;
@@ -430,6 +433,12 @@ const SalesReturn = () => {
           </div>
         )}
       </div>
+
+      <ReturnHistoryPanel
+        orderId={selectedOrderId}
+        enabled={localPosMode}
+        refreshKey={historyRefreshKey}
+      />
 
       <div className="returns-card">
         <table className="returns-table">
