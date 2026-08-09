@@ -8,6 +8,7 @@ import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 import { getOrderRepository } from '../../RepositoryFactory';
 import { isEligibleForLocalFullRefund } from './salesReturnPolicy';
 import { buildLocalPartialReturnLines } from './salesReturnPartialPolicy';
+import { getReturnLineLabel, getReturnLineState } from './salesReturnVisibilityPolicy';
 import './ReturnsCorrections.css';
 
 const SalesReturn = () => {
@@ -176,10 +177,11 @@ const SalesReturn = () => {
     setItems((prev) =>
       prev.map((row, idx) => {
         if (idx !== index) return row;
+        const lineState = getReturnLineState(row);
+        if (!lineState.isReturnable) return { ...row, qty: '' };
         const numeric = Number(value);
-        const remaining = Math.max(Number(row.soldQty || 0) - Number(row.returnedQty || 0), 0);
         if (!Number.isFinite(numeric)) return { ...row, qty: value };
-        const bounded = Math.min(Math.max(numeric, 0), remaining);
+        const bounded = Math.min(Math.max(numeric, 0), lineState.remaining);
         return { ...row, qty: String(bounded) };
       })
     );
@@ -436,6 +438,8 @@ const SalesReturn = () => {
               <th>Product</th>
               <th>Sold</th>
               <th>Returned</th>
+              <th>Remaining</th>
+              <th>Status</th>
               <th>Return Qty</th>
               <th>Batch</th>
             </tr>
@@ -443,36 +447,43 @@ const SalesReturn = () => {
           <tbody>
             {itemsLoading && (
               <tr>
-                <td colSpan={5} className="text-center text-secondary">
+                <td colSpan={7} className="text-center text-secondary">
                   Loading items...
                 </td>
               </tr>
             )}
             {!itemsLoading && items.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-secondary">
+                <td colSpan={7} className="text-center text-secondary">
                   No items for this bill.
                 </td>
               </tr>
             )}
-            {items.map((row, idx) => (
-              <tr key={`${row.orderItemId || row.productId}-${idx}`}>
-                <td>{row.name}</td>
-                <td>{row.soldQty}</td>
-                <td>{row.returnedQty}</td>
-                <td>
-                  <input
-                    type="number"
-                    className="form-control form-control-sm"
-                    value={row.qty}
-                    min="0"
-                    step="0.001"
-                    onChange={(event) => handleQtyChange(idx, event.target.value)}
-                  />
-                </td>
-                <td>{row.batchNumber || row.batchId || '-'}</td>
-              </tr>
-            ))}
+            {items.map((row, idx) => {
+              const lineState = getReturnLineState(row);
+              return (
+                <tr key={`${row.orderItemId || row.productId}-${idx}`}>
+                  <td>{row.name}</td>
+                  <td>{row.soldQty}</td>
+                  <td>{row.returnedQty}</td>
+                  <td>{lineState.remaining}</td>
+                  <td>{getReturnLineLabel(row)}</td>
+                  <td>
+                    <input
+                      type="number"
+                      className="form-control form-control-sm"
+                      value={row.qty}
+                      min="0"
+                      max={lineState.remaining}
+                      step="0.001"
+                      disabled={!lineState.isReturnable || submitting}
+                      onChange={(event) => handleQtyChange(idx, event.target.value)}
+                    />
+                  </td>
+                  <td>{row.batchNumber || row.batchId || '-'}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <div className="returns-actions" style={{ marginTop: 12 }}>
