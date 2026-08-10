@@ -59,7 +59,7 @@ export const refundOrderPartial = async (orderId, options = {}) => {
       throw error;
     }
 
-    const approval = await requestManagerApproval(requiredPermission);
+    const approval = await requestManagerApproval(requiredPermission, { orderId });
     try {
       return await runLocalPartialRefund(orderId, {
         ...options,
