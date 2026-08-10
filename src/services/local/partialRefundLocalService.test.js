@@ -41,7 +41,7 @@ describe('local POS partial-refund contract', () => {
     });
   });
 
-  test('requests order-bound pos:refund approval and retries exactly once', async () => {
+  test('requests order/action-bound pos:refund approval and retries exactly once', async () => {
     const approvalRequired = Object.assign(new Error('manager_approval_required'), {
       payload: { error: 'manager_approval_required', required_permission: 'pos:refund' },
     });
@@ -57,7 +57,10 @@ describe('local POS partial-refund contract', () => {
     });
 
     expect(requestManagerApproval).toHaveBeenCalledTimes(1);
-    expect(requestManagerApproval).toHaveBeenCalledWith('pos:refund', { orderId: 'ord-2' });
+    expect(requestManagerApproval).toHaveBeenCalledWith('pos:refund', {
+      orderId: 'ord-2',
+      actionScope: 'refund_partial',
+    });
     expect(localPosRequest).toHaveBeenCalledTimes(2);
     expect(localPosRequest.mock.calls[1][1].approvalToken).toBe('partial-refund-token');
   });

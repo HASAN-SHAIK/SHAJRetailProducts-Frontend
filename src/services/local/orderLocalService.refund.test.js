@@ -40,7 +40,7 @@ describe('local POS full-refund contract', () => {
     expect(requestManagerApproval).not.toHaveBeenCalled();
   });
 
-  test('requests order-bound pos:refund approval and retries exactly once with the one-use token', async () => {
+  test('requests order/action-bound pos:refund approval and retries exactly once with the one-use token', async () => {
     const approvalRequired = Object.assign(new Error('manager_approval_required'), {
       payload: { error: 'manager_approval_required', required_permission: 'pos:refund' },
     });
@@ -52,7 +52,10 @@ describe('local POS full-refund contract', () => {
     await refundOrder('ord-2', { reason: 'Full return' });
 
     expect(requestManagerApproval).toHaveBeenCalledTimes(1);
-    expect(requestManagerApproval).toHaveBeenCalledWith('pos:refund', { orderId: 'ord-2' });
+    expect(requestManagerApproval).toHaveBeenCalledWith('pos:refund', {
+      orderId: 'ord-2',
+      actionScope: 'refund_full',
+    });
     expect(localPosRequest).toHaveBeenCalledTimes(2);
     expect(localPosRequest.mock.calls[1][1].approvalToken).toBe('refund-token-1');
     expect(signalRefundDiagnosticsRefresh).toHaveBeenCalledWith('ord-2', 'full_refund_succeeded');
