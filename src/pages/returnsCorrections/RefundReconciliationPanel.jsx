@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { getLocalOrderRefundReconciliation } from '../../services/local';
+import { getLocalOrderRefundReconciliation, recoverLocalRefundSync } from '../../services/local';
 import { summarizeRefundReconciliation } from './refundReconciliationPolicy';
 
 const RefundReconciliationPanel = ({ orderId, enabled, refreshKey = 0 }) => {
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [recoveryReason, setRecoveryReason] = useState('');
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [recoveryRefreshKey, setRecoveryRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -14,6 +18,8 @@ const RefundReconciliationPanel = ({ orderId, enabled, refreshKey = 0 }) => {
       setSnapshot(null);
       setError('');
       setLoading(false);
+      setRecoveryReason('');
+      setRecoveryMessage('');
       return () => { cancelled = true; };
     }
 
@@ -34,7 +40,7 @@ const RefundReconciliationPanel = ({ orderId, enabled, refreshKey = 0 }) => {
       });
 
     return () => { cancelled = true; };
-  }, [enabled, orderId, refreshKey]);
+  }, [enabled, orderId, refreshKey, recoveryRefreshKey]);
 
   const summary = useMemo(
     () => summarizeRefundReconciliation(snapshot || {}),
@@ -44,6 +50,36 @@ const RefundReconciliationPanel = ({ orderId, enabled, refreshKey = 0 }) => {
   if (!enabled || !orderId) return null;
 
   const hasMismatch = summary.hasPaymentMismatch || summary.hasInventoryMismatch;
+  const deadLetterHead = snapshot?.dead_letter_sync_head || null;
+  const deadLetterEventId = String(deadLetterHead?.event_id || '').trim();
+  const canRequestRecovery = Boolean(deadLetterEventId && recoveryReason.trim() && !recovering);
+
+  const handleRecovery = async () => {
+    if (!canRequestRecovery) return;
+
+    setRecovering(true);
+    setRecoveryMessage('');
+    try {
+      await recoverLocalRefundSync({
+        orderId,
+        eventId: deadLetterEventId,
+        reason: recoveryReason.trim(),
+      });
+      setRecoveryReason('');
+      setRecoveryMessage('Central authorized recovery was accepted. Refreshing reconciliation facts.');
+      setRecoveryRefreshKey((value) => value + 1);
+    } catch (recoveryError) {
+      const recoveryCode = String(recoveryError?.message || 'sync_recovery_failed');
+      if (recoveryCode.includes('sync_recovery_grant_consumed')) {
+        setRecoveryMessage('This Central recovery authorization was already consumed. Reconciliation was refreshed; request a new manager authorization only if the exact dead-letter head still exists.');
+        setRecoveryRefreshKey((value) => value + 1);
+      } else {
+        setRecoveryMessage(`Recovery was not applied: ${recoveryCode}. Central manager authorization is required and the exact dead-letter scope must match.`);
+      }
+    } finally {
+      setRecovering(false);
+    }
+  };
 
   return (
     <div className="returns-card" data-testid="local-pos-refund-reconciliation">
@@ -78,9 +114,44 @@ const RefundReconciliationPanel = ({ orderId, enabled, refreshKey = 0 }) => {
 
           {summary.hasDeadLetterSyncFacts && (
             <div className="small text-danger mt-2" role="alert">
-              Refund sync is blocked by a dead-lettered durable fact. Do not retry or correct the refund from this screen; escalate for reconciliation.
+              Refund sync is blocked by a dead-lettered durable fact. Recovery requires Central manager authorization for the exact poisoned event; this screen cannot skip or directly retry it.
             </div>
           )}
+
+          {deadLetterEventId && (
+            <div className="mt-3" data-testid="central-authorized-refund-sync-recovery">
+              <div className="small mb-1">
+                <strong>Blocked event:</strong> {deadLetterHead?.event_type || '-'} ({deadLetterEventId})
+              </div>
+              <label className="form-label small mb-1" htmlFor={`sync-recovery-reason-${orderId}`}>
+                Manager recovery reason
+              </label>
+              <textarea
+                id={`sync-recovery-reason-${orderId}`}
+                className="form-control form-control-sm"
+                rows={2}
+                value={recoveryReason}
+                onChange={(event) => setRecoveryReason(event.target.value)}
+                disabled={recovering}
+                placeholder="Required for Central authorization"
+              />
+              <button
+                type="button"
+                className="btn btn-outline-danger btn-sm mt-2"
+                disabled={!canRequestRecovery}
+                onClick={handleRecovery}
+              >
+                {recovering ? 'Requesting Central authorization...' : 'Request manager-authorized recovery'}
+              </button>
+              <div className="small text-secondary mt-1">
+                Central verifies the signed-in user has canonical POS approval authority before POS can requeue this exact event.
+              </div>
+              {recoveryMessage && (
+                <div className="small mt-2" role="status">{recoveryMessage}</div>
+              )}
+            </div>
+          )}
+
           {hasMismatch && (
             <div className="small text-danger mt-2" role="alert">
               Local durable facts contain an impossible over-reversal or over-restoration. Do not retry the refund until the sale is reconciled.
