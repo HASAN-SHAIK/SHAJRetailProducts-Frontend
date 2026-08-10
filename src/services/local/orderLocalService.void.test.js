@@ -36,7 +36,7 @@ describe('local POS void contract', () => {
     expect(requestManagerApproval).not.toHaveBeenCalled();
   });
 
-  test('requests pos:void approval and retries exactly once with the one-use token', async () => {
+  test('requests an order-scoped pos:void approval and retries exactly once with the one-use token', async () => {
     const approvalRequired = Object.assign(new Error('manager_approval_required'), {
       payload: { error: 'manager_approval_required', required_permission: 'pos:void' },
     });
@@ -48,7 +48,7 @@ describe('local POS void contract', () => {
     await deleteOrder('ord-2');
 
     expect(requestManagerApproval).toHaveBeenCalledTimes(1);
-    expect(requestManagerApproval).toHaveBeenCalledWith('pos:void');
+    expect(requestManagerApproval).toHaveBeenCalledWith('pos:void', { orderId: 'ord-2' });
     expect(localPosRequest).toHaveBeenCalledTimes(2);
     expect(localPosRequest.mock.calls[1][1].approvalToken).toBe('void-token-1');
   });
