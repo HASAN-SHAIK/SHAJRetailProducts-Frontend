@@ -73,7 +73,6 @@ export const {
   bulkPutSalesOrders,
   bulkPutPurchaseOrders,
   clearSalesOrders,
-  bulkPutPurchaseOrders,
   clearPurchaseOrders,
   getSalesAndPurchaseOrderCounts,
   listOrders,
