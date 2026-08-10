@@ -56,11 +56,11 @@ describe('Sales Return refund reconciliation diagnostics', () => {
     expect(panelSource).toContain('Central verifies the signed-in user has canonical POS approval authority');
   });
 
-  test('shares selected bill and refresh key with the existing local return-history surface', () => {
+  test('shares selected bill and effective refresh key with the existing local return-history surface', () => {
     expect(historySource).toContain("import RefundReconciliationPanel from './RefundReconciliationPanel';");
     expect(historySource).toContain('<RefundReconciliationPanel');
     expect(historySource).toContain('orderId={orderId}');
     expect(historySource).toContain('enabled={enabled}');
-    expect(historySource).toContain('refreshKey={refreshKey}');
+    expect(historySource).toContain('refreshKey={effectiveRefreshKey}');
   });
 });
