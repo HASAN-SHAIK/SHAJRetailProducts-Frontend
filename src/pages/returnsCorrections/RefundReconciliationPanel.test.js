@@ -11,6 +11,15 @@ describe('Sales Return refund reconciliation diagnostics', () => {
     expect(panelSource).toContain('data-testid="local-pos-refund-reconciliation"');
   });
 
+  test('surfaces explicit blocked, pending, and clear Central sync states', () => {
+    expect(panelSource).toContain('data-testid="refund-sync-operator-state"');
+    expect(panelSource).toContain("summary.syncState === 'blocked'");
+    expect(panelSource).toContain("summary.syncState === 'pending'");
+    expect(panelSource).toContain('Blocked — manager-authorized recovery required.');
+    expect(panelSource).toContain('Pending — durable local refund facts are waiting for Central.');
+    expect(panelSource).toContain('Clear — no local refund sync facts are pending.');
+  });
+
   test('surfaces impossible money, inventory, or dead-letter sync facts without generic retry controls', () => {
     expect(panelSource).toContain('summary.hasPaymentMismatch || summary.hasInventoryMismatch');
     expect(panelSource).toContain('summary.hasDeadLetterSyncFacts');
