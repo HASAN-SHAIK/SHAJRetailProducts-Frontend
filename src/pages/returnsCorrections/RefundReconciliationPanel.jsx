@@ -99,6 +99,15 @@ const RefundReconciliationPanel = ({ orderId, enabled, refreshKey = 0 }) => {
 
       {!loading && !error && snapshot && (
         <>
+          <div className="small mb-2" data-testid="refund-sync-operator-state">
+            <strong>Central sync:</strong>{' '}
+            {summary.syncState === 'blocked'
+              ? 'Blocked — manager-authorized recovery required.'
+              : summary.syncState === 'pending'
+                ? 'Pending — durable local refund facts are waiting for Central.'
+                : 'Clear — no local refund sync facts are pending.'}
+          </div>
+
           <div className="row g-2 small">
             <div className="col-md-4"><strong>Captured:</strong> {summary.capturedAmount.toFixed(2)}</div>
             <div className="col-md-4"><strong>Reversed:</strong> {summary.reversedAmount.toFixed(2)}</div>
