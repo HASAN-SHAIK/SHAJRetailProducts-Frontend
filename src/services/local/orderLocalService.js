@@ -169,7 +169,7 @@ export const refundOrder = async (orderId, options = {}) => {
       throw error;
     }
 
-    const approval = await requestManagerApproval(requiredPermission, { orderId });
+    const approval = await requestManagerApproval(requiredPermission, { orderId, actionScope: 'refund_full' });
     return runFullRefundAndSignal(orderId, {
       ...options,
       approvalToken: approval.approval_token,

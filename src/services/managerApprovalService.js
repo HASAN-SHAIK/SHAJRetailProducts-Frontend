@@ -6,7 +6,7 @@ const approvalError = (message) => {
   return error;
 };
 
-const createApprovalDialog = ({ permission, orderId = '' }) => {
+const createApprovalDialog = ({ permission, orderId = '', actionScope = '' }) => {
   if (typeof document === 'undefined' || !document.body) {
     return Promise.reject(approvalError('manager_approval_ui_unavailable'));
   }
@@ -46,7 +46,9 @@ const createApprovalDialog = ({ permission, orderId = '' }) => {
       : permission === 'pos:void'
         ? 'A manager must approve this order void. The cashier session will remain active.'
         : permission === 'pos:refund'
-          ? 'A manager must approve this refund. The cashier session will remain active.'
+          ? actionScope === 'refund_partial'
+            ? 'A manager must approve this partial refund. The cashier session will remain active.'
+            : 'A manager must approve this full refund. The cashier session will remain active.'
           : `A manager must approve ${permission}. The cashier session will remain active.`;
     help.style.margin = '0 0 16px';
 
@@ -127,6 +129,7 @@ const createApprovalDialog = ({ permission, orderId = '' }) => {
           permission,
           reason: reasonInput.value.trim(),
           orderId,
+          actionScope,
         });
         if (!result?.approval_token) throw approvalError('manager_approval_token_missing');
         cleanup();
@@ -146,8 +149,15 @@ const createApprovalDialog = ({ permission, orderId = '' }) => {
 export const requestManagerApproval = async (permission = 'pos:discount', options = {}) => {
   if (!permission) throw approvalError('manager_approval_permission_required');
   const orderId = String(options?.orderId || '').trim();
+  const actionScope = String(options?.actionScope || '').trim();
   if ((permission === 'pos:void' || permission === 'pos:refund') && !orderId) {
     throw approvalError('manager_approval_order_required');
   }
-  return createApprovalDialog({ permission, orderId });
+  if (permission === 'pos:refund' && !['refund_full', 'refund_partial'].includes(actionScope)) {
+    throw approvalError('manager_approval_action_scope_required');
+  }
+  if (permission !== 'pos:refund' && actionScope) {
+    throw approvalError('manager_approval_action_scope_invalid');
+  }
+  return createApprovalDialog({ permission, orderId, actionScope });
 };
