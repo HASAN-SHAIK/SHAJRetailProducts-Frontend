@@ -96,7 +96,8 @@ export const logoutLocalPosUser = async () => {
   try { await request('/auth/logout', { method: 'POST' }); } finally { clearLocalPosSession(); }
 };
 
-export const requestLocalManagerApproval = async ({ managerUserId, pin, permission, reason = '' }) => {
+export const requestLocalManagerApproval = async ({ managerUserId, pin, permission, reason = '', orderId = '' }) => {
+  const normalizedOrderId = String(orderId || '').trim();
   const payload = await request('/auth/approvals', {
     method: 'POST',
     body: {
@@ -104,6 +105,7 @@ export const requestLocalManagerApproval = async ({ managerUserId, pin, permissi
       pin: String(pin),
       permission: String(permission),
       reason: String(reason || ''),
+      ...(normalizedOrderId ? { order_id: normalizedOrderId } : {}),
     },
   });
   if (!payload?.approval_token) throw new Error('local_pos_approval_missing');

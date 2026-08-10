@@ -120,7 +120,7 @@ export const deleteOrder = async (orderId, options = {}) => {
       throw error;
     }
 
-    const approval = await requestManagerApproval(requiredPermission);
+    const approval = await requestManagerApproval(requiredPermission, { orderId });
     return runLocalVoid(orderId, {
       ...options,
       approvalToken: approval.approval_token,
