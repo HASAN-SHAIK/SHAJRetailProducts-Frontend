@@ -24,12 +24,22 @@ describe('refund reconciliation presentation policy', () => {
       partialRefundAmount: 25,
       unpublishedSyncFacts: 2,
       deadLetterSyncFacts: 1,
+      syncState: 'blocked',
       paymentDelta: 75,
       inventoryDelta: 0.75,
       hasPaymentMismatch: false,
       hasInventoryMismatch: false,
       hasDeadLetterSyncFacts: true,
     });
+  });
+
+  test('derives blocked, pending, and clear operator sync states from local durable facts', () => {
+    expect(summarizeRefundReconciliation({ unpublished_sync_facts: 2, dead_letter_sync_facts: 1 }).syncState)
+      .toBe('blocked');
+    expect(summarizeRefundReconciliation({ unpublished_sync_facts: 2, dead_letter_sync_facts: 0 }).syncState)
+      .toBe('pending');
+    expect(summarizeRefundReconciliation({ unpublished_sync_facts: 0, dead_letter_sync_facts: 0 }).syncState)
+      .toBe('clear');
   });
 
   test('flags impossible over-reversal and over-restoration facts without proposing a correction', () => {
@@ -45,6 +55,7 @@ describe('refund reconciliation presentation policy', () => {
     expect(summary.hasDeadLetterSyncFacts).toBe(false);
     expect(summary.unpublishedSyncFacts).toBe(0);
     expect(summary.deadLetterSyncFacts).toBe(0);
+    expect(summary.syncState).toBe('clear');
     expect(summary.paymentDelta).toBe(-5);
     expect(summary.inventoryDelta).toBe(-0.25);
   });
