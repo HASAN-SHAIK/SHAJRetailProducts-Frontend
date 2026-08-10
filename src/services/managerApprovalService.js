@@ -146,7 +146,7 @@ const createApprovalDialog = ({ permission, orderId = '' }) => {
 export const requestManagerApproval = async (permission = 'pos:discount', options = {}) => {
   if (!permission) throw approvalError('manager_approval_permission_required');
   const orderId = String(options?.orderId || '').trim();
-  if (permission === 'pos:void' && !orderId) {
+  if ((permission === 'pos:void' || permission === 'pos:refund') && !orderId) {
     throw approvalError('manager_approval_order_required');
   }
   return createApprovalDialog({ permission, orderId });
