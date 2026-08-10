@@ -11,6 +11,11 @@ export const summarizeRefundReconciliation = (snapshot = {}) => {
   const deadLetterSyncFacts = Number(snapshot.dead_letter_sync_facts || 0);
   const paymentDelta = capturedAmount - reversedAmount;
   const inventoryDelta = issuedQuantity - restoredQuantity;
+  const syncState = deadLetterSyncFacts > 0
+    ? 'blocked'
+    : unpublishedSyncFacts > 0
+      ? 'pending'
+      : 'clear';
 
   return {
     orderId: snapshot.order_id || '',
@@ -23,6 +28,7 @@ export const summarizeRefundReconciliation = (snapshot = {}) => {
     partialRefundAmount,
     unpublishedSyncFacts,
     deadLetterSyncFacts,
+    syncState,
     paymentDelta,
     inventoryDelta,
     hasPaymentMismatch: reversedAmount > capturedAmount,
