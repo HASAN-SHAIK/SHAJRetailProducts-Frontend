@@ -25,7 +25,8 @@ jobs:
         run: |
           CI=true npm test -- --watchAll=false \
             src/pages/returnsCorrections/refundReconciliationPolicy.test.js \
-            src/pages/returnsCorrections/RefundReconciliationPanel.test.js
+            src/pages/returnsCorrections/RefundReconciliationPanel.test.js \
+            src/pages/returnsCorrections/RefundRecoveryLifecycleAcceptance.test.js
       - name: Production build
         # The repository currently has unrelated legacy ESLint warnings. Keep this
         # focused V1 gate responsible for compile integrity without converting those
