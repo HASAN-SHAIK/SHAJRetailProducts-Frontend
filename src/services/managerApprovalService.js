@@ -6,7 +6,7 @@ const approvalError = (message) => {
   return error;
 };
 
-const createApprovalDialog = ({ permission }) => {
+const createApprovalDialog = ({ permission, orderId = '' }) => {
   if (typeof document === 'undefined' || !document.body) {
     return Promise.reject(approvalError('manager_approval_ui_unavailable'));
   }
@@ -126,6 +126,7 @@ const createApprovalDialog = ({ permission }) => {
           pin: pinInput.value,
           permission,
           reason: reasonInput.value.trim(),
+          orderId,
         });
         if (!result?.approval_token) throw approvalError('manager_approval_token_missing');
         cleanup();
@@ -142,7 +143,11 @@ const createApprovalDialog = ({ permission }) => {
   });
 };
 
-export const requestManagerApproval = async (permission = 'pos:discount') => {
+export const requestManagerApproval = async (permission = 'pos:discount', options = {}) => {
   if (!permission) throw approvalError('manager_approval_permission_required');
-  return createApprovalDialog({ permission });
+  const orderId = String(options?.orderId || '').trim();
+  if (permission === 'pos:void' && !orderId) {
+    throw approvalError('manager_approval_order_required');
+  }
+  return createApprovalDialog({ permission, orderId });
 };
