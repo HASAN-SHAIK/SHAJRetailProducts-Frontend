@@ -1,0 +1,30 @@
+name: V1 refund reconciliation
+
+on:
+  pull_request:
+    paths:
+      - 'src/pages/returnsCorrections/**'
+      - 'src/services/local/**'
+      - 'src/services/posSyncRecoveryService.js'
+      - 'src/Repositories/local/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/v1-refund-reconciliation.yml'
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Focused refund reconciliation tests
+        run: |
+          CI=true npm test -- --watchAll=false \
+            src/pages/returnsCorrections/refundReconciliationPolicy.test.js \
+            src/pages/returnsCorrections/RefundReconciliationPanel.test.js
+      - name: Production build
+        run: npm run build
