@@ -1,0 +1,33 @@
+name: V1 transaction sync status
+
+on:
+  pull_request:
+    paths:
+      - 'src/components/OrdersPage/TransactionSyncStatus.jsx'
+      - 'src/components/OrdersPage/TransactionSyncStatus.test.js'
+      - 'src/components/OrdersPage/transactionSyncStatusPolicy.js'
+      - 'src/components/OrdersPage/transactionSyncStatusPolicy.test.js'
+      - 'src/services/local/transactionSyncStatusLocalService.js'
+      - 'src/services/local/transactionSyncStatusLocalService.test.js'
+      - '.github/workflows/v1-transaction-sync-status.yml'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Focused transaction sync status tests
+        run: |
+          CI=true npm test -- --watchAll=false \
+            src/services/local/transactionSyncStatusLocalService.test.js \
+            src/components/OrdersPage/transactionSyncStatusPolicy.test.js \
+            src/components/OrdersPage/TransactionSyncStatus.test.js
+      - name: Production build
+        run: CI=false npm run build
