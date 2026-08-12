@@ -46,6 +46,7 @@ import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 import { createReceipt, fetchPaymentEntries, fetchReceiptEntries } from '../../services/accountingService';
 import { enqueueReceipt } from '../../utils/accountingOffline';
 import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
+import TransactionSyncStatus from './TransactionSyncStatus';
 
 const OrdersPage = ({ navigate, mode }) => {
   const { showPopup } = usePopup();
@@ -2534,6 +2535,11 @@ const OrdersPage = ({ navigate, mode }) => {
                     </tbody>
                   </table>
                 </section>
+
+                <TransactionSyncStatus
+                  orderId={drawerOrder.id}
+                  enabled={isLocalPosEnabled()}
+                />
 
                 <section className="drawer-section summary">
                   <h4>Payment Summary</h4>
