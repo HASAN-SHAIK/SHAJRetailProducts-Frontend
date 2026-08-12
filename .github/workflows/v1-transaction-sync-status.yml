@@ -3,6 +3,8 @@ name: V1 transaction sync status
 on:
   pull_request:
     paths:
+      - 'src/components/OrdersPage/OrdersPage.js'
+      - 'src/components/OrdersPage/OrdersPage.transactionSyncStatusWiring.test.js'
       - 'src/components/OrdersPage/TransactionSyncStatus.jsx'
       - 'src/components/OrdersPage/TransactionSyncStatus.test.js'
       - 'src/components/OrdersPage/transactionSyncStatusPolicy.js'
@@ -28,6 +30,7 @@ jobs:
           CI=true npm test -- --watchAll=false \
             src/services/local/transactionSyncStatusLocalService.test.js \
             src/components/OrdersPage/transactionSyncStatusPolicy.test.js \
-            src/components/OrdersPage/TransactionSyncStatus.test.js
+            src/components/OrdersPage/TransactionSyncStatus.test.js \
+            src/components/OrdersPage/OrdersPage.transactionSyncStatusWiring.test.js
       - name: Production build
         run: CI=false npm run build
