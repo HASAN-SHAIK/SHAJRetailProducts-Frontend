@@ -47,7 +47,8 @@ jobs:
         run: |
           git diff --check
           git diff -- src/components/OrdersPage/OrdersPage.js
-          test "$(git diff --name-only | sort)" = "src/components/OrdersPage/OrdersPage.js"
+          expected="$(printf '%s\n' '.github/workflows/apply-v1-cashier-status-wiring.yml' 'src/components/OrdersPage/OrdersPage.js')"
+          test "$(git diff --name-only | sort)" = "$expected"
       - name: Commit surgical wiring
         run: |
           git config user.name "github-actions[bot]"
