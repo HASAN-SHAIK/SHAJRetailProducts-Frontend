@@ -2,6 +2,7 @@ import axios from 'axios';
 import { getDeviceId } from './device';
 import { getAuthToken } from './sessionStorage';
 import { preloadAllCaches } from './indexedDb';
+import { updateProduct as updateCachedProduct } from '../core/db';
 
 console.log('[cacheDB] axios module loaded');
 
@@ -45,7 +46,7 @@ api.interceptors.request.use(
 
 // Normalize network errors so callers don't crash on err.response being undefined.
 api.interceptors.response.use(
-  (response) => {
+  async (response) => {
     const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const startTime = response?.config?.metadata?.startTime ?? endTime;
     const durationMs = Math.round(endTime - startTime);
@@ -60,6 +61,22 @@ api.interceptors.response.use(
     }
     if (typeof window !== 'undefined') {
       const url = response?.config?.url || '';
+      const method = String(response?.config?.method || 'get').toLowerCase();
+
+      // Product edits return the authoritative updated row. Persist it into the
+      // IndexedDB product cache before callers continue so billing never reads
+      // the stale pre-edit is_weight_based value.
+      if (method === 'put' && /^\/products\/[^/?]+(?:\?.*)?$/.test(url)) {
+        const updatedProduct = response?.data?.product || response?.data?.data || response?.data;
+        if (updatedProduct?.id || updatedProduct?.product_id) {
+          try {
+            await updateCachedProduct(updatedProduct);
+          } catch (err) {
+            console.error('[cacheDB] failed to update edited product cache', err);
+          }
+        }
+      }
+
       if (url.includes('/platform/config')) {
         console.log('[cacheDB] platform/config detected');
         preloadAllCaches().catch((err) => {
