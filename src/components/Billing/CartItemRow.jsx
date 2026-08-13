@@ -26,6 +26,10 @@ const CartItemRow = ({
       setQtyDraft(String(item.qty ?? 1));
       return;
     }
+    if (!weightBased && !/^\d+$/.test(trimmed)) {
+      setQtyDraft(String(item.qty ?? 1));
+      return;
+    }
     onQtyChange(item.key, trimmed);
   };
 
@@ -50,7 +54,11 @@ const CartItemRow = ({
           step={weightBased ? '0.01' : '1'}
           value={qtyDraft}
           onClick={(event) => event.stopPropagation()}
-          onChange={(event) => setQtyDraft(event.target.value)}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            if (!weightBased && nextValue !== '' && !/^\d*$/.test(nextValue)) return;
+            setQtyDraft(nextValue);
+          }}
           onBlur={commitQty}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {

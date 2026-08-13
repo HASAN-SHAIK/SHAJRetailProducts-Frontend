@@ -80,6 +80,13 @@ const getStockCount = (product) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const isWeightBasedProduct = (product) => {
+  const value = product?.is_weight_based ?? product?.isWeightBased ?? product?.weight_based ?? product?.type;
+  if (value === true) return true;
+  if (value === false || value === null || value === undefined) return false;
+  return String(value) === '1';
+};
+
 const extractProductFromResponse = (response) => {
   if (!response) return null;
   const data = response?.data;
@@ -616,6 +623,10 @@ const BillingPage = () => {
         return;
       }
       if (!ensureBranchMatch(product)) {
+        return;
+      }
+      if (!isWeightBasedProduct(product) && !Number.isInteger(qty)) {
+        showPopup('Decimal quantity is not allowed for piece-based items', 'Validation');
         return;
       }
       const stock = getStockCount(product);

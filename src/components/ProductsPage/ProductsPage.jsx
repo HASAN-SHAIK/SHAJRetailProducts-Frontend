@@ -28,6 +28,13 @@ const IMPORT_CHUNK_SIZE = 100;
   tenantConfig?.enable_piece_based !== false;
  const barcodeEnabled = features.enable_barcode === true;
  const defaultWeightValue = weightBasedEnabled && !pieceBasedEnabled ? '1' : '0';
+ const isWeightBasedValue = (value) => {
+  if (value === true) return true;
+  if (value === false || value === null || value === undefined) return false;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  return ['1', 'true', 'yes', 'y', 'weight', 'weighted', 'weight based', 'weight-based', 'kg', 'kgs', 'gram', 'grams'].includes(normalized);
+ };
  const { showPopup } = usePopup();
   const [formData, setFormData] = useState({
   product_name: '',
@@ -908,6 +915,18 @@ const IMPORT_CHUNK_SIZE = 100;
     batch_number: 'batch_number',
     batchno: 'batch_number',
     'batch no': 'batch_number',
+    'is weight based': 'is_weight_based',
+    is_weight_based: 'is_weight_based',
+    weight_based: 'is_weight_based',
+    isweightbased: 'is_weight_based',
+    weightbased: 'is_weight_based',
+    'product type': 'is_weight_based',
+    product_type: 'is_weight_based',
+    producttype: 'is_weight_based',
+    'unit type': 'is_weight_based',
+    unit_type: 'is_weight_based',
+    unittype: 'is_weight_based',
+    type: 'is_weight_based',
     expiry: 'expiry_date',
     'expiry date': 'expiry_date',
     expiry_date: 'expiry_date',
@@ -977,6 +996,16 @@ const IMPORT_CHUNK_SIZE = 100;
     if (!trimmed || trimmed === '-' || trimmed === '.' || trimmed === '-.') return null;
     const num = Number(trimmed);
     return Number.isFinite(num) ? num : null;
+  };
+  const toWeightFlag = (value, fallback = defaultWeightValue) => {
+    if (value === null || value === undefined || value === '') return String(fallback);
+    if (value === true) return '1';
+    if (value === false) return '0';
+    if (typeof value === 'number') return value !== 0 ? '1' : '0';
+    const normalized = String(value).trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y', 'weight', 'weighted', 'weight based', 'weight-based', 'kg', 'kgs', 'gram', 'grams'].includes(normalized)) return '1';
+    if (['0', 'false', 'no', 'n', 'piece', 'pieces', 'piece based', 'piece-based', 'pcs', 'pc', 'unit', 'units'].includes(normalized)) return '0';
+    return String(fallback);
   };
   const toDateInput = (value) => {
     if (value === null || value === undefined || value === '') return '';
@@ -1134,6 +1163,7 @@ const IMPORT_CHUNK_SIZE = 100;
         const gst_percentage = toNumber(row.gst_percentage);
         const batch_number = row.batch_number ? String(row.batch_number).trim() : '';
         const expiry_date = toDateInput(row.expiry_date);
+        const is_weight_based = toWeightFlag(row.is_weight_based);
         return {
           id,
           name,
@@ -1147,6 +1177,7 @@ const IMPORT_CHUNK_SIZE = 100;
           gst_percentage,
           batch_number,
           expiry_date,
+          is_weight_based,
           selling_price
         };
       })
@@ -1277,6 +1308,7 @@ const IMPORT_CHUNK_SIZE = 100;
       gst_percentage: toNumber(row.gst_percentage),
       batch_number: row.batch_number ? String(row.batch_number).trim() : null,
       expiry_date: row.expiry_date ? String(row.expiry_date).trim() : null,
+      is_weight_based: toWeightFlag(row.is_weight_based),
       selling_price:
         toNumber(row.selling_price) ??
         toNumber(row.sellingPrice) ??
@@ -1636,7 +1668,7 @@ const IMPORT_CHUNK_SIZE = 100;
                     >
                       <td className="product-name-cell">
                         <span className="product-name-text">{displayProduct.name || displayProduct.product_name || '-'}</span>
-                        {String(displayProduct.is_weight_based ?? displayProduct.isWeightBased ?? displayProduct.weight_based ?? '0') === '1' ? (
+                        {isWeightBasedValue(displayProduct.is_weight_based ?? displayProduct.isWeightBased ?? displayProduct.weight_based ?? displayProduct.type) ? (
                           <span className="product-type-tag weight">Weighted</span>
                         ) : (
                           <span className="product-type-tag piece">Piece</span>
@@ -1894,6 +1926,7 @@ const IMPORT_CHUNK_SIZE = 100;
                           <th>Company</th>
                           <th>Category</th>
                           <th>Barcode</th>
+                          <th>Type</th>
                           <th className="text-end">Stock</th>
                           <th className="text-end">Purchase Price *</th>
                           <th className="text-end">MRP</th>
@@ -1941,10 +1974,20 @@ const IMPORT_CHUNK_SIZE = 100;
                               />
                             </td>
                             <td>
+                              <select
+                                className="form-select form-select-sm"
+                                value={toWeightFlag(row.is_weight_based)}
+                                onChange={(event) => updatePreviewRow(idx, 'is_weight_based', event.target.value)}
+                              >
+                                {pieceBasedEnabled && <option value="0">Piece-based</option>}
+                                {weightBasedEnabled && <option value="1">Weight-based</option>}
+                              </select>
+                            </td>
+                            <td>
                               <input
                                 className="form-control form-control-sm text-end"
                                 type="number"
-                                step="0.01"
+                                step={toWeightFlag(row.is_weight_based) === '1' ? '0.001' : '1'}
                                 value={row.stock_quantity}
                                 title={String(row.stock_quantity ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'stock_quantity', event.target.value)}

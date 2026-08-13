@@ -32,24 +32,33 @@ const getProductStock = (product) => {
 
 const toKey = (product) => product?.id ?? product?.product_id ?? product?.productId ?? product?.barcode;
 
-const normalizeItem = (product, qty = 1) => ({
-  key: toKey(product),
-  id: product?.id ?? product?.product_id ?? product?.productId ?? null,
-  barcode: product?.barcode ?? null,
-  name: product?.name ?? product?.product_name ?? '-',
-  mrp: Number(product?.mrp ?? product?.mrp_price ?? 0) || 0,
-  price: getProductPrice(product),
-  gstPercent: getProductGst(product),
-  qty,
-  is_weight_based: product?.is_weight_based ?? product?.isWeightBased ?? product?.weight_based ?? 0,
-  __stock: getProductStock(product),
-});
-
 const isWeightBased = (item) => {
   const value = item?.is_weight_based;
   if (value === true) return true;
   if (value === false || value == null) return false;
   return String(value) === '1';
+};
+
+const normalizeQtyForItem = (item, qty = 1) => {
+  const parsed = Number(qty);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
+  return isWeightBased(item) ? parsed : Math.floor(parsed);
+};
+
+const normalizeItem = (product, qty = 1) => {
+  const item = {
+    key: toKey(product),
+    id: product?.id ?? product?.product_id ?? product?.productId ?? null,
+    barcode: product?.barcode ?? null,
+    name: product?.name ?? product?.product_name ?? '-',
+    mrp: Number(product?.mrp ?? product?.mrp_price ?? 0) || 0,
+    price: getProductPrice(product),
+    gstPercent: getProductGst(product),
+    qty: 1,
+    is_weight_based: product?.is_weight_based ?? product?.isWeightBased ?? product?.weight_based ?? 0,
+    __stock: getProductStock(product),
+  };
+  return { ...item, qty: normalizeQtyForItem(item, qty) };
 };
 
 export const useBillingStore = create((set) => ({
@@ -68,7 +77,7 @@ export const useBillingStore = create((set) => ({
       const existing = state.items.find((item) => item.key === key);
       if (existing) {
         const updated = state.items.map((item) =>
-          item.key === key ? { ...item, qty: item.qty + qty } : item
+          item.key === key ? { ...item, qty: item.qty + normalizeQtyForItem(item, qty) } : item
         );
         return { items: updated, selectedKey: key };
       }
@@ -85,8 +94,9 @@ export const useBillingStore = create((set) => ({
       if (!Number.isFinite(parsed)) return state;
       const target = state.items.find((item) => item.key === key);
       const weight = isWeightBased(target);
+      if (!weight && !Number.isInteger(parsed)) return state;
       const stock = Number.isFinite(target?.__stock) ? target.__stock : null;
-      let normalized = weight ? parsed : Math.floor(parsed);
+      let normalized = weight ? parsed : parsed;
       if (stock !== null) {
         if (stock <= 0) {
           return state;

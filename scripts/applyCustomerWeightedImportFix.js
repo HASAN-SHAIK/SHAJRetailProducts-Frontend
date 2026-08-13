@@ -2,7 +2,19 @@ const fs = require('fs');
 const path = require('path');
 
 const filePath = path.join(process.cwd(), 'src/components/ProductsPage/ProductsPage.jsx');
+const adapterPath = path.join(process.cwd(), 'src/components/ProductsPage/WeightedImportAdapter.jsx');
+const indexPath = path.join(process.cwd(), 'src/components/ProductsPage/index.js');
 let source = fs.readFileSync(filePath, 'utf8');
+
+const adapterIsActive =
+  fs.existsSync(adapterPath) &&
+  fs.existsSync(indexPath) &&
+  fs.readFileSync(indexPath, 'utf8').includes("export { default } from './WeightedImportAdapter'");
+
+if (adapterIsActive) {
+  console.log('[customer-fix] weighted product import adapter already active');
+  process.exit(0);
+}
 
 const replaceRequired = (label, before, after) => {
   if (source.includes(after)) return;
