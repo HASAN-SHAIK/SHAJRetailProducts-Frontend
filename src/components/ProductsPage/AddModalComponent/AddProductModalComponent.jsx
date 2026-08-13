@@ -27,6 +27,13 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
     };
     getCategories();
   }, [navigate, showPopup]);
+
+  const isWeightedProduct = String(formData?.is_weight_based ?? '0') === '1';
+  const getNumberStep = (name) => {
+    if (name === 'stock_quantity') return isWeightedProduct ? '0.001' : '1';
+    return '0.01';
+  };
+
   return (
     <div className="modal fade ml-5" id={modalId} tabIndex="-1" aria-labelledby={`${modalId}Label`} aria-hidden="true">
       <div className="modal-dialog modal-dialog-centered custom-modal-width">
@@ -112,6 +119,7 @@ const AddProductModalComponent = ({ modalId, title, fields, formData, onChange, 
                             onChange={onChange}
                             required={required !== false}
                             autoFocus={autoFocus === true}
+                            step={type === 'number' ? getNumberStep(name) : undefined}
                           />
                         )}
                       </div>
