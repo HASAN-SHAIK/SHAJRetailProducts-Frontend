@@ -1721,14 +1721,51 @@ const ProductsPage = ({ navigate }) => {
       setImporting(false);
     }
   };
+  const formatImportFileSize = (size = 0) => {
+    if (!size) return '0 KB';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const index = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
+    const value = size / Math.pow(1024, index);
+    return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+  };
+  const handleClearImportPreview = () => {
+    setImportPreviewRows([]);
+    setImportResult(null);
+    setImportError('');
+    setImportPreviewError('');
+  };
+  const handleDownloadImportTemplate = () => {
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet([
+      {
+        name: '',
+        company: '',
+        category: '',
+        barcode: '',
+        type: 'Piece',
+        stock_quantity: '',
+        purchase_price: '',
+        mrp: '',
+        hsn_code: '',
+        gst_percentage: '',
+        batch_number: '',
+        expiry_date: 'yyyy-mm-dd',
+        selling_price: '',
+      },
+    ]);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Products');
+    XLSX.writeFile(workbook, 'products-import-template.xlsx');
+  };
   const dirtyCount = Object.keys(editedMap).length;
   const importMissingDetails = importPreviewRows
     .map((row, index) => {
       const missing = [];
       const name = String(row.name || '').trim();
       const actual = toNumber(row.purchase_price);
+      const selling = toNumber(row.selling_price);
       if (!name) missing.push('Name');
       if (!Number.isFinite(actual) || actual <= 0) missing.push('Purchase Price');
+      if (!Number.isFinite(selling) || selling <= 0) missing.push('Selling Price');
       if (missing.length === 0) return null;
       return {
         row: index + 1,
@@ -1745,6 +1782,8 @@ const ProductsPage = ({ navigate }) => {
     importMissingRequired > 0
       ? `Please fill required fields. Missing in ${importMissingRequired} row(s).`
       : '';
+  const importValidRows = Math.max(importPreviewRows.length - importMissingRequired, 0);
+  const importFileExtension = importFile?.name?.split('.').pop()?.toUpperCase() || 'XLSX';
 
   const renderEditableCell = (product, field, formatter) => {
     const readonlyValue = getProductFieldValue(product, field);
@@ -2211,17 +2250,27 @@ const ProductsPage = ({ navigate }) => {
           </div>
         )}
         {importModalOpen && (
-          <div className="delete-modal-overlay" onClick={closeImportModal}>
+          <div className="delete-modal-overlay import-modal-overlay" onClick={closeImportModal}>
             <div className="delete-modal import-modal" onClick={(event) => event.stopPropagation()}>
               <div className="import-modal-header">
-                <h4>Import Products</h4>
+                <div className="import-modal-title-group">
+                  <div className="import-modal-icon">
+                    <i className="bi bi-upload" aria-hidden="true"></i>
+                  </div>
+                  <div>
+                    <h4>Import Products</h4>
+                    <p>Upload an Excel file to import products. We'll preview the data so you can review and set selling prices.</p>
+                  </div>
+                </div>
                 <div className="import-modal-actions">
                   <button
-                    className="btn btn-primary"
+                    className="btn import-primary-action"
                     onClick={importPreviewRows.length > 0 ? handleImportConfirm : handleImportSubmit}
                     disabled={importing || importParsing || (importPreviewRows.length > 0 && importMissingRequired > 0)}
                     title={importDisableReason}
+                    type="button"
                   >
+                    <i className="bi bi-cloud-arrow-up" aria-hidden="true"></i>
                     {importing
                       ? `Importing${'.'.repeat(importDots)}`
                       : importPreviewRows.length > 0
@@ -2231,73 +2280,136 @@ const ProductsPage = ({ navigate }) => {
                       : 'Parse & Preview'}
                   </button>
                   <button
-                    className="btn btn-outline-light"
+                    className="btn import-close-action"
                     onClick={closeImportModal}
                     type="button"
                   >
+                    <i className="bi bi-x-circle" aria-hidden="true"></i>
                     Close
                   </button>
                 </div>
               </div>
-              <p className="mb-2">Upload Excel (.xlsx, .xls, .csv). We'll preview and let you set selling price.</p>
-              <input
-                type="file"
-                className="form-control mb-2"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleImportFileChange}
-              />
-              <div className="form-check mb-2">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="auto-category-toggle"
-                  checked={autoCategoryEnabled}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    setAutoCategoryEnabled(checked);
-                    if (checked && importPreviewRows.length > 0) {
-                      autoFillCategories();
-                    }
-                  }}
-                />
-                <label className="form-check-label" htmlFor="auto-category-toggle">
-                  Auto-fill category from product name when empty
-                </label>
+              <div className="import-upload-card">
+                <h5>Upload Excel File</h5>
+                <div className="import-file-drop">
+                  <label className="import-file-button" htmlFor="product-import-file">
+                    <i className="bi bi-paperclip" aria-hidden="true"></i>
+                    Choose File
+                  </label>
+                  <input
+                    id="product-import-file"
+                    type="file"
+                    className="import-file-input"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleImportFileChange}
+                  />
+                  <div className="import-file-meta">
+                    <strong>{importFile?.name || 'No file selected'}</strong>
+                    <span>{importFile ? `${importFileExtension} - ${formatImportFileSize(importFile.size)}` : 'XLSX, XLS, or CSV up to 25 MB'}</span>
+                  </div>
+                  {importFile && (
+                    <div className="import-file-success">
+                      <i className="bi bi-check-circle" aria-hidden="true"></i>
+                      File loaded successfully
+                    </div>
+                  )}
+                </div>
+                <div className="import-auto-row">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="auto-category-toggle"
+                    checked={autoCategoryEnabled}
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setAutoCategoryEnabled(checked);
+                      if (checked && importPreviewRows.length > 0) {
+                        autoFillCategories();
+                      }
+                    }}
+                  />
+                  <label htmlFor="auto-category-toggle">
+                    Auto-fill category from product name when empty
+                  </label>
+                  <span className="import-info-dot" title="Uses the product name to fill empty category cells.">
+                    i
+                  </span>
+                </div>
               </div>
-              {/* {importPreviewRows.length > 0 && (
-                <button
-                  type="button"
-                  className="btn btn-outline-info btn-sm mb-2"
-                  onClick={autoFillCategories}
-                >
-                  Re-apply Auto Categories
-                </button>
-              )} */}
               {importPreviewError && (
-                <p className="text-danger mb-2">{importPreviewError}</p>
+                <div className="import-error-message">{importPreviewError}</div>
               )}
               {importPreviewRows.length > 0 && (
-                <div className="mb-2">
-                  <p className="mb-1">
-                    Rows: {importPreviewRows.length} · Missing required: {importMissingRequired}
-                  </p>
-                  {importMissingRequired > 0 && (
-                    <div className="alert alert-warning py-2 px-3">
-                      <div className="mb-1">
-                        <strong>Why "Confirm & Import" is disabled:</strong>
+                <div className="import-preview-stack">
+                  <div className="import-stats-card">
+                    <div className="import-stat">
+                      <div className="import-stat-icon rows">
+                        <i className="bi bi-card-list" aria-hidden="true"></i>
                       </div>
-                      <div className="small">
+                      <div>
+                        <strong>{importPreviewRows.length}</strong>
+                        <span>Total Rows</span>
+                      </div>
+                    </div>
+                    <div className="import-stat">
+                      <div className="import-stat-icon warning">
+                        <i className="bi bi-exclamation-triangle" aria-hidden="true"></i>
+                      </div>
+                      <div>
+                        <strong>{importMissingRequired}</strong>
+                        <span>Row Needs Attention</span>
+                      </div>
+                    </div>
+                    <div className="import-stat">
+                      <div className="import-stat-icon valid">
+                        <i className="bi bi-diagram-3" aria-hidden="true"></i>
+                      </div>
+                      <div>
+                        <strong>{importValidRows}</strong>
+                        <span>Rows Valid</span>
+                      </div>
+                    </div>
+                    <div className="import-stat validation">
+                      <div className={`import-stat-icon ${importMissingRequired > 0 ? 'invalid' : 'success'}`}>
+                        <i className={`bi ${importMissingRequired > 0 ? 'bi-x-circle' : 'bi-check-circle'}`} aria-hidden="true"></i>
+                      </div>
+                      <div>
+                        <span>
+                          Validation: <b className={importMissingRequired > 0 ? 'text-danger' : 'text-success'}>
+                            {importMissingRequired > 0 ? 'Issues Found' : 'Ready'}
+                          </b>
+                        </span>
+                        <small>{importMissingRequired > 0 ? 'Please fix the issues below to enable import' : 'All rows can be imported'}</small>
+                      </div>
+                    </div>
+                  </div>
+                  {importMissingRequired > 0 && (
+                    <div className="import-warning-card">
+                      <div className="import-warning-icon">
+                        <i className="bi bi-exclamation-circle-fill" aria-hidden="true"></i>
+                      </div>
+                      <div>
+                        <h5>Why "Confirm & Import" is disabled</h5>
                         {importMissingDetails.slice(0, 8).map((entry) => (
-                          <div key={`missing-row-${entry.row}`}>
+                          <strong key={`missing-row-${entry.row}`}>
                             Row {entry.row}: {entry.missing.join(', ')}
-                          </div>
+                          </strong>
                         ))}
                         {importMissingDetails.length > 8 && (
-                          <div>...and {importMissingDetails.length - 8} more row(s).</div>
+                          <strong>...and {importMissingDetails.length - 8} more row(s).</strong>
                         )}
+                        <p>These required fields are missing or invalid. Please update the values in the table below.</p>
                       </div>
                     </div>
                   )}
+                  <div className="import-preview-card">
+                    <div className="import-preview-header">
+                      <h5>Parsed Preview <span>{importPreviewRows.length} row loaded</span></h5>
+                      <button className="btn import-template-btn" type="button" onClick={handleDownloadImportTemplate}>
+                        <i className="bi bi-download" aria-hidden="true"></i>
+                        Download Template
+                      </button>
+                    </div>
                   <div className="expenses-table-wrapper import-preview-table">
                     <table className="expenses-table">
                       <thead>
@@ -2307,6 +2419,7 @@ const ProductsPage = ({ navigate }) => {
                           <th>Company</th>
                           <th>Category</th>
                           <th>Barcode</th>
+                          <th>Type <span className="required-star">*</span> <span className="import-table-info" title="Piece items use whole quantities. Weight items allow decimal quantities.">i</span></th>
                           <th className="text-end">Stock</th>
                           <th className="text-end">Purchase Price *</th>
                           <th className="text-end">MRP</th>
@@ -2314,9 +2427,7 @@ const ProductsPage = ({ navigate }) => {
                           <th className="text-end">GST %</th>
                           <th>Batch No.</th>
                           <th>Expiry</th>
-                          <th className="text-end">Is Weight Based</th>
-                          <th className="text-end">Selling Price</th>
-                          <th>Validation</th>
+                          <th className="text-end">Selling Price *</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2324,8 +2435,9 @@ const ProductsPage = ({ navigate }) => {
                           const rowMissing = importMissingByRow[idx + 1] || [];
                           const nameMissing = rowMissing.includes('Name');
                           const purchaseMissing = rowMissing.includes('Purchase Price');
+                          const sellingMissing = rowMissing.includes('Selling Price');
                           return (
-                          <tr key={`import-row-${idx}`}>
+                          <tr key={`import-row-${idx}`} className={rowMissing.length > 0 ? 'import-row-invalid' : ''}>
                             <td>{idx + 1}</td>
                             <td>
                               <input
@@ -2334,7 +2446,6 @@ const ProductsPage = ({ navigate }) => {
                                 title={String(row.name ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'name', event.target.value)}
                               />
-                              {nameMissing && <small className="text-danger">Name is required</small>}
                             </td>
                             <td>
                               <input
@@ -2357,14 +2468,26 @@ const ProductsPage = ({ navigate }) => {
                                 className="form-control form-control-sm"
                                 value={row.barcode}
                                 title={String(row.barcode ?? '')}
+                                placeholder="Enter barcode"
                                 onChange={(event) => updatePreviewRow(idx, 'barcode', event.target.value)}
                               />
+                            </td>
+                            <td>
+                              <select
+                                className="form-control form-control-sm"
+                                value={toFlagValue(row.is_weight_based, '0')}
+                                title={String(row.is_weight_based ?? '0')}
+                                onChange={(event) => updatePreviewRow(idx, 'is_weight_based', event.target.value)}
+                              >
+                                <option value="0">Piece</option>
+                                <option value="1">Weight</option>
+                              </select>
                             </td>
                             <td>
                               <input
                                 className="form-control form-control-sm text-end"
                                 type="number"
-                                step="0.01"
+                                step={toFlagValue(row.is_weight_based, '0') === '1' ? '0.01' : '1'}
                                 value={row.stock_quantity}
                                 title={String(row.stock_quantity ?? '')}
                                 onChange={(event) => updatePreviewRow(idx, 'stock_quantity', event.target.value)}
@@ -2381,9 +2504,6 @@ const ProductsPage = ({ navigate }) => {
                                 onChange={(event) => updatePreviewRow(idx, 'purchase_price', event.target.value)}
                                 onWheel={preventNumberWheel}
                               />
-                              {purchaseMissing && (
-                                <small className="text-danger">Purchase Price must be greater than 0</small>
-                              )}
                             </td>
                             <td>
                               <input
@@ -2401,6 +2521,7 @@ const ProductsPage = ({ navigate }) => {
                                 className="form-control form-control-sm"
                                 value={row.hsn_code}
                                 title={String(row.hsn_code ?? '')}
+                                placeholder="Enter HSN"
                                 onChange={(event) => updatePreviewRow(idx, 'hsn_code', event.target.value)}
                               />
                             </td>
@@ -2420,6 +2541,7 @@ const ProductsPage = ({ navigate }) => {
                                 className="form-control form-control-sm"
                                 value={row.batch_number ?? ''}
                                 title={String(row.batch_number ?? '')}
+                                placeholder="Enter batch no."
                                 onChange={(event) => updatePreviewRow(idx, 'batch_number', event.target.value)}
                               />
                             </td>
@@ -2433,19 +2555,8 @@ const ProductsPage = ({ navigate }) => {
                               />
                             </td>
                             <td>
-                              <select
-                                className="form-control form-control-sm text-end"
-                                value={toFlagValue(row.is_weight_based, '0')}
-                                title={String(row.is_weight_based ?? '0')}
-                                onChange={(event) => updatePreviewRow(idx, 'is_weight_based', event.target.value)}
-                              >
-                                <option value="0">No</option>
-                                <option value="1">Yes</option>
-                              </select>
-                            </td>
-                            <td>
                               <input
-                                className="form-control form-control-sm text-end"
+                                className={`form-control form-control-sm text-end ${sellingMissing ? 'is-invalid' : ''}`}
                                 type="number"
                                 step="0.01"
                                 value={row.selling_price ?? ''}
@@ -2454,26 +2565,27 @@ const ProductsPage = ({ navigate }) => {
                                 onWheel={preventNumberWheel}
                               />
                             </td>
-                            <td>
-                              {rowMissing.length > 0 ? (
-                                <small className="text-danger">{rowMissing.join(', ')} missing</small>
-                              ) : (
-                                <small className="text-success">OK</small>
-                              )}
-                            </td>
                           </tr>
                         )})}
                       </tbody>
                     </table>
                   </div>
+                    <div className="import-preview-footer">
+                      <span><i className="bi bi-info-circle" aria-hidden="true"></i> Fields marked with <b>*</b> are required.</span>
+                      <button className="btn import-clear-btn" type="button" onClick={handleClearImportPreview}>
+                        <i className="bi bi-trash3" aria-hidden="true"></i>
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
               {importResult && (
-                <div className="mb-2">
-                  <div className="alert alert-success py-2">Products imported successfully</div>
-                  <p className="mb-1">Total: {importResult.total ?? 0}</p>
-                  <p className="mb-1">Inserted: {importResult.inserted ?? 0}</p>
-                  <p className="mb-1">Skipped: {importResult.skipped ?? 0}</p>
+                <div className="import-result-card">
+                  <strong>Products imported successfully</strong>
+                  <span>Total: {importResult.total ?? 0}</span>
+                  <span>Inserted: {importResult.inserted ?? 0}</span>
+                  <span>Skipped: {importResult.skipped ?? 0}</span>
                   {!isOpeningCompleted && (
                     <div className="alert alert-warning mt-2 mb-2">
                       <p className="mb-2">Complete Opening Setup to start billing</p>
@@ -2501,7 +2613,7 @@ const ProductsPage = ({ navigate }) => {
                 </div>
               )}
               {importError && (
-                <p className="text-danger mb-2">{importError}</p>
+                <div className="import-error-message">{importError}</div>
               )}
             </div>
           </div>
