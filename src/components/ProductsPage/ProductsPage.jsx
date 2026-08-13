@@ -197,10 +197,7 @@ const IMPORT_CHUNK_SIZE = 100;
  const [activeEdit, setActiveEdit] = useState(null);
  const [editedMap, setEditedMap] = useState({});
  const [savingBulk, setSavingBulk] = useState(false);
- const [stockModalOpen, setStockModalOpen] = useState(false);
- const [stockLoading, setStockLoading] = useState(false);
- const [stockRows, setStockRows] = useState([]);
- const [stockTarget, setStockTarget] = useState(null);
+ const [convertingTypeId, setConvertingTypeId] = useState(null);
  const [importModalOpen, setImportModalOpen] = useState(false);
  const [importFile, setImportFile] = useState(null);
  const [importResult, setImportResult] = useState(null);
@@ -324,6 +321,13 @@ const IMPORT_CHUNK_SIZE = 100;
   const getProductKey = (product) =>
     product?.id ?? product?.product_id ?? product?.productId ?? product?.barcode;
 
+  const getProductId = (product) => product?.id ?? product?.product_id ?? product?.productId ?? null;
+
+  const isSameProductId = (left, right) => {
+    if (left === null || left === undefined || right === null || right === undefined) return false;
+    return String(left) === String(right);
+  };
+
   const getDisplayBarcode = (barcodeValue) => {
     if (!barcodeValue) return '';
     const value = String(barcodeValue);
@@ -333,7 +337,16 @@ const IMPORT_CHUNK_SIZE = 100;
   const mergeNonEmptyFields = (base, extra) => {
     if (!extra) return base;
     const merged = { ...base };
+    const protectedKeys = new Set([
+      'is_weight_based',
+      'isWeightBased',
+      'weight_based',
+      'type',
+      'product_type',
+      'unit_type',
+    ]);
     Object.entries(extra).forEach(([key, value]) => {
+      if (protectedKeys.has(key)) return;
       if (value !== null && value !== undefined && value !== '') {
         merged[key] = value;
       }
@@ -463,11 +476,12 @@ const IMPORT_CHUNK_SIZE = 100;
     return { paged, totalRecords, totalPages, page };
   };
 
-  const fetchProducts = async () => {
+  const fetchProducts = async (options = {}) => {
+    const forceServer = options?.forceServer === true;
     setIsLoading(true);
     setErrorMessage('');
     try {
-      if (!forceApiFetch) {
+      if (!forceServer && !forceApiFetch) {
         const localAll = await getAllProducts();
         const localList = Array.isArray(localAll) ? localAll : [];
         if (localList.length > 0) {
@@ -511,7 +525,7 @@ const IMPORT_CHUNK_SIZE = 100;
         setErrorMessage('Unable to load products. Please try again.');
       }
     } finally {
-      if (forceApiFetch) {
+      if (forceServer || forceApiFetch) {
         setForceApiFetch(false);
       }
       setIsLoading(false);
@@ -839,27 +853,79 @@ const IMPORT_CHUNK_SIZE = 100;
       setDeletingId(null);
     }
   };
-  const openStockModal = async (product) => {
-    if (!product?.id) return;
-    setStockTarget(product);
-    setStockModalOpen(true);
-    setStockLoading(true);
-    try {
-      const res = await api.get('/stock', { params: { product_id: product.id } });
-      const payload = res?.data?.stock || res?.data?.data || res?.data || [];
-      setStockRows(Array.isArray(payload) ? payload : []);
-    } catch (err) {
-      setStockRows([]);
-      showPopup('Failed to load branch stock.', 'Error');
-    } finally {
-      setStockLoading(false);
+  const handleConvertProductType = async (product) => {
+    const productId = getProductId(product);
+    if (!productId || convertingTypeId) return;
+    const currentlyWeightBased = isWeightBasedValue(
+      product.is_weight_based ?? product.isWeightBased ?? product.weight_based ?? product.type
+    );
+    const nextValue = currentlyWeightBased ? 0 : 1;
+    if (nextValue === 1 && !weightBasedEnabled) {
+      showPopup('Weight-based products are disabled for this tenant.', 'Feature');
+      return;
     }
-  };
-
-  const closeStockModal = () => {
-    setStockModalOpen(false);
-    setStockTarget(null);
-    setStockRows([]);
+    if (nextValue === 0 && !pieceBasedEnabled) {
+      showPopup('Piece-based products are disabled for this tenant.', 'Feature');
+      return;
+    }
+    setConvertingTypeId(productId);
+    try {
+      const response = await api.put(`/products/${productId}`, {
+        is_weight_based: nextValue,
+      });
+      let updatedProduct = extractProductFromResponse(response) || {
+        ...product,
+        is_weight_based: nextValue,
+      };
+      try {
+        const freshResponse = await api.get(`/products/${productId}`);
+        updatedProduct = extractProductFromResponse(freshResponse) || updatedProduct;
+      } catch (err) {
+        // Keep the successful update response if the follow-up read is unavailable.
+      }
+      const normalizedUpdatedProduct = {
+        ...product,
+        ...updatedProduct,
+        id: getProductId(updatedProduct) ?? productId,
+        is_weight_based: updatedProduct.is_weight_based ?? nextValue,
+        type: updatedProduct.type ?? updatedProduct.is_weight_based ?? nextValue,
+      };
+      setProducts((prev) => {
+        const nextProducts = prev.map((item) =>
+          isSameProductId(getProductId(item), productId)
+            ? { ...item, ...normalizedUpdatedProduct }
+            : item
+        );
+        saveProductsCache(nextProducts);
+        return nextProducts;
+      });
+      setExtraDetailsByBarcode((prev) => {
+        const barcode = normalizedUpdatedProduct?.barcode;
+        if (!barcode) return prev;
+        const next = {
+          ...prev,
+        };
+        if (next[barcode]) {
+          next[barcode] = { ...next[barcode] };
+          delete next[barcode].is_weight_based;
+          delete next[barcode].isWeightBased;
+          delete next[barcode].weight_based;
+          delete next[barcode].type;
+          delete next[barcode].product_type;
+          delete next[barcode].unit_type;
+        }
+        return next;
+      });
+      updateProductsBulk([normalizedUpdatedProduct]).catch(() => {});
+      showPopup(
+        `Product converted to ${nextValue === 1 ? 'weight-based' : 'piece-based'}.`,
+        'Success'
+      );
+    } catch (err) {
+      showPopup('Failed to convert product type.', 'Error');
+    } finally {
+      setConvertingTypeId(null);
+    }
   };
   const closeImportModal = () => {
     setImportModalOpen(false);
@@ -1697,8 +1763,16 @@ const IMPORT_CHUNK_SIZE = 100;
                           {/* <button className="btn btn-outline-primary btn-sm" onClick={() => handleEditClick(product)}>
                             Edit
                           </button> */}
-                          <button className="btn btn-outline-info btn-sm" onClick={() => openStockModal(displayProduct)}>
-                            Stock by Branch
+                          <button
+                            className="btn btn-outline-info btn-sm"
+                            onClick={() => handleConvertProductType(displayProduct)}
+                            disabled={convertingTypeId === (displayProduct.id ?? displayProduct.product_id ?? displayProduct.productId)}
+                          >
+                            {convertingTypeId === (displayProduct.id ?? displayProduct.product_id ?? displayProduct.productId)
+                              ? 'Converting...'
+                              : isWeightBasedValue(displayProduct.is_weight_based ?? displayProduct.isWeightBased ?? displayProduct.weight_based ?? displayProduct.type)
+                              ? 'Convert to Piece'
+                              : 'Convert to Weight'}
                           </button>
                           <button className="btn btn-outline-danger btn-sm" onClick={() => openDeleteModal(product)}>
                             Delete
@@ -1783,47 +1857,6 @@ const IMPORT_CHUNK_SIZE = 100;
                 </button>
                 <button className="btn btn-danger" onClick={handleDeleteProduct} disabled={deletingId === deleteTarget?.id}>
                   {deletingId === deleteTarget?.id ? 'Deleting...' : 'Delete'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        {stockModalOpen && (
-          <div className="delete-modal-overlay" onClick={closeStockModal}>
-            <div className="delete-modal stock-modal" onClick={(event) => event.stopPropagation()}>
-              <h4>Stock by Branch</h4>
-              <p className="mb-2">{stockTarget?.name || stockTarget?.product_name || '-'}</p>
-              <div className="expenses-table-wrapper">
-                <table className="expenses-table">
-                  <thead>
-                    <tr>
-                      <th>Branch</th>
-                      <th className="text-end">Quantity</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stockLoading && (
-                      <tr>
-                        <td colSpan={2} className="text-center">Loading...</td>
-                      </tr>
-                    )}
-                    {!stockLoading && stockRows.length === 0 && (
-                      <tr>
-                        <td colSpan={2} className="text-center">No stock data.</td>
-                      </tr>
-                    )}
-                    {!stockLoading && stockRows.map((row) => (
-                      <tr key={row.branch_id || row.branch}>
-                        <td>{row.branch || '-'}</td>
-                        <td className="text-end">{row.quantity ?? 0}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="delete-actions">
-                <button className="btn btn-outline-secondary" onClick={closeStockModal}>
-                  Close
                 </button>
               </div>
             </div>
