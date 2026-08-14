@@ -88,6 +88,13 @@ export const enrollLocalPosUser = async ({ offlineGrant, pin }) =>
 export const getLocalPosDevice = async () =>
   request('/device', { method: 'GET', requireSession: false });
 
+export const registerLocalPosDevice = async ({ storeId, terminalId }) =>
+  request('/device/registration', {
+    method: 'PUT',
+    requireSession: false,
+    body: { store_id: String(storeId), terminal_id: String(terminalId).trim() },
+  });
+
 export const loginLocalPosUser = async ({ userId, pin }) => {
   const payload = await request('/auth/login', { method: 'POST', requireSession: false, body: { user_id: String(userId), pin } });
   if (!payload?.session_token) throw new Error('local_pos_session_missing');
