@@ -1,6 +1,6 @@
 // src/pages/Login/Login.js
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import './Login.css';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
@@ -17,7 +17,14 @@ import {
   getLocalPosDevice,
   isLocalPosEnabled,
   loginLocalPosUser,
+  registerLocalPosDevice,
 } from '../../Repositories/local/posLocalApiClient';
+import {
+  claimPosRegistration,
+  getPosRegistrationStatus,
+  loadPendingPosRegistration,
+  requestPosRegistration,
+} from '../../services/posRegistrationService';
 
 const validPin = (value) => /^\d{4,8}$/.test(String(value || ''));
 
@@ -26,6 +33,10 @@ const Login = () => {
   const [form, setForm] = useState({ email: '', password: '', posPin: '' });
   const [error, setError] = useState('');
   const [offlineSessionUser, setOfflineSessionUser] = useState(null);
+  const [registrationDevice, setRegistrationDevice] = useState(null);
+  const [registrationTenantId, setRegistrationTenantId] = useState(process.env.REACT_APP_POS_TENANT_ID || '');
+  const [registration, setRegistration] = useState(() => loadPendingPosRegistration());
+  const [registrationBusy, setRegistrationBusy] = useState(false);
   const posEnabled = isLocalPosEnabled();
   const resumeEmail = process.env.REACT_APP_RESUME_EMAIL || 'admin@hasan.com';
   const resumePassword = process.env.REACT_APP_RESUME_PASSWORD || 'admin';
@@ -33,6 +44,35 @@ const Login = () => {
   const dispatch = useDispatch();
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+
+  useEffect(() => {
+    if (!posEnabled) return;
+    getLocalPosDevice().then((device) => {
+      setRegistrationDevice(device || null);
+      if (device?.store_id) return;
+      const pending = loadPendingPosRegistration();
+      if (pending) {
+        setRegistration(pending);
+        if (pending.tenant_id) setRegistrationTenantId(String(pending.tenant_id));
+      }
+    }).catch(() => {});
+  }, [posEnabled]);
+
+  useEffect(() => {
+    if (!registration?.request_id || !registration?.request_token) return undefined;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const next = await getPosRegistrationStatus(registration);
+        if (!cancelled && next) setRegistration(next);
+      } catch (err) {
+        if (!cancelled && err?.status !== 404) console.warn('POS registration status check failed', err);
+      }
+    };
+    check();
+    const id = setInterval(check, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [registration?.request_id, registration?.request_token]);
 
   const applyUser = (userPayload, decoded = null) => {
     if (decoded) {
@@ -65,8 +105,15 @@ const Login = () => {
 
       if (posEnabled) {
         const localDevice = await getLocalPosDevice();
+        setRegistrationDevice(localDevice || null);
         const posDeviceId = String(localDevice?.device_id || '').trim();
         if (!posDeviceId) throw new Error('local_pos_device_missing');
+        if (!localDevice?.store_id) {
+          const tenantId = String(userPayload?.tenant_id || decoded?.tenant_id || registrationTenantId || '').trim();
+          if (tenantId) setRegistrationTenantId(tenantId);
+          setError('This POS is not registered yet. Send a registration request below, then ask your Retail Hub administrator to approve it and assign a store.');
+          return;
+        }
         const grantPayload = await issueOfflinePosGrant({ deviceId: posDeviceId });
         if (!grantPayload?.offline_grant) throw new Error('offline_pos_grant_missing');
         await enrollLocalPosUser({ offlineGrant: grantPayload.offline_grant, pin: form.posPin });
@@ -95,6 +142,48 @@ const Login = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleRequestRegistration = async () => {
+    setError('');
+    const tenantId = String(registrationTenantId || '').trim();
+    if (!tenantId) { setError('Tenant ID is required to send this POS registration request.'); return; }
+    setRegistrationBusy(true);
+    try {
+      const device = registrationDevice || await getLocalPosDevice();
+      if (!device?.device_id) throw new Error('local_pos_device_missing');
+      if (device?.store_id) { setError('This POS is already registered to a store.'); return; }
+      const pending = await requestPosRegistration({ tenantId, device });
+      setRegistrationDevice(device);
+      setRegistration(pending);
+      setError('Registration request sent. Open Retail Hub → POS & Devices and approve this terminal. This screen will check automatically.');
+    } catch (err) {
+      if (err?.payload?.code === 'REGISTRATION_REQUEST_EXISTS') {
+        setError('A pending request already exists for this POS. If this browser lost its request token, reject the old request in Retail Hub and send a new one.');
+      } else {
+        setError(err?.payload?.message || err?.message || 'Unable to send POS registration request.');
+      }
+    } finally { setRegistrationBusy(false); }
+  };
+
+  const handleActivateApprovedRegistration = async () => {
+    setRegistrationBusy(true);setError('');
+    try {
+      const current = await getPosRegistrationStatus(registration);
+      if (current?.status !== 'APPROVED' || !current?.branch_id || !current?.terminal_id) {
+        setRegistration(current || registration);
+        setError(current?.status === 'REJECTED' ? 'This POS registration request was rejected.' : 'Still waiting for Retail Hub approval.');
+        return;
+      }
+      await registerLocalPosDevice({ storeId: current.branch_id, terminalId: current.terminal_id });
+      await claimPosRegistration(current);
+      const localDevice = await getLocalPosDevice();
+      setRegistrationDevice(localDevice);
+      setRegistration(null);
+      setError(`POS activated for store ${current.branch_id} as terminal ${current.terminal_id}. Sign in again to enroll your POS PIN.`);
+    } catch (err) {
+      setError(err?.payload?.message || err?.payload?.error || err?.message || 'Unable to activate approved POS registration.');
+    } finally { setRegistrationBusy(false); }
   };
 
   const handleContinueOffline = async () => {
@@ -129,6 +218,9 @@ const Login = () => {
     }
   };
 
+  const unregistered = posEnabled && registrationDevice && !registrationDevice?.store_id;
+  const registrationStatus = String(registration?.status || '').toUpperCase();
+
   return (
     <div className="login-wrapper">
       <img className='companyLogo' src={logo} alt="SHAJ Logo" width="30%" height="20%"/>
@@ -138,6 +230,20 @@ const Login = () => {
         <div className="floating-shape logincube green"></div>
         <div className="floating-shape logincircle red"></div>
         {error && <div className="alert text-danger text-center loginErrorMessage">{error}</div>}
+
+        {unregistered && <div className="mb-3 p-3 rounded border" style={{position:'relative',zIndex:1000}}>
+          <strong>Activate this POS</strong>
+          <div className="small text-muted mb-2">Device: {registrationDevice?.device_id}</div>
+          <label className="form-label">Tenant ID</label>
+          <input className="form-control loginzindex" value={registrationTenantId} onChange={e=>setRegistrationTenantId(e.target.value)} placeholder="e.g. 11" disabled={Boolean(registration?.request_id)}/>
+          {!registration?.request_id && <button type="button" className="letsgo" style={{marginTop:12,zIndex:1000}} disabled={registrationBusy} onClick={handleRequestRegistration}>{registrationBusy?'Sending...':'Register this POS'}</button>}
+          {registration?.request_id && <div className="mt-2">
+            <div className="small">Request: <span className="mono">{registration.request_id}</span></div>
+            <div className="small">Status: <strong>{registrationStatus||'PENDING'}</strong></div>
+            <button type="button" className="letsgo" style={{marginTop:10,zIndex:1000}} disabled={registrationBusy} onClick={handleActivateApprovedRegistration}>{registrationStatus==='APPROVED'?'Activate approved POS':'Check approval'}</button>
+          </div>}
+        </div>}
+
         <form onSubmit={handleSubmit}>
           <label className='form-label'>Email</label>
           <input className='form-control loginzindex' type="email" name="email" value={form.email} onChange={handleChange} required placeholder="admin@example.com" />
