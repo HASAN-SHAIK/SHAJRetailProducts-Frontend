@@ -17,6 +17,31 @@
   border-bottom: 1px solid rgba(148, 163, 184, 0.2);
 }
 
+.branch-devices-page .pos-registration-card .form-control {
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.branch-devices-page .pos-registration-card .form-control:focus {
+  background: rgba(15, 23, 42, 0.9);
+  color: #fff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.15);
+}
+
+.branch-devices-page .pos-registration-card .form-control:disabled,
+.branch-devices-page .pos-registration-card .form-control[readonly] {
+  background: rgba(15, 23, 42, 0.45);
+  color: #94a3b8;
+}
+
+.branch-devices-page .device-id-input,
+.branch-devices-page .device-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
 body.app-theme-light .branch-devices-page {
   color: #0f172a;
 }
@@ -40,6 +65,18 @@ body.app-theme-light .branch-devices-page .card-header {
   background: rgba(241, 245, 249, 0.98);
   color: #0f172a !important;
   border-bottom-color: rgba(148, 163, 184, 0.28);
+}
+
+body.app-theme-light .branch-devices-page .pos-registration-card .form-control {
+  background: #fff;
+  color: #0f172a;
+  border-color: rgba(100, 116, 139, 0.4);
+}
+
+body.app-theme-light .branch-devices-page .pos-registration-card .form-control:disabled,
+body.app-theme-light .branch-devices-page .pos-registration-card .form-control[readonly] {
+  background: #f1f5f9;
+  color: #64748b;
 }
 
 body.app-theme-light .branch-devices-page .table th {
