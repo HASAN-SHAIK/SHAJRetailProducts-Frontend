@@ -14,6 +14,7 @@ import { login as sqlLogin, issueOfflinePosGrant } from '../../services/authServ
 import {
   enrollLocalPosUser,
   getCachedLocalPosUserId,
+  getLocalPosDevice,
   isLocalPosEnabled,
   loginLocalPosUser,
 } from '../../Repositories/local/posLocalApiClient';
@@ -63,7 +64,10 @@ const Login = () => {
       if (!userPayload?.id) throw new Error('authenticated_user_missing');
 
       if (posEnabled) {
-        const grantPayload = await issueOfflinePosGrant({ deviceId });
+        const localDevice = await getLocalPosDevice();
+        const posDeviceId = String(localDevice?.device_id || '').trim();
+        if (!posDeviceId) throw new Error('local_pos_device_missing');
+        const grantPayload = await issueOfflinePosGrant({ deviceId: posDeviceId });
         if (!grantPayload?.offline_grant) throw new Error('offline_pos_grant_missing');
         await enrollLocalPosUser({ offlineGrant: grantPayload.offline_grant, pin: form.posPin });
         await loginLocalPosUser({ userId: userPayload.id, pin: form.posPin });

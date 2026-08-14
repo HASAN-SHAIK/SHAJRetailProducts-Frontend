@@ -85,6 +85,9 @@ const request = async (path, { method = 'GET', body, signal, requireSession = tr
 export const enrollLocalPosUser = async ({ offlineGrant, pin }) =>
   request('/auth/enroll', { method: 'POST', requireSession: false, body: { offline_grant: offlineGrant, pin } });
 
+export const getLocalPosDevice = async () =>
+  request('/device', { method: 'GET', requireSession: false });
+
 export const loginLocalPosUser = async ({ userId, pin }) => {
   const payload = await request('/auth/login', { method: 'POST', requireSession: false, body: { user_id: String(userId), pin } });
   if (!payload?.session_token) throw new Error('local_pos_session_missing');
