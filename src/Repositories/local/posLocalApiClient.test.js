@@ -4,6 +4,7 @@ import {
   getLocalPosDevice,
   localPosRequest,
   loginLocalPosUser,
+  registerLocalPosDevice,
   requestLocalManagerApproval,
 } from './posLocalApiClient';
 
@@ -55,6 +56,25 @@ describe('local POS API client security contract', () => {
     expect(options.headers['X-POS-Local-Token']).toBe('machine-token-test');
     expect(options.headers['X-POS-Session-Token']).toBeUndefined();
     expect(device.device_id).toBe('dev_pos_1');
+  });
+
+  test('device registration uses machine trust and binds store plus terminal without a cashier session', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({
+      device_id: 'dev_pos_1',
+      store_id: 'store-1',
+      terminal_id: 'POS-01',
+      status: 'active',
+    }));
+
+    const device = await registerLocalPosDevice({ storeId: 'store-1', terminalId: ' POS-01 ' });
+
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toContain('/device/registration');
+    expect(options.method).toBe('PUT');
+    expect(options.headers['X-POS-Local-Token']).toBe('machine-token-test');
+    expect(options.headers['X-POS-Session-Token']).toBeUndefined();
+    expect(JSON.parse(options.body)).toEqual({ store_id: 'store-1', terminal_id: 'POS-01' });
+    expect(device.status).toBe('active');
   });
 
   test('business requests send both machine token and verified local cashier session token', async () => {
