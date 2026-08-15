@@ -1,0 +1,27 @@
+name: V1 customers frontend
+
+on:
+  pull_request:
+    paths:
+      - 'src/pages/customers/**'
+      - 'src/Repositories/LocalPosCustomerRepository.js'
+      - 'src/Repositories/LocalPosCustomerRepository.financialAuthority.test.js'
+      - 'src/services/local/customerLocalService.js'
+      - '.github/workflows/v1-customers-frontend.yml'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Focused customer financial authority test
+        run: CI=true npm test -- --watchAll=false src/Repositories/LocalPosCustomerRepository.financialAuthority.test.js
+      - name: Production build
+        run: CI=false npm run build
