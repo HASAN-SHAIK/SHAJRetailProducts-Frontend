@@ -1,4 +1,4 @@
-import { toLocalCustomerPayload } from './LocalPosCustomerRepository';
+import { toLocalCustomerPayload } from './local/customerPayload';
 
 describe('V1 customer financial authority', () => {
   test('POS customer writes carry identity/contact facts but never Central financial snapshots', () => {
