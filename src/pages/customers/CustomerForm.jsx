@@ -89,11 +89,13 @@ const CustomerForm = () => {
     setSaving(true);
     setError('');
     try {
-      const payload = { ...form };
+      const { credit_limit: _creditLimit, current_balance: _currentBalance, ...payload } = form;
       const nowIso = new Date().toISOString();
       const localId = isEdit ? id : `temp:${Date.now()}`;
       const localCustomer = {
         ...payload,
+        credit_limit: form.credit_limit,
+        current_balance: form.current_balance,
         id: localId,
         mobile: payload.phone || payload.mobile || '',
         updated_at: nowIso,
@@ -143,6 +145,11 @@ const CustomerForm = () => {
     }
   };
 
+  const formatFinancialSnapshot = (value) => {
+    const number = Number(value || 0);
+    return Number.isFinite(number) ? number.toFixed(2) : '0.00';
+  };
+
   return (
     <div className="billing-page customers-page">
       <div className="customers-header">
@@ -186,12 +193,22 @@ const CustomerForm = () => {
               </>
             )}
             <label className="billing-label">
-              Credit Limit
-              <input className="form-control form-control-sm billing-input" type="number" value={form.credit_limit || ''} onChange={handleChange('credit_limit')} />
+              Credit Limit (Central)
+              <input
+                className="form-control form-control-sm billing-input"
+                value={formatFinancialSnapshot(form.credit_limit)}
+                readOnly
+                aria-readonly="true"
+              />
             </label>
             <label className="billing-label">
-              Current Balance
-              <input className="form-control form-control-sm billing-input" type="number" value={form.current_balance || ''} onChange={handleChange('current_balance')} />
+              Current Balance (Central)
+              <input
+                className="form-control form-control-sm billing-input"
+                value={formatFinancialSnapshot(form.current_balance)}
+                readOnly
+                aria-readonly="true"
+              />
             </label>
             <label className="billing-label">
               Address
