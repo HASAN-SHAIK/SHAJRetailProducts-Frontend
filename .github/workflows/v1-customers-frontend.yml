@@ -22,7 +22,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Focused customer financial authority test
-        run: CI=true npm test -- --watchAll=false src/Repositories/LocalPosCustomerRepository.financialAuthority.test.js
+      - name: Focused customer authority acceptance
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/Repositories/LocalPosCustomerRepository.financialAuthority.test.js
+          src/pages/customers/CustomerOfflinePos.v1Acceptance.test.js
       - name: Production build
         run: CI=false npm run build

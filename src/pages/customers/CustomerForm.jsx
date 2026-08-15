@@ -55,19 +55,22 @@ const CustomerForm = () => {
       if (cached) {
         applyCustomer(cached);
       }
-      if (!navigator.onLine) {
+      try {
+        // Always try the configured repository. In local POS mode this remains the
+        // on-device SQLite authority even without internet connectivity.
+        const detail = await getCustomerDetail(resolveCustomerId(id));
+        const customer = detail?.customer || null;
+        if (customer) {
+          applyCustomer(customer);
+          upsertCustomersBulk([customer]).catch(() => {});
+        } else if (!cached) {
+          setError('Failed to load customer');
+        }
+      } catch {
+        if (!cached) setError('Customer service is unavailable');
+      } finally {
         setLoading(false);
-        return;
       }
-      const detail = await getCustomerDetail(resolveCustomerId(id));
-      const customer = detail?.customer || null;
-      if (customer) {
-        applyCustomer(customer);
-        upsertCustomersBulk([customer]).catch(() => {});
-      } else if (!cached) {
-        setError('Failed to load customer');
-      }
-      setLoading(false);
     })();
   }, [id, isEdit]);
 
@@ -105,21 +108,17 @@ const CustomerForm = () => {
       let savedCustomer = null;
       let synced = false;
 
-      if (navigator.onLine) {
-        try {
-          if (isEdit) {
-            savedCustomer = await updateCustomer(id, payload);
-          } else {
-            savedCustomer = await createCustomer(payload);
-          }
-          synced = true;
-        } catch {
-          synced = false;
+      try {
+        // Do not use navigator.onLine as the authority boundary: LocalPosCustomerRepository
+        // talks to the local POS runtime and must remain usable during internet outages.
+        if (isEdit) {
+          savedCustomer = await updateCustomer(id, payload);
+        } else {
+          savedCustomer = await createCustomer(payload);
         }
-      }
-
-      if (synced && !savedCustomer) {
-        savedCustomer = null;
+        synced = true;
+      } catch {
+        synced = false;
       }
 
       if (synced && savedCustomer) {
