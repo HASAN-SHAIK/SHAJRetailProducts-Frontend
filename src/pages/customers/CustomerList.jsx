@@ -29,6 +29,7 @@ const CustomerList = () => {
   const [search, setSearch] = useState('');
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const searchTimerRef = useRef(null);
 
   const filterLocalCustomers = (list, term) => {
@@ -47,39 +48,35 @@ const CustomerList = () => {
     const safe = dedupeCustomers(list);
     const filtered = filterLocalCustomers(safe, term);
     setCustomers(filtered);
+    return filtered;
   };
 
   const fetchCustomers = async (term = '') => {
     setLoading(true);
+    setError('');
     try {
-      await loadCustomersFromCache(term);
-      if (!navigator.onLine) return;
+      const cached = await loadCustomersFromCache(term);
+      // Always try the configured repository. In local POS mode it is the on-device
+      // SQLite authority and remains available even when navigator.onLine is false.
       const list = await searchCustomers({
         search: term,
         limit: term ? undefined : 500,
       });
       const safe = dedupeCustomers(list);
-      setCustomers(safe.length ? safe : filterLocalCustomers(await getAllCustomers(), term));
+      setCustomers(safe.length ? safe : cached);
       if (safe.length) {
         upsertCustomersBulk(safe).catch(() => {});
       }
     } catch {
-      setCustomers((prev) => prev || []);
+      await loadCustomersFromCache(term).catch(() => setCustomers([]));
+      setError('Customer service is unavailable. Showing locally cached customers.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    setLoading(true);
-    loadCustomersFromCache('')
-      .finally(async () => {
-        if (navigator.onLine) {
-          await fetchCustomers('');
-        } else {
-          setLoading(false);
-        }
-      });
+    fetchCustomers('');
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     };
@@ -89,10 +86,6 @@ const CustomerList = () => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     const term = search.trim();
     searchTimerRef.current = setTimeout(() => {
-      if (!term) {
-        loadCustomersFromCache(term);
-        return;
-      }
       fetchCustomers(term);
     }, 300);
   }, [search]);
@@ -118,6 +111,8 @@ const CustomerList = () => {
           </button>
         </div>
       </div>
+
+      {error && <div className="billing-message">{error}</div>}
 
       <div className="billing-table-wrapper">
         <table className="billing-table">
