@@ -6,6 +6,7 @@ on:
       - 'src/pages/customers/**'
       - 'src/Repositories/LocalPosCustomerRepository.js'
       - 'src/Repositories/LocalPosCustomerRepository.financialAuthority.test.js'
+      - 'src/Repositories/local/customerPayload.js'
       - 'src/services/local/customerLocalService.js'
       - '.github/workflows/v1-customers-frontend.yml'
       - 'package.json'
