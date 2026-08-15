@@ -9,15 +9,12 @@ const normalizeCustomer = (customer) => customer ? {
   current_balance: customer.current_balance ?? Number(customer.outstanding_minor || 0) / 100,
 } : customer;
 
-const toLocalCustomerPayload = (payload = {}) => ({
+export const toLocalCustomerPayload = (payload = {}) => ({
   customer_code: payload.customer_code || payload.customerCode || undefined,
   name: payload.name || payload.customer_name || '',
   phone: payload.phone || payload.mobile || payload.customer_phone || undefined,
   email: payload.email || undefined,
   tax_id: payload.tax_id || payload.gstin || payload.gst_number || undefined,
-  credit_limit_minor: payload.credit_limit_minor !== undefined
-    ? Math.round(Number(payload.credit_limit_minor) || 0)
-    : Math.round(Number(payload.credit_limit || 0) * 100),
   currency: String(payload.currency || 'INR').toUpperCase(),
 });
 
