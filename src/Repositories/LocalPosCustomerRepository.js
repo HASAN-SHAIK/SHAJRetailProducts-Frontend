@@ -1,5 +1,6 @@
 import { ApiCustomerRepository } from './ApiCustomerRepository';
 import { isLocalPosEnabled, localPosRequest } from './local/posLocalApiClient';
+import { toLocalCustomerPayload } from './local/customerPayload';
 
 const normalizeCustomer = (customer) => customer ? {
   ...customer,
@@ -8,15 +9,6 @@ const normalizeCustomer = (customer) => customer ? {
   credit_limit: customer.credit_limit ?? Number(customer.credit_limit_minor || 0) / 100,
   current_balance: customer.current_balance ?? Number(customer.outstanding_minor || 0) / 100,
 } : customer;
-
-export const toLocalCustomerPayload = (payload = {}) => ({
-  customer_code: payload.customer_code || payload.customerCode || undefined,
-  name: payload.name || payload.customer_name || '',
-  phone: payload.phone || payload.mobile || payload.customer_phone || undefined,
-  email: payload.email || undefined,
-  tax_id: payload.tax_id || payload.gstin || payload.gst_number || undefined,
-  currency: String(payload.currency || 'INR').toUpperCase(),
-});
 
 /** Local-first customer projection with the existing IndexedDB cache retained as a read-through cache. */
 export class LocalPosCustomerRepository extends ApiCustomerRepository {
