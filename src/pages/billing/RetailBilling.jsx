@@ -318,6 +318,8 @@ const RetailBilling = () => {
   const [searchText, setSearchText] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [searchRetryKey, setSearchRetryKey] = useState(0);
   const [isItemAdding, setIsItemAdding] = useState(false);
   const [productFormData, setProductFormData] = useState({
     product_name: '',
@@ -823,6 +825,7 @@ const RetailBilling = () => {
     if (!searchText.trim()) {
       setSearchSuggestions([]);
       setSearchLoading(false);
+      setSearchError('');
       return;
     }
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -830,51 +833,73 @@ const RetailBilling = () => {
     searchTimerRef.current = setTimeout(async () => {
       latestSearchRef.current = current;
       setSearchLoading(true);
-      const localResults = await searchLocalProducts(current);
-      if (localResults.length) {
-        const filteredLocal = effectiveBranchId
-          ? localResults.filter((item) => isProductInCurrentBranch(item))
-          : localResults;
-        const batchWise = await expandProductsToBatchSuggestions(filteredLocal);
-        const deduped = batchWise.slice(0, 8);
-        if (latestSearchRef.current !== current) return;
-        setSearchSuggestions(deduped);
-        setSearchLoading(false);
-        return;
-      }
+      setSearchError('');
+      try {
+        if (isLocalPosEnabled()) {
+          const localPosResults = await getProductRepository().searchLocalCatalog(current, 8);
+          if (latestSearchRef.current !== current) return;
+          const filteredLocalPos = effectiveBranchId
+            ? localPosResults.filter((item) => isProductInCurrentBranch(item))
+            : localPosResults;
+          const batchWise = await expandProductsToBatchSuggestions(filteredLocalPos);
+          if (latestSearchRef.current !== current) return;
+          setSearchSuggestions(batchWise.slice(0, 8));
+          return;
+        }
 
-      const map = new Map();
-      let suggestions = [];
-      if (navigator.onLine) {
-        try {
-          const response = await api.get(buildSearchUrl(current, transactionType));
-          const payload = response?.data?.data ?? response?.data?.products ?? response?.data ?? [];
-          const list = Array.isArray(payload) ? payload : [];
-          list.forEach((item) => {
-            const key = item?.barcode || item?.id || item?.product_id;
-            if (!key || map.has(key)) return;
-            map.set(key, {
-              ...item,
-              name: item?.name ?? item?.product_name ?? item?.product ?? '-',
-              company: item?.company ?? item?.company_name ?? '',
-              __stock: getStockCount(item),
+        const localResults = await searchLocalProducts(current);
+        if (localResults.length) {
+          const filteredLocal = effectiveBranchId
+            ? localResults.filter((item) => isProductInCurrentBranch(item))
+            : localResults;
+          const batchWise = await expandProductsToBatchSuggestions(filteredLocal);
+          if (latestSearchRef.current !== current) return;
+          setSearchSuggestions(batchWise.slice(0, 8));
+          return;
+        }
+
+        const map = new Map();
+        let suggestions = [];
+        if (navigator.onLine) {
+          try {
+            const response = await api.get(buildSearchUrl(current, transactionType));
+            const payload = response?.data?.data ?? response?.data?.products ?? response?.data ?? [];
+            const list = Array.isArray(payload) ? payload : [];
+            list.forEach((item) => {
+              const key = item?.barcode || item?.id || item?.product_id;
+              if (!key || map.has(key)) return;
+              map.set(key, {
+                ...item,
+                name: item?.name ?? item?.product_name ?? item?.product ?? '-',
+                company: item?.company ?? item?.company_name ?? '',
+                __stock: getStockCount(item),
+              });
             });
-          });
-          suggestions = Array.from(map.values()).slice(0, 8);
-        } catch (err) {
-          // ignore network search failures
+            suggestions = Array.from(map.values()).slice(0, 8);
+          } catch (err) {
+            // Legacy non-local-POS deployments may continue with no remote suggestions.
+          }
+        }
+        if (latestSearchRef.current !== current) return;
+        if (effectiveBranchId) {
+          suggestions = suggestions.filter((item) => isProductInCurrentBranch(item));
+        }
+        const batchWise = await expandProductsToBatchSuggestions(suggestions);
+        setSearchSuggestions(batchWise.slice(0, 8));
+      } catch (error) {
+        if (latestSearchRef.current !== current) return;
+        setSearchSuggestions([]);
+        if (isLocalPosEnabled()) {
+          setSearchError('Local POS product search is unavailable. Retry after the POS service is reachable.');
+        }
+      } finally {
+        if (latestSearchRef.current === current) {
+          setSearchLoading(false);
         }
       }
-      if (latestSearchRef.current !== current) return;
-      if (effectiveBranchId) {
-        suggestions = suggestions.filter((item) => isProductInCurrentBranch(item));
-      }
-      const batchWise = await expandProductsToBatchSuggestions(suggestions);
-      setSearchSuggestions(batchWise.slice(0, 8));
-      setSearchLoading(false);
     }, 300);
     return () => clearTimeout(searchTimerRef.current);
-  }, [searchText, transactionType, effectiveBranchId]);
+  }, [searchText, transactionType, effectiveBranchId, searchRetryKey]);
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((sum, item) => {
@@ -1205,6 +1230,9 @@ const RetailBilling = () => {
   };
 
   const findProduct = async (barcode) => {
+    if (isLocalPosEnabled()) {
+      return getProductRepository().getProductByBarcode(barcode, effectiveBranchId);
+    }
     const cached = await getProductByBarcode(barcode, effectiveBranchId);
     if (cached) return cached;
     if (!navigator.onLine) return null;
@@ -1379,7 +1407,17 @@ const RetailBilling = () => {
     const qty = Number(quantityValue || 1);
     try {
       setIsItemAdding(true);
-      const product = await findProduct(barcode);
+      let product = null;
+      try {
+        product = await findProduct(barcode);
+      } catch (error) {
+        if (isLocalPosEnabled()) {
+          setMessage('Local POS product lookup is unavailable. Retry after the POS service is reachable.');
+          showPopup('Local POS product lookup is unavailable. Retry after the POS service is reachable.', 'POS Unavailable');
+          return;
+        }
+        throw error;
+      }
       if (!product) {
         setMessage('Product not found');
         openAddProductModal(barcode);
@@ -2185,7 +2223,9 @@ const RetailBilling = () => {
             value={searchText}
             suggestions={searchSuggestions}
             loading={searchLoading}
-            onChange={setSearchText}
+            error={searchError}
+            onChange={(value) => { setSearchError(''); setSearchText(value); }}
+            onRetry={() => setSearchRetryKey((value) => value + 1)}
             onSelect={async (product) => {
               const normalizedProduct = {
                 ...product,
