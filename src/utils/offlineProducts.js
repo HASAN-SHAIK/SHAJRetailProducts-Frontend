@@ -6,7 +6,18 @@ import {
   updateProductsBulk,
   upsertLocalProduct,
 } from '../services/local/productLocalService';
+import { isLocalPosEnabled } from '../Repositories/local/posLocalApiClient';
 import { enqueueInventorySync, processInventorySyncQueue } from './inventorySync';
+
+export const assertLegacyProductMutationAllowed = () => {
+  if (isLocalPosEnabled()) {
+    const error = new Error(
+      'Product changes must be made through the Central product catalog while local POS mode is enabled.'
+    );
+    error.code = 'CENTRAL_PRODUCT_AUTHORITY_REQUIRED';
+    throw error;
+  }
+};
 
 const createLocalId = () => `temp_${Date.now()}`;
 
@@ -90,6 +101,7 @@ const mergeStockQuantity = (existing, payload) =>
   String(Math.max(asNumber(existing?.stock_quantity), 0) + Math.max(asNumber(payload?.stock_quantity), 0));
 
 export const createOfflineProduct = async (payload) => {
+  assertLegacyProductMutationAllowed();
   const barcodeInput = String(payload?.barcode || '').trim();
   const productNameInput = String(payload?.product_name || payload?.name || '').trim();
   const batchModeEnabled = isBatchEnabled(payload?.is_batch_enabled);
@@ -191,6 +203,7 @@ export const createOfflineProduct = async (payload) => {
 };
 
 export const updateOfflineProduct = async (payload) => {
+  assertLegacyProductMutationAllowed();
   const id = payload.id;
   if (!id) throw new Error('Missing product id');
   const existing = await getProductCacheById(id);
@@ -223,6 +236,7 @@ export const updateOfflineProduct = async (payload) => {
 };
 
 export const deleteOfflineProduct = async (productId) => {
+  assertLegacyProductMutationAllowed();
   if (!productId) return;
   const existing = await getProductCacheById(productId);
   const now = new Date().toISOString();
@@ -242,4 +256,3 @@ export const deleteOfflineProduct = async (productId) => {
     processInventorySyncQueue().catch(() => {});
   }
 };
-
