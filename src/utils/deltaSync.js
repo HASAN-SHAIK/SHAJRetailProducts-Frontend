@@ -8,6 +8,7 @@ import {
 import { deleteSuppliersCacheByIds, updateSuppliersCacheBulk } from '../services/local/supplierLocalService';
 import { fetchBatchesDelta, fetchProductsDelta } from '../Repositories/api/productApiClient';
 import { fetchSuppliersDelta } from '../Repositories/api/supplierApiClient';
+import { isLocalPosEnabled } from '../Repositories/local/posLocalApiClient';
 
 const SYNC_KEY = 'delta_sync_state_v1';
 let deltaSyncInFlight = null;
@@ -56,6 +57,13 @@ const handleSyncResponse = async ({ moduleKey, payload, upsert, drop }) => {
 };
 
 export const runDeltaSync = async (options = {}) => {
+  // Packaged local-POS deployments must not let any routed screen invoke the
+  // legacy browser/Central delta worker directly. POSService owns durable
+  // catalog/config synchronization in that mode; callers may continue reading
+  // their presentation cache, but this helper cannot mutate it from Central.
+  if (isLocalPosEnabled()) {
+    return { authority: 'pos_edge', skipped: 'local_pos_authoritative' };
+  }
   if (!navigator.onLine) return null;
   if (deltaSyncInFlight) return deltaSyncInFlight;
 
