@@ -9,6 +9,10 @@ import LoadingSpinner from '../components/common/LoadingSpinner/LoadingSpinner';
 import { clearOrderDetails } from '../store/orderSlice';
 import { usePopup } from '../components/common/PopUp/PopupProvider';
 import { logout as sqlLogout } from '../services/authService';
+import {
+  isLocalPosEnabled,
+  logoutLocalPosUser,
+} from '../Repositories/local/posLocalApiClient';
 
 const Logout = () => {
   const navigate = useNavigate();
@@ -23,7 +27,17 @@ const Logout = () => {
         logoutError = error;
         console.error('Logout error:', error);
       } finally {
-        // Always clear local session state, even if the API call fails.
+        if (isLocalPosEnabled()) {
+          try {
+            await logoutLocalPosUser();
+          } catch (error) {
+            // logoutLocalPosUser clears the browser-held POS session even when
+            // the local runtime rejects/unavailable, so Central logout cannot
+            // leave a reusable offline session behind.
+            console.error('Local POS logout error:', error);
+          }
+        }
+        // Always clear browser session state, even if either server is unavailable.
         dispatch(clearUserDetails());
         dispatch(clearOrderDetails());
         dispatch(clearTenantState());
