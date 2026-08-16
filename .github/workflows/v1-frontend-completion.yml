@@ -15,6 +15,8 @@ on:
       - 'src/pages/SyncCenterContent.jsx'
       - 'src/pages/syncCenterAccess.js'
       - 'src/pages/syncCenterAccess.v1.test.js'
+      - 'src/pages/billing/RetailBilling.jsx'
+      - 'src/pages/billing/retailBillingCheckout.v1.test.js'
       - '.github/workflows/v1-frontend-completion.yml'
       - 'package.json'
       - 'package-lock.json'
@@ -30,11 +32,12 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Focused V1 Frontend sync authority acceptance
+      - name: Focused V1 Frontend completion acceptance
         run: >-
           CI=true npm test -- --watchAll=false
           src/utils/appSyncOrchestrator.v1.test.js
           src/utils/legacyBrowserSyncAuthority.v1.test.js
           src/pages/syncCenterAccess.v1.test.js
+          src/pages/billing/retailBillingCheckout.v1.test.js
       - name: Production build
         run: CI=false npm run build
