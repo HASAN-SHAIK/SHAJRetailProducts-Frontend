@@ -21,6 +21,8 @@ on:
       - 'src/pages/billing/retailBillingCheckout.v1.test.js'
       - 'src/pages/customers/CustomerList.jsx'
       - 'src/pages/customers/customerListStates.v1.test.js'
+      - 'src/pages/returnsCorrections/SalesReturn.jsx'
+      - 'src/pages/returnsCorrections/salesReturnAuthority.v1.test.js'
       - 'src/utils/offlineProducts.js'
       - 'src/utils/offlineProductsAuthority.v1.test.js'
       - '.github/workflows/v1-frontend-completion.yml'
@@ -47,6 +49,7 @@ jobs:
           src/pages/syncCenterAccess.v1.test.js
           src/pages/billing/retailBillingCheckout.v1.test.js
           src/pages/customers/customerListStates.v1.test.js
+          src/pages/returnsCorrections/salesReturnAuthority.v1.test.js
           src/utils/offlineProductsAuthority.v1.test.js
       - name: Production build
         run: CI=false npm run build
