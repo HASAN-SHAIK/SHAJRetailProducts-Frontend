@@ -1,5 +1,6 @@
 import api from './axios';
 import * as staffLocal from '../services/local/staffLocalService';
+import { isLegacyBrowserSyncAllowed, localPosSyncSkippedResult } from './legacyBrowserSyncAuthority';
 
 const nowIso = () => new Date().toISOString();
 
@@ -122,6 +123,9 @@ const emitSyncEvent = () => {
 };
 
 export const processStaffExpensesSync = async () => {
+  if (!isLegacyBrowserSyncAllowed()) {
+    return localPosSyncSkippedResult({ synced: [], failed: [] });
+  }
   if (!navigator.onLine) return { synced: [], failed: [] };
   const synced = [];
   const failed = [];
@@ -173,6 +177,9 @@ export const processStaffExpensesSync = async () => {
 };
 
 export const syncAllStaffExpenses = async (options = {}) => {
+  if (!isLegacyBrowserSyncAllowed()) {
+    return localPosSyncSkippedResult({ synced: [], failed: [], remoteErrors: [] });
+  }
   const queueResult = await processStaffExpensesSync();
   if (!navigator.onLine) return queueResult;
   const refreshRemote = options?.refreshRemote !== false;

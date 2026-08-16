@@ -5,6 +5,12 @@ on:
     paths:
       - 'src/utils/appSyncOrchestrator.js'
       - 'src/utils/appSyncOrchestrator.v1.test.js'
+      - 'src/utils/legacyBrowserSyncAuthority.js'
+      - 'src/utils/legacyBrowserSyncAuthority.v1.test.js'
+      - 'src/services/local/syncLocalService.js'
+      - 'src/services/local/offlineLocalService.js'
+      - 'src/utils/staffExpensesSync.js'
+      - 'src/utils/returnsCorrectionsSync.js'
       - '.github/workflows/v1-frontend-completion.yml'
       - 'package.json'
       - 'package-lock.json'
@@ -24,5 +30,6 @@ jobs:
         run: >-
           CI=true npm test -- --watchAll=false
           src/utils/appSyncOrchestrator.v1.test.js
+          src/utils/legacyBrowserSyncAuthority.v1.test.js
       - name: Production build
         run: CI=false npm run build
