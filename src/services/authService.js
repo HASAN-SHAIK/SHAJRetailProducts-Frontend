@@ -1,11 +1,25 @@
 import api from '../utils/axios';
 import {
-  saveAuthToken,
   saveSessionInfo,
   clearAuthToken,
   clearSessionInfo,
-  getAuthToken,
 } from '../utils/sessionStorage';
+
+const persistCentralSession = async (data) => {
+  // Central interactive auth is cookie-based. Never persist the access JWT in
+  // JavaScript-readable browser storage; clear any pre-V1 bearer token instead.
+  await clearAuthToken();
+  const userPayload = data?.user || null;
+  if (userPayload) {
+    await saveSessionInfo({
+      token: null,
+      user: userPayload,
+      permissions: data?.permissions || userPayload.permissions || [],
+      store_permissions: data?.store_permissions || userPayload.store_permissions || null,
+      remember_me: data?.remember_me === true,
+    });
+  }
+};
 
 export const login = async ({ email, password, device_id, branch_id, remember_me = true }) => {
   const res = await api.post('/auth/login', {
@@ -15,19 +29,7 @@ export const login = async ({ email, password, device_id, branch_id, remember_me
     branch_id,
     remember_me,
   });
-
-  if (res.data?.token) await saveAuthToken(res.data.token);
-
-  const userPayload = res.data?.user || null;
-  if (userPayload) {
-    await saveSessionInfo({
-      token: res.data?.token || null,
-      user: userPayload,
-      permissions: res.data?.permissions || userPayload.permissions || [],
-      store_permissions: res.data?.store_permissions || userPayload.store_permissions || null,
-      remember_me: res.data?.remember_me === true,
-    });
-  }
+  await persistCentralSession(res.data);
   return res.data;
 };
 
@@ -47,39 +49,23 @@ export const logout = async () => {
 
 export const refreshSession = async () => {
   const res = await api.post('/auth/refresh');
-  if (res.data?.token) await saveAuthToken(res.data.token);
-  if (res.data?.user) {
-    await saveSessionInfo({
-      token: res.data?.token || null,
-      user: res.data.user,
-      permissions: res.data?.permissions || res.data.user?.permissions || [],
-      store_permissions: res.data?.store_permissions || res.data.user.store_permissions || null,
-      remember_me: res.data?.remember_me === true,
-    });
-  }
+  await persistCentralSession(res.data);
   return res.data;
 };
 
 export const validateSession = async () => {
   const res = await api.get('/auth/getLogin');
-  if (res.data?.user) {
-    const existingToken = await getAuthToken().catch(() => null);
-    await saveSessionInfo({
-      token: existingToken,
-      user: res.data.user,
-      permissions: res.data?.permissions || res.data.user?.permissions || [],
-      store_permissions: res.data?.store_permissions || res.data.user?.store_permissions || null,
-    });
-  }
+  await persistCentralSession(res.data);
   return res.data;
 };
 
+// Compatibility helper for older callers. Central no longer exposes a bearer
+// token to browser code; successful refresh means the HttpOnly cookie session is
+// valid and the caller should use the shared credentialed API client.
 export const ensureValidAccessToken = async () => {
-  const token = await getAuthToken().catch(() => null);
-  if (token) return token;
   try {
-    const data = await refreshSession();
-    return data?.token || null;
+    await refreshSession();
+    return null;
   } catch (err) {
     return null;
   }
