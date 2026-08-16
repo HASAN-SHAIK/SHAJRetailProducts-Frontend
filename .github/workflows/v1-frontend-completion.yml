@@ -3,6 +3,8 @@ name: V1 Frontend completion acceptance
 on:
   pull_request:
     paths:
+      - 'src/App.js'
+      - 'src/appRoutes.v1.test.js'
       - 'src/utils/appSyncOrchestrator.js'
       - 'src/utils/appSyncOrchestrator.v1.test.js'
       - 'src/utils/legacyBrowserSyncAuthority.js'
@@ -37,6 +39,7 @@ jobs:
       - name: Focused V1 Frontend completion acceptance
         run: >-
           CI=true npm test -- --watchAll=false
+          src/appRoutes.v1.test.js
           src/utils/appSyncOrchestrator.v1.test.js
           src/utils/legacyBrowserSyncAuthority.v1.test.js
           src/pages/syncCenterAccess.v1.test.js
