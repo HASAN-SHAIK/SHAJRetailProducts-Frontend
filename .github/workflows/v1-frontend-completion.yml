@@ -9,6 +9,8 @@ on:
       - 'src/utils/authResponseStates.v1.test.js'
       - 'src/utils/appSyncOrchestrator.js'
       - 'src/utils/appSyncOrchestrator.v1.test.js'
+      - 'src/utils/deltaSync.js'
+      - 'src/utils/deltaSyncAuthority.v1.test.js'
       - 'src/utils/legacyBrowserSyncAuthority.js'
       - 'src/utils/legacyBrowserSyncAuthority.v1.test.js'
       - 'src/services/local/syncLocalService.js'
@@ -54,6 +56,7 @@ jobs:
           src/appRoutes.v1.test.js
           src/utils/authResponseStates.v1.test.js
           src/utils/appSyncOrchestrator.v1.test.js
+          src/utils/deltaSyncAuthority.v1.test.js
           src/utils/legacyBrowserSyncAuthority.v1.test.js
           src/pages/syncCenterAccess.v1.test.js
           src/pages/billing/retailBillingCheckout.v1.test.js
