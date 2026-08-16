@@ -11,6 +11,10 @@ on:
       - 'src/services/local/offlineLocalService.js'
       - 'src/utils/staffExpensesSync.js'
       - 'src/utils/returnsCorrectionsSync.js'
+      - 'src/pages/SyncCenter.jsx'
+      - 'src/pages/SyncCenterContent.jsx'
+      - 'src/pages/syncCenterAccess.js'
+      - 'src/pages/syncCenterAccess.v1.test.js'
       - '.github/workflows/v1-frontend-completion.yml'
       - 'package.json'
       - 'package-lock.json'
@@ -31,5 +35,6 @@ jobs:
           CI=true npm test -- --watchAll=false
           src/utils/appSyncOrchestrator.v1.test.js
           src/utils/legacyBrowserSyncAuthority.v1.test.js
+          src/pages/syncCenterAccess.v1.test.js
       - name: Production build
         run: CI=false npm run build
