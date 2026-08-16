@@ -5,6 +5,8 @@ on:
     paths:
       - 'src/App.js'
       - 'src/appRoutes.v1.test.js'
+      - 'src/utils/axios.js'
+      - 'src/utils/authResponseStates.v1.test.js'
       - 'src/utils/appSyncOrchestrator.js'
       - 'src/utils/appSyncOrchestrator.v1.test.js'
       - 'src/utils/legacyBrowserSyncAuthority.js'
@@ -50,6 +52,7 @@ jobs:
         run: >-
           CI=true npm test -- --watchAll=false
           src/appRoutes.v1.test.js
+          src/utils/authResponseStates.v1.test.js
           src/utils/appSyncOrchestrator.v1.test.js
           src/utils/legacyBrowserSyncAuthority.v1.test.js
           src/pages/syncCenterAccess.v1.test.js
