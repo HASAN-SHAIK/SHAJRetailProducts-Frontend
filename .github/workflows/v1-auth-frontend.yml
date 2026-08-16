@@ -10,6 +10,7 @@ on:
       - 'src/Repositories/local/posLocalApiClient.js'
       - 'src/services/authService.js'
       - 'src/utils/axios.js'
+      - 'src/utils/sessionStorage.js'
       - '.github/workflows/v1-auth-frontend.yml'
       - 'package.json'
       - 'package-lock.json'
