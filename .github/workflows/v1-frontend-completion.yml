@@ -29,6 +29,9 @@ on:
       - 'src/components/Login/Login.js'
       - 'src/components/Login/loginInteraction.v1.test.js'
       - 'src/Repositories/LocalPosProductRepository.js'
+      - 'src/Repositories/LocalPosInventoryRepository.js'
+      - 'src/Repositories/localPosInventoryAuthority.v1.test.js'
+      - 'src/RepositoryFactory/index.js'
       - 'src/pages/customers/CustomerList.jsx'
       - 'src/pages/customers/customerListStates.v1.test.js'
       - 'src/pages/returnsCorrections/SalesReturn.jsx'
@@ -63,6 +66,7 @@ jobs:
           src/pages/billing/retailBillingProductSearchAuthority.v1.test.js
           src/components/Billing/productSearchInteraction.v1.test.js
           src/components/Login/loginInteraction.v1.test.js
+          src/Repositories/localPosInventoryAuthority.v1.test.js
           src/pages/customers/customerListStates.v1.test.js
           src/pages/returnsCorrections/salesReturnAuthority.v1.test.js
           src/utils/offlineProductsAuthority.v1.test.js
