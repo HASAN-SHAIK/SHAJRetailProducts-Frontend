@@ -7,7 +7,9 @@ const protectedRoute = fs.readFileSync(path.join(__dirname, 'protectedRoute.jsx'
 const login = read('components/Login/Login.js');
 const logout = read('pages/Logout.jsx');
 const localClient = read('Repositories/local/posLocalApiClient.js');
+const authService = read('services/authService.js');
 const axiosClient = read('utils/axios.js');
+const sessionStorage = read('utils/sessionStorage.js');
 
 describe('V1 Frontend authentication authorization boundary', () => {
   test('offline protected routes require a POSService-validated local session, not only cached Central user data', () => {
@@ -33,8 +35,22 @@ describe('V1 Frontend authentication authorization boundary', () => {
     expect(localClient).toContain('finally { clearLocalPosSession(); }');
   });
 
-  test('401 refresh and 403 forbidden UX remain wired centrally', () => {
-    expect(axiosClient).toContain("status === 401");
+  test('Central browser auth uses HttpOnly cookies instead of JavaScript-readable bearer persistence', () => {
+    expect(authService).toContain('await clearAuthToken();');
+    expect(authService).toContain('token: null');
+    expect(authService).not.toContain('saveAuthToken(');
+    expect(axiosClient).toContain('withCredentials: true');
+    expect(axiosClient).not.toContain('getAuthToken');
+    expect(axiosClient).not.toContain('saveAuthToken');
+    expect(axiosClient).not.toContain('Bearer ${');
+    expect(sessionStorage).toContain('return null;');
+    expect(sessionStorage).toContain('await purgeLegacyAccessToken();');
+    expect(sessionStorage).toContain('{ ...info, token: null }');
+  });
+
+  test('401 refresh retries with the rotated credentialed cookie and 403 UX remains centralized', () => {
+    expect(axiosClient).toContain('await refreshAccessToken();');
+    expect(axiosClient).toContain('return api(originalRequest);');
     expect(axiosClient).toContain("!requestUrl.includes('/auth/refresh')");
     expect(axiosClient).toContain("window.dispatchEvent(new CustomEvent('auth-expired'))");
     expect(axiosClient).toContain("window.dispatchEvent(new CustomEvent('forbidden', { detail: { message } }))");
