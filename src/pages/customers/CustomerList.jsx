@@ -91,6 +91,7 @@ const CustomerList = () => {
   }, [search]);
 
   const rows = useMemo(() => customers || [], [customers]);
+  const retryCustomers = () => fetchCustomers(search.trim());
 
   return (
     <div className="billing-page customers-page">
@@ -102,6 +103,7 @@ const CustomerList = () => {
             placeholder="Search by name or phone"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            aria-label="Search customers"
           />
           <button className="btn btn-outline-primary" onClick={() => navigate('/customers/new')}>
             Add Customer
@@ -112,9 +114,21 @@ const CustomerList = () => {
         </div>
       </div>
 
-      {error && <div className="billing-message">{error}</div>}
+      {error && (
+        <div className="billing-message" role="alert" aria-live="polite">
+          <span>{error}</span>{' '}
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-primary"
+            onClick={retryCustomers}
+            disabled={loading}
+          >
+            {loading ? 'Retrying...' : 'Retry'}
+          </button>
+        </div>
+      )}
 
-      <div className="billing-table-wrapper">
+      <div className="billing-table-wrapper" aria-busy={loading ? 'true' : 'false'}>
         <table className="billing-table">
           <thead>
             <tr>
@@ -129,12 +143,14 @@ const CustomerList = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="6" className="billing-empty">Loading...</td>
+                <td colSpan="6" className="billing-empty">Loading customers...</td>
               </tr>
             )}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan="6" className="billing-empty">No customers found.</td>
+                <td colSpan="6" className="billing-empty">
+                  {search.trim() ? 'No customers match this search.' : 'No customers found.'}
+                </td>
               </tr>
             )}
             {!loading && rows.map((customer) => {
