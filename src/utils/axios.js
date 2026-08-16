@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { getDeviceId } from './device';
-import { getAuthToken, saveAuthToken, saveSessionInfo } from './sessionStorage';
+import { saveSessionInfo } from './sessionStorage';
 
 const isDev = process.env.NODE_ENV === 'development';
 const centralApiUrl =
@@ -23,7 +23,6 @@ if (isDev) {
   console.log('[cacheDB] axios module loaded');
 }
 
-
 const api = axios.create({
   baseURL: centralApiUrl,
   withCredentials: true,
@@ -37,13 +36,11 @@ const refreshAccessToken = async () => {
   refreshInFlight = api
     .post('/auth/refresh')
     .then(async (response) => {
-      const token = response?.data?.token;
-      if (token) {
-        await saveAuthToken(token);
-      }
+      // Central rotates the HttpOnly access/refresh cookies. Browser JavaScript
+      // stores only non-secret session metadata, never the access JWT itself.
       if (response?.data?.user) {
         await saveSessionInfo({
-          token: token || null,
+          token: null,
           user: response.data.user,
           permissions: response.data?.permissions || response.data.user?.permissions || [],
           store_permissions:
@@ -58,6 +55,7 @@ const refreshAccessToken = async () => {
     });
   return refreshInFlight;
 };
+
 const shouldTriggerAuthExpired = (error) => {
   const status = error?.response?.status;
   if (status !== 401) return false;
@@ -78,7 +76,6 @@ const probeServerReachability = async () => {
 
   const baseURL = String(api.defaults.baseURL || '').replace(/\/$/, '');
   const pingUrl = `${baseURL}/auth/getLogin`;
-  const token = typeof window !== 'undefined' ? await getAuthToken().catch(() => null) : null;
 
   serverReachabilityProbe = axios
     .get(pingUrl, {
@@ -88,7 +85,6 @@ const probeServerReachability = async () => {
       headers: {
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     })
     .then(() => true)
@@ -100,7 +96,6 @@ const probeServerReachability = async () => {
   return serverReachabilityProbe;
 };
 
-// 🔐 REGISTER INTERCEPTOR HERE (ONCE)
 api.interceptors.request.use(
   async (config) => {
     const requestUrl = String(config?.url || '');
@@ -121,15 +116,10 @@ api.interceptors.request.use(
     } catch (err) {
       // ignore storage access issues
     }
-    if (typeof window !== 'undefined') {
-      try {
-        const token = await getAuthToken();
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
-      } catch (err) {
-        // Ignore storage access issues
-      }
+    // Central browser authentication is carried only by HttpOnly cookies via
+    // withCredentials. Do not mirror the access JWT into an Authorization header.
+    if (config.headers?.Authorization) {
+      delete config.headers.Authorization;
     }
     return config;
   },
@@ -194,13 +184,13 @@ api.interceptors.response.use(
     ) {
       originalRequest._authRetried = true;
       try {
-        const refreshResponse = await refreshAccessToken();
-        const nextToken = refreshResponse?.data?.token || (await getAuthToken().catch(() => null));
-        if (nextToken) {
-          originalRequest.headers = originalRequest.headers || {};
-          originalRequest.headers.Authorization = `Bearer ${nextToken}`;
-          return api(originalRequest);
+        await refreshAccessToken();
+        // Refresh rotates the HttpOnly cookies. Retrying the original request is
+        // sufficient; no JavaScript-readable bearer token is required.
+        if (originalRequest.headers?.Authorization) {
+          delete originalRequest.headers.Authorization;
         }
+        return api(originalRequest);
       } catch (refreshError) {
         // fall through to existing auth-expired handling
       }
@@ -252,7 +242,6 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-
 
 const HEALTHCHECK_INTERVAL_MS = Number(process.env.REACT_APP_HEALTHCHECK_INTERVAL_MS) || 5 * 60 * 1000;
 const HEALTHCHECK_ENABLED = String(process.env.REACT_APP_HEALTHCHECK_ENABLED || '').toLowerCase() === 'true';
