@@ -85,6 +85,7 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isLoading) return;
     setError('');
     if (posEnabled && !validPin(form.posPin)) {
       setError('Enter a 4–8 digit POS PIN. This PIN is used only for verified offline cashier login on this device.');
@@ -145,6 +146,7 @@ const Login = () => {
   };
 
   const handleRequestRegistration = async () => {
+    if (registrationBusy) return;
     setError('');
     const tenantId = String(registrationTenantId || '').trim();
     if (!tenantId) { setError('Tenant ID is required to send this POS registration request.'); return; }
@@ -167,7 +169,9 @@ const Login = () => {
   };
 
   const handleActivateApprovedRegistration = async () => {
-    setRegistrationBusy(true);setError('');
+    if (registrationBusy) return;
+    setRegistrationBusy(true);
+    setError('');
     try {
       const current = await getPosRegistrationStatus(registration);
       if (current?.status !== 'APPROVED' || !current?.branch_id || !current?.terminal_id) {
@@ -187,11 +191,13 @@ const Login = () => {
   };
 
   const handleContinueOffline = async () => {
+    if (isLoading) return;
     setError('');
     if (!offlineSessionUser) return;
     if (!validPin(form.posPin)) { setError('Enter your 4–8 digit POS PIN.'); return; }
     const cachedUserId = getCachedLocalPosUserId();
     if (!cachedUserId) { setError('No offline cashier is enrolled on this device.'); return; }
+    setIsLoading(true);
     try {
       const local = await loginLocalPosUser({ userId: cachedUserId, pin: form.posPin });
       const localUser = local?.user || {};
@@ -215,6 +221,8 @@ const Login = () => {
       } else {
         setError('Invalid POS PIN or offline authorization is no longer valid.');
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -229,36 +237,36 @@ const Login = () => {
         {process.env.REACT_APP_FOR_RESUME && <p className='demoCredentials'>Demo credentials: {resumeEmail} / {resumePassword}</p>}
         <div className="floating-shape logincube green"></div>
         <div className="floating-shape logincircle red"></div>
-        {error && <div className="alert text-danger text-center loginErrorMessage">{error}</div>}
+        {error && <div className="alert text-danger text-center loginErrorMessage" role="alert" aria-live="assertive">{error}</div>}
 
-        {unregistered && <div className="mb-3 p-3 rounded border" style={{position:'relative',zIndex:1000}}>
+        {unregistered && <div className="mb-3 p-3 rounded border" style={{position:'relative',zIndex:1000}} aria-busy={registrationBusy}>
           <strong>Activate this POS</strong>
           <div className="small text-muted mb-2">Device: {registrationDevice?.device_id}</div>
-          <label className="form-label">Tenant ID</label>
-          <input className="form-control loginzindex" value={registrationTenantId} onChange={e=>setRegistrationTenantId(e.target.value)} placeholder="e.g. 11" disabled={Boolean(registration?.request_id)}/>
+          <label className="form-label" htmlFor="pos-registration-tenant">Tenant ID</label>
+          <input id="pos-registration-tenant" className="form-control loginzindex" value={registrationTenantId} onChange={e=>setRegistrationTenantId(e.target.value)} placeholder="e.g. 11" disabled={Boolean(registration?.request_id) || registrationBusy}/>
           {!registration?.request_id && <button type="button" className="letsgo" style={{marginTop:12,zIndex:1000}} disabled={registrationBusy} onClick={handleRequestRegistration}>{registrationBusy?'Sending...':'Register this POS'}</button>}
           {registration?.request_id && <div className="mt-2">
             <div className="small">Request: <span className="mono">{registration.request_id}</span></div>
-            <div className="small">Status: <strong>{registrationStatus||'PENDING'}</strong></div>
+            <div className="small" role="status" aria-live="polite">Status: <strong>{registrationStatus||'PENDING'}</strong></div>
             <button type="button" className="letsgo" style={{marginTop:10,zIndex:1000}} disabled={registrationBusy} onClick={handleActivateApprovedRegistration}>{registrationStatus==='APPROVED'?'Activate approved POS':'Check approval'}</button>
           </div>}
         </div>}
 
-        <form onSubmit={handleSubmit}>
-          <label className='form-label'>Email</label>
-          <input className='form-control loginzindex' type="email" name="email" value={form.email} onChange={handleChange} required placeholder="admin@example.com" />
-          <label className='form-label'>Password</label>
-          <input className='form-control loginpasswordinput' name="password" type="password" value={form.password} onChange={handleChange} required placeholder="••••••" />
+        <form onSubmit={handleSubmit} aria-busy={isLoading}>
+          <label className='form-label' htmlFor="login-email">Email</label>
+          <input id="login-email" className='form-control loginzindex' type="email" name="email" value={form.email} onChange={handleChange} required placeholder="admin@example.com" autoComplete="username" />
+          <label className='form-label' htmlFor="login-password">Password</label>
+          <input id="login-password" className='form-control loginpasswordinput' name="password" type="password" value={form.password} onChange={handleChange} required placeholder="••••••" autoComplete="current-password" />
           {posEnabled && <>
-            <label className='form-label'>POS PIN</label>
-            <input className='form-control loginpasswordinput' name="posPin" type="password" inputMode="numeric" pattern="[0-9]{4,8}" autoComplete="off" value={form.posPin} onChange={handleChange} placeholder="4–8 digits" required />
+            <label className='form-label' htmlFor="login-pos-pin">POS PIN</label>
+            <input id="login-pos-pin" className='form-control loginpasswordinput' name="posPin" type="password" inputMode="numeric" pattern="[0-9]{4,8}" autoComplete="off" value={form.posPin} onChange={handleChange} placeholder="4–8 digits" required />
             <small className="form-text text-muted">Used for cashier login when this POS is offline. Your central password is never stored locally.</small>
           </>}
           <div className="floating-shape loginring orange"></div>
-          <button style={{zIndex: 1000}} type="submit" className='letsgo'>
-            {isLoading ? <div className="spinner-border spinner-style text-light" role="status"></div> : `Let's Go`}
+          <button style={{zIndex: 1000}} type="submit" className='letsgo' disabled={isLoading || registrationBusy}>
+            {isLoading ? <div className="spinner-border spinner-style text-light" role="status" aria-label="Signing in"></div> : `Let's Go`}
           </button>
-          {offlineSessionUser && posEnabled && <button style={{ zIndex: 1000, marginTop: 10 }} type="button" className='letsgo' onClick={handleContinueOffline}>Continue Offline</button>}
+          {offlineSessionUser && posEnabled && <button style={{ zIndex: 1000, marginTop: 10 }} type="button" className='letsgo' onClick={handleContinueOffline} disabled={isLoading || registrationBusy}>Continue Offline</button>}
         </form>
       </div>
       <div className="floating-shape circle red"></div><div className="floating-shape triangle purple"></div><div className="floating-shape square yellow"></div><div className="floating-shape wave pink"></div><div className="floating-shape ring orange"></div><div className="floating-shape cube green"></div>
