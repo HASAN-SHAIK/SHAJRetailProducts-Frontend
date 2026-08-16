@@ -1,4 +1,5 @@
 import { db } from '../core/db';
+import { isLocalPosEnabled, localPosRequest } from '../Repositories/local/posLocalApiClient';
 
 const normalizeName = (product) =>
   product?.name ||
@@ -52,9 +53,39 @@ const dedupeProducts = (products = []) => {
 
 const SEARCH_LIMIT = 50;
 
+const normalizePosSearchProduct = (product) => {
+  if (!product) return product;
+  const price = product.price || null;
+  const primaryBarcode = product.barcode || (Array.isArray(product.barcodes) ? product.barcodes[0] : undefined);
+  return {
+    ...product,
+    barcode: primaryBarcode,
+    product_id: product.product_id || product.id,
+    selling_price: product.selling_price ?? (price ? Number(price.amount_minor || 0) / 100 : undefined),
+    price: product.selling_price ?? (price ? Number(price.amount_minor || 0) / 100 : product.price),
+  };
+};
+
+const searchPosCatalog = async (term) => {
+  const query = String(term || '').trim();
+  if (!query) return [];
+  const payload = await localPosRequest(
+    `/catalog/products?q=${encodeURIComponent(query)}&limit=${SEARCH_LIMIT}`
+  );
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  return items
+    .map(normalizePosSearchProduct)
+    .filter((product) => product && product.is_active !== false)
+    .slice(0, SEARCH_LIMIT);
+};
+
 export const searchLocalProducts = async (term) => {
   const query = String(term || '').trim().toLowerCase();
   if (!query) return [];
+
+  if (isLocalPosEnabled()) {
+    return searchPosCatalog(term);
+  }
 
   const candidates = [];
   const barcode = String(term || '').trim();
