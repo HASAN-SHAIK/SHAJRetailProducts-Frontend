@@ -19,6 +19,15 @@ const normalizeProduct = (product) => {
 
 /** Keeps existing IndexedDB cache behavior while sourcing sale-time catalog data locally. */
 export class LocalPosProductRepository extends ApiProductRepository {
+  async updateBatchesBulk(batches) {
+    if (isLocalPosEnabled()) {
+      const error = new Error('Batch changes are Central-authoritative while local POS mode is enabled.');
+      error.code = 'LOCAL_POS_BATCH_MUTATION_CENTRAL_ONLY';
+      throw error;
+    }
+    return super.updateBatchesBulk(batches);
+  }
+
   async searchLocalCatalog(search = '', limit = 50) {
     if (!isLocalPosEnabled()) return [];
     const query = String(search || '').trim();
