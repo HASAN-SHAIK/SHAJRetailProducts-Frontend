@@ -13,6 +13,7 @@ import {
   preloadTransactionsToIndexedDb,
 } from './indexedDb';
 import { getSyncPlan, markSyncPlanComplete } from './syncStrategy';
+import { isLocalPosEnabled } from '../Repositories/local/posLocalApiClient';
 
 const normalizeBranchId = (branchId) => {
   if (!branchId || branchId === 'all') return null;
@@ -54,6 +55,14 @@ export const runAppSyncCycle = async ({
   branchId,
   forceFull = false,
 } = {}) => {
+  // When the packaged local POS runtime is enabled, POSService/SQLite owns the
+  // durable outbox/inbox and reconnect lifecycle. The legacy browser IndexedDB
+  // orchestrator must not become a second transaction/customer/inventory sync
+  // authority. Screen-level reads continue through the configured repositories.
+  if (isLocalPosEnabled()) {
+    return { mode: 'pos_edge', reason: 'local_pos_authoritative' };
+  }
+
   if (!navigator.onLine) {
     return { mode: 'offline', reason: 'offline' };
   }
