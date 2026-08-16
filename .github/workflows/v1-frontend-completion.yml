@@ -22,6 +22,8 @@ on:
       - 'src/pages/billing/retailBillingProductSearchAuthority.v1.test.js'
       - 'src/components/Billing/ProductSearch.jsx'
       - 'src/components/Billing/productSearchInteraction.v1.test.js'
+      - 'src/components/Login/Login.js'
+      - 'src/components/Login/loginInteraction.v1.test.js'
       - 'src/Repositories/LocalPosProductRepository.js'
       - 'src/pages/customers/CustomerList.jsx'
       - 'src/pages/customers/customerListStates.v1.test.js'
@@ -54,6 +56,7 @@ jobs:
           src/pages/billing/retailBillingCheckout.v1.test.js
           src/pages/billing/retailBillingProductSearchAuthority.v1.test.js
           src/components/Billing/productSearchInteraction.v1.test.js
+          src/components/Login/loginInteraction.v1.test.js
           src/pages/customers/customerListStates.v1.test.js
           src/pages/returnsCorrections/salesReturnAuthority.v1.test.js
           src/utils/offlineProductsAuthority.v1.test.js
