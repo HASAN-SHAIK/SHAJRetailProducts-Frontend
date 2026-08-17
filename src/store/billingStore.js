@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { calculateGST, normalizeGstMode } from '../services/gstService';
+import { isLocalPosEnabled } from '../Repositories/local/posLocalApiClient';
 
 const getProductPrice = (product) =>
   Number(
@@ -124,8 +125,13 @@ export const useBillingStore = create((set, get) => ({
   selectedKey: null,
   isGSTEnabled: true,
   gstMode: 'INCLUSIVE',
-  setGSTEnabled: (value) => set({ isGSTEnabled: value }),
-  setGstMode: (mode) =>
+  setGSTEnabled: (value) => {
+    if (isLocalPosEnabled()) return false;
+    set({ isGSTEnabled: Boolean(value) });
+    return true;
+  },
+  setGstMode: (mode) => {
+    if (isLocalPosEnabled()) return false;
     set((state) => {
       const nextMode = normalizeGstMode(mode);
       const updated = state.items.map((item) => ({
@@ -133,7 +139,9 @@ export const useBillingStore = create((set, get) => ({
         ...applyGstTotals(item.price, item.qty, item.gstPercent, nextMode),
       }));
       return { gstMode: nextMode, items: updated };
-    }),
+    });
+    return true;
+  },
   setItems: (items) => set((state) => {
     const gstMode = state.gstMode || 'INCLUSIVE';
     const nextItems = Array.isArray(items) ? items : [];
@@ -248,4 +256,3 @@ export const useBillingStore = create((set, get) => ({
       selectedKey: state.selectedKey === key ? null : state.selectedKey,
     })),
 }));
-
