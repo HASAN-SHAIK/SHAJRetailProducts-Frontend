@@ -37,6 +37,8 @@ on:
       - 'src/store/billingStore.js'
       - 'src/components/Login/Login.js'
       - 'src/components/Login/loginInteraction.v1.test.js'
+      - 'src/components/common/PopUp/PopUp.jsx'
+      - 'src/components/common/PopUp/popupAccessibility.v1.test.js'
       - 'src/Repositories/LocalPosProductRepository.js'
       - 'src/Repositories/LocalPosProductRepository.batchAuthority.v1.test.js'
       - 'src/Repositories/LocalPosInventoryRepository.js'
@@ -79,6 +81,7 @@ jobs:
           src/components/Billing/cartItemAccessibility.v1.test.js
           src/components/Billing/gstFrontendAuthority.v1.test.js
           src/components/Login/loginInteraction.v1.test.js
+          src/components/common/PopUp/popupAccessibility.v1.test.js
           src/Repositories/LocalPosProductRepository.batchAuthority.v1.test.js
           src/Repositories/localPosInventoryAuthority.v1.test.js
           src/pages/customers/customerListStates.v1.test.js
