@@ -36,4 +36,16 @@ describe('V1 cashier checkout interaction safety', () => {
     expect(localPosSection).toMatch(/if \(!response\)[\s\S]*?return;/);
     expect(localPosSection).toMatch(/resetCheckoutModalState\(\);[\s\S]*?return;/);
   });
+
+  test('local POS checkout failure is actionable and leaves checkout retryable', () => {
+    const source = readBillingSource();
+    const handlerStart = source.indexOf('const handleConfirmCheckout = async () => {');
+    const handlerEnd = source.indexOf('\n  const ', handlerStart + 1);
+    const handler = source.slice(handlerStart, handlerEnd > handlerStart ? handlerEnd : undefined);
+
+    expect(handlerStart).toBeGreaterThanOrEqual(0);
+    expect(handler).toContain('Local POS service unavailable. Please start POSService and retry checkout.');
+    expect(handler).toContain("showPopup(message, 'Local POS unavailable');");
+    expect(handler).toContain('setIsConfirmSubmitting(false);');
+  });
 });
