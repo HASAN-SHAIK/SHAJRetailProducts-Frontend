@@ -51,6 +51,32 @@ describe('V1 Frontend local POS sync authority', () => {
     expect(markSyncPlanComplete).not.toHaveBeenCalled();
   });
 
+  test('keeps local POS authority stable across browser offline to online reconnect', async () => {
+    isLocalPosEnabled.mockReturnValue(true);
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: false });
+
+    const offlineResult = await runAppSyncCycle({
+      tenantId: 'tenant-a',
+      userId: 'user-a',
+      branchId: 'branch-a',
+    });
+
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+    const reconnectResult = await runAppSyncCycle({
+      tenantId: 'tenant-a',
+      userId: 'user-a',
+      branchId: 'branch-a',
+    });
+
+    expect(offlineResult).toEqual({ mode: 'pos_edge', reason: 'local_pos_authoritative' });
+    expect(reconnectResult).toEqual({ mode: 'pos_edge', reason: 'local_pos_authoritative' });
+    expect(getSyncPlan).not.toHaveBeenCalled();
+    expect(processOfflineQueue).not.toHaveBeenCalled();
+    expect(syncAllCustomers).not.toHaveBeenCalled();
+    expect(processInventorySyncQueue).not.toHaveBeenCalled();
+    expect(markSyncPlanComplete).not.toHaveBeenCalled();
+  });
+
   test('retains the legacy browser path only when local POS mode is disabled', async () => {
     isLocalPosEnabled.mockReturnValue(false);
     getSyncPlan.mockResolvedValue({ mode: 'delta', reason: 'scheduled' });
