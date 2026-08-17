@@ -19,6 +19,8 @@ on:
       - 'src/services/local/offlineLocalService.js'
       - 'src/utils/staffExpensesSync.js'
       - 'src/utils/returnsCorrectionsSync.js'
+      - 'src/components/returnsCorrections/ReturnsHeader.jsx'
+      - 'src/components/returnsCorrections/returnsHeaderSyncAuthority.v1.test.js'
       - 'src/pages/SyncCenter.jsx'
       - 'src/pages/SyncCenterContent.jsx'
       - 'src/pages/syncCenterAccess.js'
@@ -77,6 +79,7 @@ jobs:
           src/Repositories/localPosInventoryAuthority.v1.test.js
           src/pages/customers/customerListStates.v1.test.js
           src/pages/returnsCorrections/salesReturnAuthority.v1.test.js
+          src/components/returnsCorrections/returnsHeaderSyncAuthority.v1.test.js
           src/utils/offlineProductsAuthority.v1.test.js
       - name: Production build
         run: CI=false npm run build
