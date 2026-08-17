@@ -13,8 +13,6 @@ on:
       - 'src/utils/deltaSyncAuthority.v1.test.js'
       - 'src/utils/legacyBrowserSyncAuthority.js'
       - 'src/utils/legacyBrowserSyncAuthority.v1.test.js'
-      - 'src/utils/sessionStorage.js'
-      - 'src/utils/browserPersistenceBoundary.v1.test.js'
       - 'src/services/local/syncLocalService.js'
       - 'src/services/local/offlineLocalService.js'
       - 'src/utils/staffExpensesSync.js'
@@ -66,7 +64,6 @@ jobs:
           src/utils/appSyncOrchestrator.v1.test.js
           src/utils/deltaSyncAuthority.v1.test.js
           src/utils/legacyBrowserSyncAuthority.v1.test.js
-          src/utils/browserPersistenceBoundary.v1.test.js
           src/pages/syncCenterAccess.v1.test.js
           src/pages/billing/retailBillingCheckout.v1.test.js
           src/pages/billing/retailBillingProductSearchAuthority.v1.test.js
