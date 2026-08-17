@@ -22,4 +22,10 @@ describe('V1 customer screen loading and retry states', () => {
     expect(source).toContain('Loading customers...');
     expect(source).toContain('No customers match this search.');
   });
+
+  test('gives repeated customer row actions customer-specific accessible names', () => {
+    expect(source).toContain("const customerActionLabel = customer.name || customer.phone || customer.mobile || customer.id || 'customer';");
+    expect(source).toContain('aria-label={`View customer ${customerActionLabel}`}');
+    expect(source).toContain('aria-label={`Edit customer ${customerActionLabel}`}');
+  });
 });

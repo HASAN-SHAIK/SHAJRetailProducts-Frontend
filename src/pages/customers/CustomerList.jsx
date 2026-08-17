@@ -157,6 +157,7 @@ const CustomerList = () => {
               const balance = Number(customer.current_balance || 0);
               const limit = Number(customer.credit_limit || 0);
               const isHigh = limit > 0 && balance > limit;
+              const customerActionLabel = customer.name || customer.phone || customer.mobile || customer.id || 'customer';
               return (
                 <tr key={customer.id} className="billing-row">
                   <td>{customer.name || '-'}</td>
@@ -169,6 +170,7 @@ const CustomerList = () => {
                       type="button"
                       className="btn btn-sm btn-outline-primary"
                       onClick={() => navigate(`/customers/${customer.id}`)}
+                      aria-label={`View customer ${customerActionLabel}`}
                     >
                       View
                     </button>
@@ -176,6 +178,7 @@ const CustomerList = () => {
                       type="button"
                       className="btn btn-sm btn-outline-secondary ms-2"
                       onClick={() => navigate(`/customers/${customer.id}/edit`)}
+                      aria-label={`Edit customer ${customerActionLabel}`}
                     >
                       Edit
                     </button>
