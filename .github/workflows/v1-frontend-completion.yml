@@ -32,6 +32,8 @@ on:
       - 'src/components/Billing/productSearchInteraction.v1.test.js'
       - 'src/components/Billing/CartItemRow.jsx'
       - 'src/components/Billing/cartItemAccessibility.v1.test.js'
+      - 'src/components/Billing/CameraBarcodeScannerModal.jsx'
+      - 'src/components/Billing/cameraBarcodeAccessibility.v1.test.js'
       - 'src/components/Billing/GSTTogglePopup.jsx'
       - 'src/components/Billing/gstFrontendAuthority.v1.test.js'
       - 'src/store/billingStore.js'
@@ -79,6 +81,7 @@ jobs:
           src/pages/billing/retailBillingProductSearchAuthority.v1.test.js
           src/components/Billing/productSearchInteraction.v1.test.js
           src/components/Billing/cartItemAccessibility.v1.test.js
+          src/components/Billing/cameraBarcodeAccessibility.v1.test.js
           src/components/Billing/gstFrontendAuthority.v1.test.js
           src/components/Login/loginInteraction.v1.test.js
           src/components/common/PopUp/popupAccessibility.v1.test.js
