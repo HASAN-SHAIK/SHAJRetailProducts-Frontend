@@ -21,9 +21,13 @@ const CameraBarcodeScannerModal = ({ open, onClose, onDetected }) => {
   const frameRef = useRef(null);
   const lastScanAtRef = useRef(0);
   const isDetectedRef = useRef(false);
+  const closeButtonRef = useRef(null);
+  const previouslyFocusedRef = useRef(null);
   const [error, setError] = useState('');
   const [initializing, setInitializing] = useState(false);
   const [manualCode, setManualCode] = useState('');
+  const titleId = 'billing-camera-scanner-title';
+  const manualInputId = 'billing-camera-manual-barcode';
   const isSupported = useMemo(
     () =>
       typeof window !== 'undefined' &&
@@ -35,6 +39,29 @@ const CameraBarcodeScannerModal = ({ open, onClose, onDetected }) => {
     () => typeof window !== 'undefined' && !!navigator?.mediaDevices?.getUserMedia,
     []
   );
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    previouslyFocusedRef.current = document.activeElement;
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose?.();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      const previous = previouslyFocusedRef.current;
+      if (previous && typeof previous.focus === 'function' && document.contains(previous)) {
+        previous.focus();
+      }
+    };
+  }, [onClose, open]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -185,7 +212,6 @@ const CameraBarcodeScannerModal = ({ open, onClose, onDetected }) => {
         frameRef.current = window.requestAnimationFrame(detectFrame);
       } catch (bootError) {
         try {
-          // Fallback for browsers where BarcodeDetector fails at runtime.
           await bootZxingScanner();
         } catch {
           setError('Unable to access camera scanner. Allow permission and use HTTPS (or localhost).');
@@ -206,32 +232,52 @@ const CameraBarcodeScannerModal = ({ open, onClose, onDetected }) => {
 
   return (
     <div className="billing-camera-overlay" onClick={onClose}>
-      <div className="billing-camera-modal" onClick={(event) => event.stopPropagation()}>
+      <div
+        className="billing-camera-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="billing-camera-header">
-          <h5>Scan Product Barcode</h5>
-          <button type="button" className="btn btn-sm btn-outline-light" onClick={onClose}>
+          <h5 id={titleId}>Scan Product Barcode</h5>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className="btn btn-sm btn-outline-light"
+            onClick={onClose}
+            aria-label="Close barcode scanner"
+          >
             Close
           </button>
         </div>
         <div className="billing-camera-body">
           {!hasCameraSupport ? (
-            <div className="billing-camera-status">
+            <div className="billing-camera-status" role="status" aria-live="polite">
               Camera is unavailable here. Use HTTPS and allow permission, or enter barcode manually below.
             </div>
           ) : (
             <>
               <div className="billing-camera-video-wrap">
-                <video ref={videoRef} className="billing-camera-video" playsInline muted autoPlay />
+                <video
+                  ref={videoRef}
+                  className="billing-camera-video"
+                  playsInline
+                  muted
+                  autoPlay
+                  aria-label="Camera barcode preview"
+                />
               </div>
-              <div className="billing-camera-status">
+              <div className="billing-camera-status" role="status" aria-live="polite">
                 {initializing ? 'Starting camera...' : 'Point camera at barcode or QR code.'}
               </div>
             </>
           )}
-          {error ? <div className="billing-camera-error">{error}</div> : null}
+          {error ? <div className="billing-camera-error" role="alert">{error}</div> : null}
           <div className="mt-2">
-            <label className="form-label text-light">Manual Barcode Entry</label>
+            <label className="form-label text-light" htmlFor={manualInputId}>Manual Barcode Entry</label>
             <input
+              id={manualInputId}
               type="text"
               className="form-control"
               value={manualCode}
