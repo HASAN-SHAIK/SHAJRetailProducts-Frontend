@@ -3,38 +3,36 @@ jest.mock('../services/local/sessionLocalService', () => ({
   getSessionValue: jest.fn(() => Promise.resolve(null)),
 }));
 
-const {
-  saveAuthToken,
-  getAuthToken,
-  saveSessionInfo,
-  getSessionInfo,
-  clearSessionInfo,
-} = require('./sessionStorage');
-
-const { clearSessionValue } = require('../services/local/sessionLocalService');
+const loadPersistenceModules = () => {
+  jest.resetModules();
+  const localService = require('../services/local/sessionLocalService');
+  const sessionStorage = require('./sessionStorage');
+  return { localService, sessionStorage };
+};
 
 describe('V1 browser persistence boundary', () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
-    clearSessionValue.mockClear();
-    jest.resetModules();
   });
 
   test('access JWTs are purged instead of persisted in browser-readable storage', async () => {
+    const { localService, sessionStorage } = loadPersistenceModules();
     window.localStorage.setItem('auth_token', 'legacy-local-token');
     window.sessionStorage.setItem('auth_token', 'legacy-session-token');
 
-    await saveAuthToken('new-secret-token');
+    await sessionStorage.saveAuthToken('new-secret-token');
 
     expect(window.localStorage.getItem('auth_token')).toBeNull();
     expect(window.sessionStorage.getItem('auth_token')).toBeNull();
-    expect(clearSessionValue).toHaveBeenCalledWith('auth_token');
-    await expect(getAuthToken()).resolves.toBeNull();
+    expect(localService.clearSessionValue).toHaveBeenCalledWith('auth_token');
+    await expect(sessionStorage.getAuthToken()).resolves.toBeNull();
   });
 
   test('session metadata may persist but never carries an access token', async () => {
-    await saveSessionInfo({
+    const { sessionStorage } = loadPersistenceModules();
+
+    await sessionStorage.saveSessionInfo({
       userId: 'user-1',
       role: 'cashier',
       branchId: 'branch-1',
@@ -50,7 +48,7 @@ describe('V1 browser persistence boundary', () => {
       token: null,
     });
     expect(window.sessionStorage.getItem('session_info')).toBeNull();
-    await expect(getSessionInfo()).resolves.toMatchObject({
+    await expect(sessionStorage.getSessionInfo()).resolves.toMatchObject({
       userId: 'user-1',
       role: 'cashier',
       branchId: 'branch-1',
@@ -59,16 +57,14 @@ describe('V1 browser persistence boundary', () => {
   });
 
   test('legacy IndexedDB session metadata is sanitized before browser migration', async () => {
-    jest.resetModules();
-    const localService = require('../services/local/sessionLocalService');
+    const { localService, sessionStorage } = loadPersistenceModules();
     localService.getSessionValue.mockResolvedValueOnce({
       userId: 'legacy-user',
       role: 'cashier',
       token: 'legacy-indexeddb-token',
     });
-    const freshSessionStorage = require('./sessionStorage');
 
-    const info = await freshSessionStorage.getSessionInfo();
+    const info = await sessionStorage.getSessionInfo();
 
     expect(info).toEqual({
       userId: 'legacy-user',
@@ -80,16 +76,18 @@ describe('V1 browser persistence boundary', () => {
       role: 'cashier',
       token: null,
     });
+    expect(localService.clearSessionValue).toHaveBeenCalledWith('session_info');
   });
 
   test('clearing session metadata removes browser copies and IndexedDB compatibility state', async () => {
+    const { localService, sessionStorage } = loadPersistenceModules();
     window.localStorage.setItem('session_info', JSON.stringify({ userId: 'user-1', token: null }));
     window.sessionStorage.setItem('session_info', JSON.stringify({ userId: 'user-1', token: null }));
 
-    await clearSessionInfo();
+    await sessionStorage.clearSessionInfo();
 
     expect(window.localStorage.getItem('session_info')).toBeNull();
     expect(window.sessionStorage.getItem('session_info')).toBeNull();
-    expect(clearSessionValue).toHaveBeenCalledWith('session_info');
+    expect(localService.clearSessionValue).toHaveBeenCalledWith('session_info');
   });
 });
