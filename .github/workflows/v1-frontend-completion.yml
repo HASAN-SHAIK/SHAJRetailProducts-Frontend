@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/App.js'
       - 'src/appRoutes.v1.test.js'
+      - 'src/productsAdminImportStates.v1.test.js'
       - 'src/utils/axios.js'
       - 'src/utils/authResponseStates.v1.test.js'
       - 'src/utils/appSyncOrchestrator.js'
@@ -73,6 +74,7 @@ jobs:
         run: >-
           CI=true npm test -- --watchAll=false
           src/appRoutes.v1.test.js
+          src/productsAdminImportStates.v1.test.js
           src/utils/authResponseStates.v1.test.js
           src/utils/appSyncOrchestrator.v1.test.js
           src/utils/deltaSyncAuthority.v1.test.js
