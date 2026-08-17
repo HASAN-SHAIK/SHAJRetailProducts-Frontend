@@ -22,4 +22,12 @@ describe('V1 sales return local POS authority', () => {
     expect(source).toContain('disabled={submitting || Boolean(itemsError) || Boolean(ordersError)}');
     expect(source).toContain('role="alert"');
   });
+
+  test('associates refund form labels and gives each return quantity input a product-specific name', () => {
+    expect(source).toContain('htmlFor="sales-return-original-bill"');
+    expect(source).toContain('id="sales-return-original-bill"');
+    expect(source).toContain('htmlFor="sales-return-reason"');
+    expect(source).toContain('id="sales-return-reason"');
+    expect(source).toContain('aria-label={`Return quantity for ${row.name}`}');
+  });
 });
