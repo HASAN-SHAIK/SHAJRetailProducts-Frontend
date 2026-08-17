@@ -416,8 +416,9 @@ const SalesReturn = () => {
         )}
         <div className="row g-2">
           <div className="col-md-4">
-            <label className="form-label">Original Bill</label>
+            <label className="form-label" htmlFor="sales-return-original-bill">Original Bill</label>
             <select
+              id="sales-return-original-bill"
               className="form-select"
               value={selectedOrderId}
               onChange={(event) => setSelectedOrderId(event.target.value)}
@@ -433,8 +434,13 @@ const SalesReturn = () => {
             </select>
           </div>
           <div className="col-md-4">
-            <label className="form-label">Reason</label>
-            <input className="form-control" value={reason} onChange={(event) => setReason(event.target.value)} />
+            <label className="form-label" htmlFor="sales-return-reason">Reason</label>
+            <input
+              id="sales-return-reason"
+              className="form-control"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
           </div>
           <div className="col-md-4">
             <span className="badge-flag">Refund: {summary.refund.toFixed(2)} | Tax: {summary.tax.toFixed(2)}</span>
@@ -518,6 +524,7 @@ const SalesReturn = () => {
                       max={lineState.remaining}
                       step="0.001"
                       disabled={!lineState.isReturnable || submitting}
+                      aria-label={`Return quantity for ${row.name}`}
                       onChange={(event) => handleQtyChange(idx, event.target.value)}
                     />
                   </td>
