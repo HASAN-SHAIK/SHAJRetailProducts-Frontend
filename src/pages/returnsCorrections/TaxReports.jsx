@@ -25,10 +25,11 @@ const TaxReports = () => {
               date: row.date,
               billId: '-',
               type: 'SUMMARY',
-              taxableAmount: 0,
-              cgst: row.cgst,
-              sgst: row.sgst,
-              igst: row.igst,
+              taxableAmount: row.taxable_amount ?? 0,
+              totalGst: row.total_gst ?? null,
+              cgst: row.cgst ?? null,
+              sgst: row.sgst ?? null,
+              igst: row.igst ?? null,
               gstEntryId: `${row.date}-summary`,
             }))
           );
@@ -74,14 +75,23 @@ const TaxReports = () => {
   const totals = useMemo(() => {
     return entries.reduce(
       (acc, entry) => {
-        acc.cgst += Number(entry.cgst || 0);
-        acc.sgst += Number(entry.sgst || 0);
-        acc.igst += Number(entry.igst || 0);
+        const cgst = Number(entry.cgst || 0);
+        const sgst = Number(entry.sgst || 0);
+        const igst = Number(entry.igst || 0);
+        acc.cgst += cgst;
+        acc.sgst += sgst;
+        acc.igst += igst;
+        acc.totalGst += Number(entry.totalGst ?? entry.totalTax ?? (cgst + sgst + igst));
         return acc;
       },
-      { cgst: 0, sgst: 0, igst: 0 }
+      { cgst: 0, sgst: 0, igst: 0, totalGst: 0 }
     );
   }, [entries]);
+
+  const hasComponentBreakdown = useMemo(
+    () => entries.some((entry) => entry.cgst != null || entry.sgst != null || entry.igst != null),
+    [entries]
+  );
 
   return (
     <div className="returns-page" aria-busy={isLoading}>
@@ -97,7 +107,10 @@ const TaxReports = () => {
             <input id="tax-report-to" type="date" className="form-control" value={to} onChange={(event) => setTo(event.target.value)} />
           </div>
           <div className="col-md-6">
-            <span className="badge-flag">CGST {totals.cgst.toFixed(2)} | SGST {totals.sgst.toFixed(2)} | IGST {totals.igst.toFixed(2)}</span>
+            <span className="badge-flag">
+              GST {totals.totalGst.toFixed(2)}
+              {hasComponentBreakdown && ` | CGST ${totals.cgst.toFixed(2)} | SGST ${totals.sgst.toFixed(2)} | IGST ${totals.igst.toFixed(2)}`}
+            </span>
           </div>
         </div>
       </div>
@@ -117,6 +130,7 @@ const TaxReports = () => {
               <th>Bill</th>
               <th>Type</th>
               <th>Taxable</th>
+              <th>Total GST</th>
               <th>CGST</th>
               <th>SGST</th>
               <th>IGST</th>
@@ -125,31 +139,43 @@ const TaxReports = () => {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={7} className="text-center text-secondary" role="status">
+                <td colSpan={8} className="text-center text-secondary" role="status">
                   Loading GST entries...
                 </td>
               </tr>
             )}
             {!isLoading && !loadError && entries.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center text-secondary">
+                <td colSpan={8} className="text-center text-secondary">
                   No GST entries.
                 </td>
               </tr>
             )}
-            {!loadError && entries.map((entry) => (
-              <tr key={entry.gstEntryId}>
-                <td>{entry.date}</td>
-                <td>{entry.billId}</td>
-                <td>{entry.type}</td>
-                <td>{Number(entry.taxableAmount || 0).toFixed(2)}</td>
-                <td>{Number(entry.cgst || 0).toFixed(2)}</td>
-                <td>{Number(entry.sgst || 0).toFixed(2)}</td>
-                <td>{Number(entry.igst || 0).toFixed(2)}</td>
-              </tr>
-            ))}
+            {!loadError && entries.map((entry) => {
+              const cgst = entry.cgst == null ? null : Number(entry.cgst);
+              const sgst = entry.sgst == null ? null : Number(entry.sgst);
+              const igst = entry.igst == null ? null : Number(entry.igst);
+              const totalGst = Number(entry.totalGst ?? entry.totalTax ?? ((cgst || 0) + (sgst || 0) + (igst || 0)));
+              return (
+                <tr key={entry.gstEntryId}>
+                  <td>{entry.date}</td>
+                  <td>{entry.billId}</td>
+                  <td>{entry.type}</td>
+                  <td>{Number(entry.taxableAmount || 0).toFixed(2)}</td>
+                  <td>{totalGst.toFixed(2)}</td>
+                  <td>{cgst == null ? '—' : cgst.toFixed(2)}</td>
+                  <td>{sgst == null ? '—' : sgst.toFixed(2)}</td>
+                  <td>{igst == null ? '—' : igst.toFixed(2)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        {!isLoading && !loadError && entries.length > 0 && !hasComponentBreakdown && (
+          <p className="text-secondary small mt-2 mb-0" role="note">
+            Jurisdiction component split is unavailable for these canonical POS tax snapshots; totals are shown without inventing CGST/SGST/IGST allocation.
+          </p>
+        )}
       </div>
     </div>
   );
