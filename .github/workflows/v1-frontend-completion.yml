@@ -6,6 +6,8 @@ on:
       - 'src/App.js'
       - 'src/appRoutes.v1.test.js'
       - 'src/productsAdminImportStates.v1.test.js'
+      - 'src/pages/Dashboard.jsx'
+      - 'src/pages/dashboardNetworkState.v1.test.js'
       - 'src/pages/SetupScreen.jsx'
       - 'src/pages/setupScreenResilience.v1.test.js'
       - 'src/utils/axios.js'
@@ -81,6 +83,7 @@ jobs:
           CI=true npm test -- --watchAll=false
           src/appRoutes.v1.test.js
           src/productsAdminImportStates.v1.test.js
+          src/pages/dashboardNetworkState.v1.test.js
           src/pages/setupScreenResilience.v1.test.js
           src/utils/authResponseStates.v1.test.js
           src/utils/appSyncOrchestrator.v1.test.js
