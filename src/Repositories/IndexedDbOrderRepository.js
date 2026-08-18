@@ -1,10 +1,11 @@
 import * as storage from './internal/storage';
 
-const { db, validateAndPrepare, saveTransactionsBulk } = storage;
+const { db, validateAndPrepare, saveTransactionsBulk, isValidIndexedDbKey } = storage;
 
 const normalizeOrderId = (orderId) => {
   if (orderId === null || orderId === undefined) return null;
-  const raw = String(orderId);
+  const raw = String(orderId).trim();
+  if (!raw) return null;
   if (raw.startsWith('local:')) return raw;
   const asNumber = Number(orderId);
   if (Number.isFinite(asNumber)) return asNumber;
@@ -85,7 +86,8 @@ const resolveOrderType = (order = {}) => normalizeTransactionType(order);
 
 const normalizeOrderKey = (orderId) => {
   if (orderId === null || orderId === undefined) return null;
-  const raw = String(orderId);
+  const raw = String(orderId).trim();
+  if (!raw) return null;
   if (raw.startsWith('local:')) return raw;
   const asNumber = Number(orderId);
   if (Number.isFinite(asNumber)) return asNumber;
@@ -220,12 +222,11 @@ export class IndexedDbOrderRepository {
   }
 
   async getCachedOrderById(orderId) {
-    if (!orderId) return null;
     const key = normalizeOrderKey(orderId);
-    if (key === null) return null;
+    if (!isValidIndexedDbKey(key)) return null;
     const direct = await db.orders.get(key);
     if (direct) return direct;
-    if (key !== orderId) {
+    if (key !== orderId && isValidIndexedDbKey(orderId)) {
       return await db.orders.get(orderId);
     }
     return null;
@@ -233,7 +234,7 @@ export class IndexedDbOrderRepository {
 
   async getCachedOrderItems(orderId) {
     const key = normalizeOrderKey(orderId);
-    if (key === null) return [];
+    if (!isValidIndexedDbKey(key)) return [];
     try {
       return await db.order_items.where('order_id').equals(key).toArray();
     } catch {
@@ -244,7 +245,7 @@ export class IndexedDbOrderRepository {
 
   async replaceCachedOrderItems(orderId, items = []) {
     const key = normalizeOrderKey(orderId);
-    if (key === null) return 0;
+    if (!isValidIndexedDbKey(key)) return 0;
     const list = Array.isArray(items) ? items : [];
     if (!list.length) {
       throw new Error('Order items are required');
@@ -435,11 +436,13 @@ export class IndexedDbOrderRepository {
   }
 
   getOrderRecordById(orderId) {
+    if (!isValidIndexedDbKey(orderId)) return null;
     return db.orders.get(orderId);
   }
 
   getOrderItemsByOrderId(orderId) {
-    const idText = String(orderId);
+    if (!isValidIndexedDbKey(orderId)) return Promise.resolve([]);
+    const idText = String(orderId).trim();
     const idNum = Number(orderId);
     return db.order_items
       .where('order_id')

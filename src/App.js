@@ -82,6 +82,37 @@ import { runAppSyncCycle } from './utils/appSyncOrchestrator';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
+const resolveValidBranchSelection = ({
+  branches,
+  selectedBranchId,
+  hasAllBranchAccess,
+  restrictedBranchId
+}) => {
+  const selected = selectedBranchId ? String(selectedBranchId) : '';
+  const branchList = Array.isArray(branches) ? branches : [];
+  const restrictedBranch = restrictedBranchId
+    ? branchList.find((branch) => String(branch?.id) === restrictedBranchId)
+    : null;
+
+  if (restrictedBranch) {
+    return { id: restrictedBranchId, name: restrictedBranch?.name || '' };
+  }
+
+  if (selected && selected !== 'all') {
+    const selectedBranch = branchList.find((branch) => String(branch?.id) === selected);
+    if (selectedBranch) {
+      return { id: selected, name: selectedBranch?.name || '' };
+    }
+  }
+
+  if (hasAllBranchAccess) {
+    return { id: 'all', name: 'All' };
+  }
+
+  const firstBranch = branchList[0];
+  return firstBranch ? { id: firstBranch.id, name: firstBranch?.name || '' } : { id: null, name: '' };
+};
+
 const ScrollToTop = () => {
   const location = useLocation();
   useEffect(() => {
@@ -202,29 +233,19 @@ function App() {
             const list = payload?.branches || payload?.data?.branches || payload?.data || [];
             const branches = Array.isArray(list) ? list : [];
             setBranches(branches);
-            const restrictedBranch = restrictedBranchId
-              ? branches.find((branch) => String(branch?.id) === restrictedBranchId)
-              : null;
-            if (restrictedBranch) {
-              if (String(selectedBranchId || '') !== restrictedBranchId) {
-                setSelectedBranchId(restrictedBranchId, {
-                  confirmed: false,
-                  name: restrictedBranch?.name || ''
-                });
-              }
-              branchIdForSync = restrictedBranchId;
-            } else if (!selectedBranchId && branches.length > 0) {
-              if (hasAllBranchAccess) {
-                setSelectedBranchId('all', { confirmed: false, name: 'All' });
-                branchIdForSync = 'all';
-              } else {
-                setSelectedBranchId(branches[0].id, {
-                  confirmed: false,
-                  name: branches[0]?.name || ''
-                });
-                branchIdForSync = branches[0].id;
-              }
+            const nextBranch = resolveValidBranchSelection({
+              branches,
+              selectedBranchId,
+              hasAllBranchAccess,
+              restrictedBranchId
+            });
+            if (String(selectedBranchId || '') !== String(nextBranch.id || '')) {
+              setSelectedBranchId(nextBranch.id, {
+                confirmed: false,
+                name: nextBranch.name
+              });
             }
+            branchIdForSync = nextBranch.id;
           } catch {
             // keep previous branches on error
           }
@@ -461,25 +482,17 @@ useEffect(() => {
       const list = payload?.branches || payload?.data?.branches || payload?.data || [];
       const branches = Array.isArray(list) ? list : [];
       setBranches(branches);
-      const restrictedBranch = restrictedBranchId
-        ? branches.find((branch) => String(branch?.id) === restrictedBranchId)
-        : null;
-      if (restrictedBranch) {
-        if (String(selectedBranchId || '') !== restrictedBranchId) {
-          setSelectedBranchId(restrictedBranchId, {
-            confirmed: false,
-            name: restrictedBranch?.name || ''
-          });
-        }
-      } else if (!selectedBranchId && branches.length > 0) {
-        if (hasAllBranchAccess) {
-          setSelectedBranchId('all', { confirmed: false, name: 'All' });
-        } else {
-          setSelectedBranchId(branches[0].id, {
-            confirmed: false,
-            name: branches[0]?.name || ''
-          });
-        }
+      const nextBranch = resolveValidBranchSelection({
+        branches,
+        selectedBranchId,
+        hasAllBranchAccess,
+        restrictedBranchId
+      });
+      if (String(selectedBranchId || '') !== String(nextBranch.id || '')) {
+        setSelectedBranchId(nextBranch.id, {
+          confirmed: false,
+          name: nextBranch.name
+        });
       }
     } catch (err) {
       // Keep previous branches on error to avoid flicker/reset.

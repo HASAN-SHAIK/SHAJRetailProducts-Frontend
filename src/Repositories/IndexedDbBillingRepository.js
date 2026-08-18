@@ -1,6 +1,6 @@
 import * as storage from './internal/storage';
 
-const { db, validateAndPrepare } = storage;
+const { db, validateAndPrepare, isValidIndexedDbKey } = storage;
 
 const normalizeNumber = (value) => {
   const parsed = Number(value);
@@ -97,7 +97,7 @@ export class IndexedDbBillingRepository {
   }
 
   async getOrderById(orderId) {
-    if (!orderId) return null;
+    if (!isValidIndexedDbKey(orderId)) return null;
     return await db.orders.get(orderId);
   }
 
@@ -124,7 +124,7 @@ export class IndexedDbBillingRepository {
   }
 
   async replaceOrderItems(orderId, items) {
-    if (!orderId) return 0;
+    if (!isValidIndexedDbKey(orderId)) return 0;
     const list = Array.isArray(items) ? items : [];
     if (!list.length) {
       throw new Error('Order items are required');
@@ -142,7 +142,7 @@ export class IndexedDbBillingRepository {
   }
 
   async getOrderItems(orderId) {
-    if (!orderId) return [];
+    if (!isValidIndexedDbKey(orderId)) return [];
     return await db.order_items.where('order_id').equals(orderId).toArray();
   }
 

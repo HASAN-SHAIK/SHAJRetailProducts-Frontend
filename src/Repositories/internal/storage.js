@@ -6,6 +6,7 @@ import * as coreDb from '../../core/db';
 
 export const {
   validateAndPrepare,
+  isValidIndexedDbKey,
   initDB,
   saveProductsBulk,
   getAllCustomers,

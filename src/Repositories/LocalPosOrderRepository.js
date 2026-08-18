@@ -88,6 +88,22 @@ const toLocalCreatePayload = (payload = {}) => ({
   items: toLocalItems(payload),
 });
 
+const dropMissingLocalCustomer = async (payload) => {
+  const customerId = payload?.customer_id;
+  if (!customerId) return payload;
+  try {
+    await localPosRequest(`/customers/${encodeURIComponent(String(customerId))}`);
+    return payload;
+  } catch (error) {
+    if (error?.status === 404 || error?.payload?.error === 'customer_not_found') {
+      const next = { ...payload };
+      delete next.customer_id;
+      return next;
+    }
+    throw error;
+  }
+};
+
 const toPaymentInput = (payload = {}, fallbackCurrency = 'INR') => ({
   client_payment_id: String(payload.client_payment_id || payload.payment_id || uuid('payment')),
   mode: String(payload.mode || payload.payment_mode || payload.payment_method || payload.method || 'cash').toLowerCase(),
@@ -214,9 +230,10 @@ export class LocalPosOrderRepository extends ApiOrderRepository {
   async createOrder(payload, options = {}) {
     if (!isLocalPosEnabled()) return super.createOrder(payload, options);
 
-    const createPayload = toLocalCreatePayload(payload);
+    const createPayload = await dropMissingLocalCustomer(toLocalCreatePayload(payload));
     if (process.env.NODE_ENV === 'development') {
       console.info('[POS order payload]', JSON.stringify({
+        customer_id: createPayload.customer_id || null,
         itemCount: createPayload.items.length,
         items: createPayload.items.map((item) => ({
           product_id: item.product_id,

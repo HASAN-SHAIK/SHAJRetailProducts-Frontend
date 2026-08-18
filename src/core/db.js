@@ -1227,7 +1227,7 @@ export const validateAndPrepare = async (entityType, data) => {
 
     if (entityType === 'batch') {
       const productId = payload.product_id;
-      if (productId) {
+      if (isValidIndexedDbKey(productId)) {
         const product =
           (await db.products_cache.get(productId)) || (await db.products.get(productId));
         if (!product) {
@@ -1245,7 +1245,7 @@ export const validateAndPrepare = async (entityType, data) => {
         throw new Error('Negative batch quantity_remaining');
       }
 
-      if (payload.batch_number && payload.product_id) {
+      if (payload.batch_number && isValidIndexedDbKey(payload.product_id)) {
         const existing = await db.batches_cache
           .where('product_id')
           .equals(payload.product_id)
@@ -1447,6 +1447,15 @@ const normalizeTransaction = (transaction) => {
 
 const normalizeSessionKey = (key) => String(key || '').trim();
 
+export const isValidIndexedDbKey = (key) => {
+  if (key === null || key === undefined) return false;
+  if (typeof key === 'number') return Number.isFinite(key);
+  if (typeof key === 'string') return key.trim() !== '';
+  if (key instanceof Date) return Number.isFinite(key.getTime());
+  if (Array.isArray(key)) return key.length > 0 && key.every(isValidIndexedDbKey);
+  return false;
+};
+
 export const initDB = async () => {
   await db.open();
   return db;
@@ -1592,7 +1601,7 @@ export const getBatchCacheById = async (batchId) => {
 };
 
 export const getLatestBatchForProduct = async (productId, branchId = null) => {
-  if (!productId) return null;
+  if (!isValidIndexedDbKey(productId)) return null;
   const list = await db.batches_cache
     .where('product_id')
     .equals(productId)
@@ -1612,7 +1621,7 @@ export const getLatestBatchForProduct = async (productId, branchId = null) => {
 };
 
 export const getBatchesForProduct = async (productId, branchId = null) => {
-  if (!productId) return [];
+  if (!isValidIndexedDbKey(productId)) return [];
   const list = await db.batches_cache.where('product_id').equals(productId).toArray();
   return list.filter((batch) => {
     if (batch?.is_deleted) return false;
@@ -1670,7 +1679,7 @@ export const getProductCacheByBarcode = async (barcode) => {
 };
 
 export const getProductCacheById = async (productId) => {
-  if (!productId) return null;
+  if (!isValidIndexedDbKey(productId)) return null;
   return await db.products_cache.get(productId);
 };
 
@@ -1788,7 +1797,7 @@ export const upsertSupplierLedgerBulk = async (entries = []) => {
 };
 
 export const getSupplierLedgerBySupplierId = async (supplierId) => {
-  if (!supplierId) return [];
+  if (!isValidIndexedDbKey(supplierId)) return [];
   const key = String(supplierId);
   return await db.supplier_ledger.where('supplier_id').equals(key).toArray();
 };
@@ -1964,7 +1973,7 @@ export const addLocalPurchaseItems = async (items = []) => {
 };
 
 export const getLocalPurchaseItems = async (purchaseId) => {
-  if (!purchaseId) return [];
+  if (!isValidIndexedDbKey(purchaseId)) return [];
   return await db.purchase_items.where('purchaseId').equals(purchaseId).toArray();
 };
 
@@ -2043,7 +2052,7 @@ export const addSyncLog = async ({ type, entityId, status, message }) => {
 };
 
 export const replaceProductIdReferences = async (oldId, newId) => {
-  if (!oldId || !newId || oldId === newId) return;
+  if (!isValidIndexedDbKey(oldId) || !isValidIndexedDbKey(newId) || oldId === newId) return;
   const existing = await db.products_cache.get(oldId);
   if (existing) {
     await db.products_cache.delete(oldId);
@@ -2086,7 +2095,7 @@ export const replaceProductIdReferences = async (oldId, newId) => {
 };
 
 export const replaceSupplierIdReferences = async (oldId, newId) => {
-  if (!oldId || !newId || oldId === newId) return;
+  if (!isValidIndexedDbKey(oldId) || !isValidIndexedDbKey(newId) || oldId === newId) return;
   const existing = await db.suppliers_cache.get(oldId);
   if (existing) {
     await db.suppliers_cache.delete(oldId);
