@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
-import dayjs from 'dayjs';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSalesSummary } from '../../services/local';
 import MobileShell from '../components/MobileShell';
 import MetricCard from '../components/MetricCard';
@@ -10,27 +9,29 @@ const formatCurrency = (value) => Number(value || 0).toLocaleString('en-IN', { m
 const ReportsMobile = () => {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [period, setPeriod] = useState('month');
-  const [fromDate, setFromDate] = useState(dayjs().startOf('month').format('YYYY-MM-DD'));
-  const [toDate, setToDate] = useState(dayjs().format('YYYY-MM-DD'));
+
+  const fetchSummary = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const payload = await getSalesSummary();
+      if (!payload) {
+        throw new Error('report_unavailable');
+      }
+      setSummary(payload);
+    } catch {
+      setSummary(null);
+      setError('Sales reporting is unavailable. Check Central connectivity or cached report data, then retry.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    const fetchSummary = async () => {
-      try {
-        const payload = await getSalesSummary();
-        if (active) setSummary(payload || null);
-      } catch {
-        if (active) setSummary(null);
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
     fetchSummary();
-    return () => {
-      active = false;
-    };
-  }, []);
+  }, [fetchSummary]);
 
   const today = Number(summary?.today || 0);
   const week = Number(summary?.week || 0);
@@ -44,62 +45,82 @@ const ReportsMobile = () => {
 
   const selectedWindowLabel = period === 'today' ? 'Today window' : period === 'week' ? 'This week window' : 'This month window';
   const selectedWindowValue = period === 'today' ? today : period === 'week' ? week : month;
+  const metricValue = (value) => {
+    if (loading) return '...';
+    if (!summary) return 'Unavailable';
+    return `Rs ${formatCurrency(value)}`;
+  };
 
   return (
-    <MobileShell title="Reports" subtitle="Revenue insights with quick period and date controls.">
-      <SectionCard title="Report Filters">
+    <MobileShell title="Reports" subtitle="Canonical Central revenue summary with fixed V1 reporting windows.">
+      <SectionCard title="Report Window">
         <div className="mobile-inline-grid">
           <div>
-            <label className="mobile-label">Period</label>
-            <select className="mobile-field" value={period} onChange={(event) => setPeriod(event.target.value)}>
+            <label className="mobile-label" htmlFor="mobile-report-period">Period</label>
+            <select
+              id="mobile-report-period"
+              className="mobile-field"
+              value={period}
+              onChange={(event) => setPeriod(event.target.value)}
+            >
               <option value="today">Today</option>
               <option value="week">This week</option>
               <option value="month">This month</option>
             </select>
           </div>
           <div>
-            <label className="mobile-label">Growth</label>
-            <input className="mobile-field" value={`${growthPercent}% vs yesterday`} readOnly />
+            <label className="mobile-label" htmlFor="mobile-report-growth">Growth</label>
+            <input
+              id="mobile-report-growth"
+              className="mobile-field"
+              value={summary ? `${growthPercent}% vs yesterday` : 'Unavailable'}
+              readOnly
+            />
           </div>
         </div>
-        <div className="mobile-inline-grid">
-          <div>
-            <label className="mobile-label">From Date</label>
-            <input type="date" className="mobile-field" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
-          </div>
-          <div>
-            <label className="mobile-label">To Date</label>
-            <input type="date" className="mobile-field" value={toDate} onChange={(event) => setToDate(event.target.value)} />
-          </div>
-        </div>
+        <p className="mobile-muted" style={{ margin: '8px 0 0', fontSize: 11 }}>
+          These totals use the canonical Today / This week / This month windows supplied by Central. Custom date-range reporting is not exposed on this V1 mobile screen.
+        </p>
       </SectionCard>
 
-      <div className="mobile-grid-2">
-        <MetricCard label="Today" value={loading ? '...' : `Rs ${formatCurrency(summary?.today)}`} helper="Daily sales" />
-        <MetricCard label="Yesterday" value={loading ? '...' : `Rs ${formatCurrency(summary?.yesterday)}`} helper="Previous day" />
-        <MetricCard label="Week" value={loading ? '...' : `Rs ${formatCurrency(summary?.week)}`} helper="7-day total" />
-        <MetricCard label="Month" value={loading ? '...' : `Rs ${formatCurrency(summary?.month)}`} helper="Current month" />
+      {error ? (
+        <SectionCard title="Reporting unavailable">
+          <div role="alert" className="mobile-item" style={{ display: 'grid', gap: 8 }}>
+            <p style={{ margin: 0 }}>{error}</p>
+            <button type="button" className="mobile-button" onClick={fetchSummary} disabled={loading}>
+              {loading ? 'Retrying...' : 'Retry report'}
+            </button>
+          </div>
+        </SectionCard>
+      ) : null}
+
+      <div className="mobile-grid-2" aria-busy={loading ? 'true' : 'false'}>
+        <MetricCard label="Today" value={metricValue(summary?.today)} helper="Daily sales" />
+        <MetricCard label="Yesterday" value={metricValue(summary?.yesterday)} helper="Previous day" />
+        <MetricCard label="Week" value={metricValue(summary?.week)} helper="7-day total" />
+        <MetricCard label="Month" value={metricValue(summary?.month)} helper="Current month" />
       </div>
 
       <SectionCard title="Performance Snapshot">
         <div className="mobile-item">
           <p className="mobile-card-title" style={{ margin: 0 }}>{selectedWindowLabel}</p>
-          <p style={{ margin: '6px 0 0', fontSize: 18, fontWeight: 700 }}>Rs {loading ? '...' : formatCurrency(selectedWindowValue)}</p>
-          <p className="mobile-muted" style={{ margin: '6px 0 0', fontSize: 11 }}>
-            Date span: {dayjs(fromDate).format('DD MMM YYYY')} to {dayjs(toDate).format('DD MMM YYYY')}
+          <p style={{ margin: '6px 0 0', fontSize: 18, fontWeight: 700 }}>
+            {metricValue(selectedWindowValue)}
           </p>
         </div>
 
-        <div className="mobile-item" style={{ display: 'grid', gap: 8 }}>
-          <div>
-            <p className="mobile-label" style={{ marginBottom: 4 }}>Today vs Month</p>
-            <progress max={Math.max(month, 1)} value={today} style={{ width: '100%' }} />
+        {summary ? (
+          <div className="mobile-item" style={{ display: 'grid', gap: 8 }}>
+            <div>
+              <p className="mobile-label" style={{ marginBottom: 4 }}>Today vs Month</p>
+              <progress max={Math.max(month, 1)} value={today} style={{ width: '100%' }} />
+            </div>
+            <div>
+              <p className="mobile-label" style={{ marginBottom: 4 }}>Week vs Month</p>
+              <progress max={Math.max(month, 1)} value={week} style={{ width: '100%' }} />
+            </div>
           </div>
-          <div>
-            <p className="mobile-label" style={{ marginBottom: 4 }}>Week vs Month</p>
-            <progress max={Math.max(month, 1)} value={week} style={{ width: '100%' }} />
-          </div>
-        </div>
+        ) : null}
       </SectionCard>
     </MobileShell>
   );

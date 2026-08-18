@@ -11,6 +11,7 @@ import { ApiSupplierRepository } from '../Repositories/ApiSupplierRepository';
 import { IndexedDbSupplierRepository } from '../Repositories/IndexedDbSupplierRepository';
 import { ApiInventoryRepository } from '../Repositories/ApiInventoryRepository';
 import { IndexedDbInventoryRepository } from '../Repositories/IndexedDbInventoryRepository';
+import { LocalPosInventoryRepository } from '../Repositories/LocalPosInventoryRepository';
 import { IndexedDbTransactionRepository } from '../Repositories/IndexedDbTransactionRepository';
 import { IndexedDbSessionRepository } from '../Repositories/IndexedDbSessionRepository';
 import { IndexedDbConfigRepository } from '../Repositories/IndexedDbConfigRepository';
@@ -78,7 +79,8 @@ export const getSupplierRepository = () => {
 export const getInventoryRepository = () => {
   if (!instances.inventory) {
     const useApiRepository = String(process.env.REACT_APP_INVENTORY_REPOSITORY || 'api').toLowerCase() !== 'indexeddb';
-    instances.inventory = useApiRepository ? new ApiInventoryRepository() : new IndexedDbInventoryRepository();
+    if (localPosEnabled() && useApiRepository) instances.inventory = new LocalPosInventoryRepository();
+    else instances.inventory = useApiRepository ? new ApiInventoryRepository() : new IndexedDbInventoryRepository();
   }
   return instances.inventory;
 };

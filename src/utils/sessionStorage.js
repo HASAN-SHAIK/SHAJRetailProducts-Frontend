@@ -47,14 +47,6 @@ const clearBrowserValue = (key) => {
   }
 };
 
-const readLegacyToken = () => {
-  try {
-    return localStorage.getItem(AUTH_TOKEN_KEY);
-  } catch (err) {
-    return null;
-  }
-};
-
 const clearLegacyToken = () => {
   try {
     localStorage.removeItem(AUTH_TOKEN_KEY);
@@ -63,20 +55,22 @@ const clearLegacyToken = () => {
   }
 };
 
-const migrateFromIndexedDbOnce = async () => {
+const purgeLegacyAccessToken = async () => {
+  clearBrowserValue(AUTH_TOKEN_KEY);
+  clearLegacyToken();
+  await clearSessionValue(AUTH_TOKEN_KEY).catch(() => {});
+};
+
+const migrateSessionInfoFromIndexedDbOnce = async () => {
   if (migrationAttempted) return;
   migrationAttempted = true;
   try {
-    const indexedToken = await getSessionValue(AUTH_TOKEN_KEY);
-    if (indexedToken && !readBrowserValue(AUTH_TOKEN_KEY)) {
-      writeBrowserValue(AUTH_TOKEN_KEY, indexedToken, false);
-    }
+    // V1 Central auth is HttpOnly-cookie based. Old IndexedDB/local/session
+    // access tokens are deleted rather than migrated back into JavaScript.
+    await purgeLegacyAccessToken();
     const indexedSession = await getSessionValue(SESSION_INFO_KEY);
     if (indexedSession && !readBrowserValue(SESSION_INFO_KEY, true)) {
-      writeBrowserValue(SESSION_INFO_KEY, indexedSession, true);
-    }
-    if (indexedToken) {
-      await clearSessionValue(AUTH_TOKEN_KEY).catch(() => {});
+      writeBrowserValue(SESSION_INFO_KEY, { ...indexedSession, token: null }, true);
     }
     if (indexedSession) {
       await clearSessionValue(SESSION_INFO_KEY).catch(() => {});
@@ -86,35 +80,20 @@ const migrateFromIndexedDbOnce = async () => {
   }
 };
 
-export const saveAuthToken = async (token) => {
-  if (!token) {
-    clearBrowserValue(AUTH_TOKEN_KEY);
-    await clearSessionValue(AUTH_TOKEN_KEY).catch(() => {});
-    return;
-  }
-  writeBrowserValue(AUTH_TOKEN_KEY, token, false);
+// Retained for compatibility with older callers. Access JWTs are never stored
+// in JavaScript-readable browser state; Central's HttpOnly cookie is authority.
+export const saveAuthToken = async () => {
+  await purgeLegacyAccessToken();
 };
 
 export const getAuthToken = async () => {
-  await migrateFromIndexedDbOnce();
-
-  const token = readBrowserValue(AUTH_TOKEN_KEY, false);
-  if (token) return token;
-
-  const legacy = readLegacyToken();
-  if (legacy) {
-    writeBrowserValue(AUTH_TOKEN_KEY, legacy, false);
-    clearLegacyToken();
-    return legacy;
-  }
-
+  await migrateSessionInfoFromIndexedDbOnce();
+  await purgeLegacyAccessToken();
   return null;
 };
 
 export const clearAuthToken = async () => {
-  clearBrowserValue(AUTH_TOKEN_KEY);
-  clearLegacyToken();
-  await clearSessionValue(AUTH_TOKEN_KEY).catch(() => {});
+  await purgeLegacyAccessToken();
 };
 
 export const saveSessionInfo = async (info) => {
@@ -123,15 +102,16 @@ export const saveSessionInfo = async (info) => {
     await clearSessionValue(SESSION_INFO_KEY).catch(() => {});
     return;
   }
-  writeBrowserValue(SESSION_INFO_KEY, info, true);
+  writeBrowserValue(SESSION_INFO_KEY, { ...info, token: null }, true);
 };
 
 export const getSessionInfo = async () => {
-  await migrateFromIndexedDbOnce();
+  await migrateSessionInfoFromIndexedDbOnce();
   const info = readBrowserValue(SESSION_INFO_KEY, true);
-  if (info) return info;
+  if (info) return { ...info, token: null };
   try {
-    return await getSessionValue(SESSION_INFO_KEY);
+    const indexed = await getSessionValue(SESSION_INFO_KEY);
+    return indexed ? { ...indexed, token: null } : null;
   } catch (err) {
     return null;
   }
@@ -143,10 +123,6 @@ export const clearSessionInfo = async () => {
 };
 
 export const migrateAuthTokenFromLocalStorage = async () => {
-  await migrateFromIndexedDbOnce();
-  const legacy = readLegacyToken();
-  if (!legacy) return null;
-  writeBrowserValue(AUTH_TOKEN_KEY, legacy, false);
-  clearLegacyToken();
-  return legacy;
+  await purgeLegacyAccessToken();
+  return null;
 };

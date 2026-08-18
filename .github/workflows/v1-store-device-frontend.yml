@@ -1,0 +1,29 @@
+name: V1 Store Device frontend
+
+on:
+  pull_request:
+    paths:
+      - 'src/pages/BranchDevices.jsx'
+      - 'src/pages/BranchDevices.css'
+      - 'src/pages/BranchDevices.v1Acceptance.test.js'
+      - 'src/Repositories/local/posLocalApiClient.js'
+      - '.github/workflows/v1-store-device-frontend.yml'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Focused Store Device frontend authority acceptance
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/pages/BranchDevices.v1Acceptance.test.js
+      - name: Production build
+        run: CI=false npm run build

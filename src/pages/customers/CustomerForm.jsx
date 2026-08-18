@@ -55,19 +55,22 @@ const CustomerForm = () => {
       if (cached) {
         applyCustomer(cached);
       }
-      if (!navigator.onLine) {
+      try {
+        // Always try the configured repository. In local POS mode this remains the
+        // on-device SQLite authority even without internet connectivity.
+        const detail = await getCustomerDetail(resolveCustomerId(id));
+        const customer = detail?.customer || null;
+        if (customer) {
+          applyCustomer(customer);
+          upsertCustomersBulk([customer]).catch(() => {});
+        } else if (!cached) {
+          setError('Failed to load customer');
+        }
+      } catch {
+        if (!cached) setError('Customer service is unavailable');
+      } finally {
         setLoading(false);
-        return;
       }
-      const detail = await getCustomerDetail(resolveCustomerId(id));
-      const customer = detail?.customer || null;
-      if (customer) {
-        applyCustomer(customer);
-        upsertCustomersBulk([customer]).catch(() => {});
-      } else if (!cached) {
-        setError('Failed to load customer');
-      }
-      setLoading(false);
     })();
   }, [id, isEdit]);
 
@@ -89,11 +92,13 @@ const CustomerForm = () => {
     setSaving(true);
     setError('');
     try {
-      const payload = { ...form };
+      const { credit_limit: _creditLimit, current_balance: _currentBalance, ...payload } = form;
       const nowIso = new Date().toISOString();
       const localId = isEdit ? id : `temp:${Date.now()}`;
       const localCustomer = {
         ...payload,
+        credit_limit: form.credit_limit,
+        current_balance: form.current_balance,
         id: localId,
         mobile: payload.phone || payload.mobile || '',
         updated_at: nowIso,
@@ -103,21 +108,17 @@ const CustomerForm = () => {
       let savedCustomer = null;
       let synced = false;
 
-      if (navigator.onLine) {
-        try {
-          if (isEdit) {
-            savedCustomer = await updateCustomer(id, payload);
-          } else {
-            savedCustomer = await createCustomer(payload);
-          }
-          synced = true;
-        } catch {
-          synced = false;
+      try {
+        // Do not use navigator.onLine as the authority boundary: LocalPosCustomerRepository
+        // talks to the local POS runtime and must remain usable during internet outages.
+        if (isEdit) {
+          savedCustomer = await updateCustomer(id, payload);
+        } else {
+          savedCustomer = await createCustomer(payload);
         }
-      }
-
-      if (synced && !savedCustomer) {
-        savedCustomer = null;
+        synced = true;
+      } catch {
+        synced = false;
       }
 
       if (synced && savedCustomer) {
@@ -141,6 +142,11 @@ const CustomerForm = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const formatFinancialSnapshot = (value) => {
+    const number = Number(value || 0);
+    return Number.isFinite(number) ? number.toFixed(2) : '0.00';
   };
 
   return (
@@ -186,12 +192,22 @@ const CustomerForm = () => {
               </>
             )}
             <label className="billing-label">
-              Credit Limit
-              <input className="form-control form-control-sm billing-input" type="number" value={form.credit_limit || ''} onChange={handleChange('credit_limit')} />
+              Credit Limit (Central)
+              <input
+                className="form-control form-control-sm billing-input"
+                value={formatFinancialSnapshot(form.credit_limit)}
+                readOnly
+                aria-readonly="true"
+              />
             </label>
             <label className="billing-label">
-              Current Balance
-              <input className="form-control form-control-sm billing-input" type="number" value={form.current_balance || ''} onChange={handleChange('current_balance')} />
+              Current Balance (Central)
+              <input
+                className="form-control form-control-sm billing-input"
+                value={formatFinancialSnapshot(form.current_balance)}
+                readOnly
+                aria-readonly="true"
+              />
             </label>
             <label className="billing-label">
               Address

@@ -1,0 +1,106 @@
+name: V1 Frontend completion acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'src/App.js'
+      - 'src/appRoutes.v1.test.js'
+      - 'src/productsAdminImportStates.v1.test.js'
+      - 'src/pages/SetupScreen.jsx'
+      - 'src/pages/setupScreenResilience.v1.test.js'
+      - 'src/utils/axios.js'
+      - 'src/utils/authResponseStates.v1.test.js'
+      - 'src/utils/appSyncOrchestrator.js'
+      - 'src/utils/appSyncOrchestrator.v1.test.js'
+      - 'src/utils/deltaSync.js'
+      - 'src/utils/deltaSyncAuthority.v1.test.js'
+      - 'src/utils/legacyBrowserSyncAuthority.js'
+      - 'src/utils/legacyBrowserSyncAuthority.v1.test.js'
+      - 'src/utils/sessionStorage.js'
+      - 'src/utils/browserPersistenceBoundary.v1.test.js'
+      - 'src/services/local/syncLocalService.js'
+      - 'src/services/local/offlineLocalService.js'
+      - 'src/utils/staffExpensesSync.js'
+      - 'src/utils/returnsCorrectionsSync.js'
+      - 'src/components/returnsCorrections/ReturnsHeader.jsx'
+      - 'src/components/returnsCorrections/returnsHeaderSyncAuthority.v1.test.js'
+      - 'src/pages/SyncCenter.jsx'
+      - 'src/pages/SyncCenterContent.jsx'
+      - 'src/pages/syncCenterAccess.js'
+      - 'src/pages/syncCenterAccess.v1.test.js'
+      - 'src/pages/billing/RetailBilling.jsx'
+      - 'src/pages/billing/retailBillingCheckout.v1.test.js'
+      - 'src/pages/billing/retailBillingProductSearchAuthority.v1.test.js'
+      - 'src/components/Billing/ProductSearch.jsx'
+      - 'src/components/Billing/productSearchInteraction.v1.test.js'
+      - 'src/components/Billing/CartItemRow.jsx'
+      - 'src/components/Billing/cartItemAccessibility.v1.test.js'
+      - 'src/components/Billing/CameraBarcodeScannerModal.jsx'
+      - 'src/components/Billing/cameraBarcodeAccessibility.v1.test.js'
+      - 'src/components/Billing/GSTTogglePopup.jsx'
+      - 'src/components/Billing/gstFrontendAuthority.v1.test.js'
+      - 'src/store/billingStore.js'
+      - 'src/components/Login/Login.js'
+      - 'src/components/Login/loginInteraction.v1.test.js'
+      - 'src/components/common/PopUp/PopUp.jsx'
+      - 'src/components/common/PopUp/PopupProvider.jsx'
+      - 'src/components/common/PopUp/popupAccessibility.v1.test.js'
+      - 'src/components/common/PopUp/pricingPolicyMessages.v1.test.js'
+      - 'src/Repositories/LocalPosProductRepository.js'
+      - 'src/Repositories/LocalPosProductRepository.batchAuthority.v1.test.js'
+      - 'src/Repositories/LocalPosInventoryRepository.js'
+      - 'src/Repositories/localPosInventoryAuthority.v1.test.js'
+      - 'src/RepositoryFactory/index.js'
+      - 'src/pages/customers/CustomerList.jsx'
+      - 'src/pages/customers/customerListStates.v1.test.js'
+      - 'src/pages/returnsCorrections/SalesReturn.jsx'
+      - 'src/pages/returnsCorrections/salesReturnAuthority.v1.test.js'
+      - 'src/mobile/pages/ReportsMobile.jsx'
+      - 'src/mobile/pages/reportsMobileTruthStates.v1.test.js'
+      - 'src/utils/offlineProducts.js'
+      - 'src/utils/offlineProductsAuthority.v1.test.js'
+      - '.github/workflows/v1-frontend-completion.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Focused V1 Frontend completion acceptance
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/appRoutes.v1.test.js
+          src/productsAdminImportStates.v1.test.js
+          src/pages/setupScreenResilience.v1.test.js
+          src/utils/authResponseStates.v1.test.js
+          src/utils/appSyncOrchestrator.v1.test.js
+          src/utils/deltaSyncAuthority.v1.test.js
+          src/utils/legacyBrowserSyncAuthority.v1.test.js
+          src/utils/browserPersistenceBoundary.v1.test.js
+          src/pages/syncCenterAccess.v1.test.js
+          src/pages/billing/retailBillingCheckout.v1.test.js
+          src/pages/billing/retailBillingProductSearchAuthority.v1.test.js
+          src/components/Billing/productSearchInteraction.v1.test.js
+          src/components/Billing/cartItemAccessibility.v1.test.js
+          src/components/Billing/cameraBarcodeAccessibility.v1.test.js
+          src/components/Billing/gstFrontendAuthority.v1.test.js
+          src/components/Login/loginInteraction.v1.test.js
+          src/components/common/PopUp/popupAccessibility.v1.test.js
+          src/components/common/PopUp/pricingPolicyMessages.v1.test.js
+          src/Repositories/LocalPosProductRepository.batchAuthority.v1.test.js
+          src/Repositories/localPosInventoryAuthority.v1.test.js
+          src/pages/customers/customerListStates.v1.test.js
+          src/pages/returnsCorrections/salesReturnAuthority.v1.test.js
+          src/components/returnsCorrections/returnsHeaderSyncAuthority.v1.test.js
+          src/mobile/pages/reportsMobileTruthStates.v1.test.js
+          src/utils/offlineProductsAuthority.v1.test.js
+      - name: Production build
+        run: CI=false npm run build

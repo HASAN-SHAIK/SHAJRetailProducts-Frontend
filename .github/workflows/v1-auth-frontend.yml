@@ -1,0 +1,34 @@
+name: V1 Authentication Authorization frontend
+
+on:
+  pull_request:
+    paths:
+      - 'src/components/Login/Login.js'
+      - 'src/components/common/protectedRoute.jsx'
+      - 'src/components/common/authFrontend.v1Acceptance.test.js'
+      - 'src/pages/Logout.jsx'
+      - 'src/Repositories/local/posLocalApiClient.js'
+      - 'src/services/authService.js'
+      - 'src/utils/axios.js'
+      - 'src/utils/sessionStorage.js'
+      - '.github/workflows/v1-auth-frontend.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Focused V1 Frontend auth acceptance
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/components/common/authFrontend.v1Acceptance.test.js
+      - name: Production build
+        run: CI=false npm run build

@@ -15,11 +15,14 @@ import './ReturnsCorrections.css';
 const SalesReturn = () => {
   const { showPopup } = usePopup();
   const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [items, setItems] = useState([]);
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState('');
   const [autoAdjustBill, setAutoAdjustBill] = useState(true);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const localPosMode = isLocalPosEnabled();
@@ -41,36 +44,45 @@ const SalesReturn = () => {
   };
 
   const loadOrders = useCallback(async () => {
-    if (localPosMode) {
-      try {
-        const result = await getOrderRepository().listOrders({ limit: 200 });
-        const list = Array.isArray(result?.list) ? result.list : [];
-        setOrders(list);
-        return;
-      } catch {
-        // Fall back to the local browser cache if the loopback POS service is unavailable.
+    setOrdersLoading(true);
+    setOrdersError('');
+    try {
+      if (localPosMode) {
+        try {
+          const result = await getOrderRepository().listOrders({ limit: 200 });
+          const list = Array.isArray(result?.list) ? result.list : [];
+          setOrders(list);
+          return;
+        } catch {
+          setOrdersError('Local POS orders are unavailable. Retry after the POS service is reachable.');
+          return;
+        }
       }
-    }
 
-    if (navigator.onLine) {
-      try {
-        const list = await fetchAllSalesOrders();
-        setOrders(list);
-        return;
-      } catch {
-        // fallback to local cache
+      if (navigator.onLine) {
+        try {
+          const list = await fetchAllSalesOrders();
+          setOrders(list);
+          return;
+        } catch {
+          // Legacy non-local-POS deployments may continue to the browser cache.
+        }
       }
+      const localList = await getAllOrderRecords();
+      setOrders(localList);
+    } finally {
+      setOrdersLoading(false);
     }
-    const localList = await getAllOrderRecords();
-    setOrders(localList);
   }, [localPosMode]);
 
   const loadItems = useCallback(async () => {
     if (!selectedOrderId) {
       setItems([]);
+      setItemsError('');
       return;
     }
     setItemsLoading(true);
+    setItemsError('');
     try {
       let orderItems = [];
       if (localPosMode) {
@@ -82,7 +94,9 @@ const SalesReturn = () => {
               ? detail.products
               : [];
         } catch {
-          orderItems = await getOrderItemsByOrderId(selectedOrderId);
+          setItems([]);
+          setItemsError('Local POS bill details are unavailable. Retry this bill before returning items.');
+          return;
         }
       } else {
         orderItems = await getOrderItemsByOrderId(selectedOrderId);
@@ -392,15 +406,26 @@ const SalesReturn = () => {
     <div className="returns-page">
       <ReturnsHeader title="Sales Return" />
       <div className="returns-card">
+        {ordersError && (
+          <div className="alert alert-danger d-flex align-items-center justify-content-between gap-2" role="alert">
+            <span>{ordersError}</span>
+            <button type="button" className="btn btn-sm btn-outline-danger" onClick={loadOrders} disabled={ordersLoading}>
+              {ordersLoading ? 'Retrying...' : 'Retry POS orders'}
+            </button>
+          </div>
+        )}
         <div className="row g-2">
           <div className="col-md-4">
-            <label className="form-label">Original Bill</label>
+            <label className="form-label" htmlFor="sales-return-original-bill">Original Bill</label>
             <select
+              id="sales-return-original-bill"
               className="form-select"
               value={selectedOrderId}
               onChange={(event) => setSelectedOrderId(event.target.value)}
+              disabled={ordersLoading || Boolean(ordersError)}
+              aria-busy={ordersLoading ? 'true' : 'false'}
             >
-              <option value="">Select bill</option>
+              <option value="">{ordersLoading ? 'Loading bills...' : 'Select bill'}</option>
               {orders.map((order) => (
                 <option key={order.id} value={order.id}>
                   {getBillOptionLabel(order)}
@@ -409,8 +434,13 @@ const SalesReturn = () => {
             </select>
           </div>
           <div className="col-md-4">
-            <label className="form-label">Reason</label>
-            <input className="form-control" value={reason} onChange={(event) => setReason(event.target.value)} />
+            <label className="form-label" htmlFor="sales-return-reason">Reason</label>
+            <input
+              id="sales-return-reason"
+              className="form-control"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
           </div>
           <div className="col-md-4">
             <span className="badge-flag">Refund: {summary.refund.toFixed(2)} | Tax: {summary.tax.toFixed(2)}</span>
@@ -441,7 +471,15 @@ const SalesReturn = () => {
       />
 
       <div className="returns-card">
-        <table className="returns-table">
+        {itemsError && (
+          <div className="alert alert-danger d-flex align-items-center justify-content-between gap-2" role="alert">
+            <span>{itemsError}</span>
+            <button type="button" className="btn btn-sm btn-outline-danger" onClick={loadItems} disabled={itemsLoading}>
+              {itemsLoading ? 'Retrying...' : 'Retry bill'}
+            </button>
+          </div>
+        )}
+        <table className="returns-table" aria-busy={itemsLoading ? 'true' : 'false'}>
           <thead>
             <tr>
               <th>Product</th>
@@ -461,14 +499,14 @@ const SalesReturn = () => {
                 </td>
               </tr>
             )}
-            {!itemsLoading && items.length === 0 && (
+            {!itemsLoading && !itemsError && items.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center text-secondary">
                   No items for this bill.
                 </td>
               </tr>
             )}
-            {items.map((row, idx) => {
+            {!itemsError && items.map((row, idx) => {
               const lineState = getReturnLineState(row);
               return (
                 <tr key={`${row.orderItemId || row.productId}-${idx}`}>
@@ -486,6 +524,7 @@ const SalesReturn = () => {
                       max={lineState.remaining}
                       step="0.001"
                       disabled={!lineState.isReturnable || submitting}
+                      aria-label={`Return quantity for ${row.name}`}
                       onChange={(event) => handleQtyChange(idx, event.target.value)}
                     />
                   </td>
@@ -496,7 +535,7 @@ const SalesReturn = () => {
           </tbody>
         </table>
         <div className="returns-actions" style={{ marginTop: 12 }}>
-          <button className="btn btn-primary" type="button" onClick={handleSubmit} disabled={submitting}>
+          <button className="btn btn-primary" type="button" onClick={handleSubmit} disabled={submitting || Boolean(itemsError) || Boolean(ordersError)}>
             {submitting ? 'Processing...' : 'Save Return'}
           </button>
         </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 
-const ProductSearch = ({ value, suggestions, loading, onChange, onSelect }) => (
-  <div className="billing-search">
+const ProductSearch = ({ value, suggestions, loading, error, onChange, onSelect, onRetry }) => (
+  <div className="billing-search" aria-busy={loading}>
     <label className="billing-label">
       Search Product
       <input
@@ -11,7 +11,21 @@ const ProductSearch = ({ value, suggestions, loading, onChange, onSelect }) => (
         placeholder="Search by name, company, or barcode"
       />
     </label>
-    {loading && <div className="billing-search-status">Searching...</div>}
+    {loading && (
+      <div className="billing-search-status" role="status" aria-live="polite">
+        Searching...
+      </div>
+    )}
+    {error && (
+      <div className="alert alert-danger d-flex align-items-center justify-content-between gap-2" role="alert">
+        <span>{error}</span>
+        {onRetry && (
+          <button type="button" className="btn btn-sm btn-outline-danger" onClick={onRetry} disabled={loading}>
+            {loading ? 'Retrying...' : 'Retry POS search'}
+          </button>
+        )}
+      </div>
+    )}
     {suggestions.length > 0 && (
       <div className="billing-search-list">
         {suggestions.map((item, idx) => (
@@ -19,7 +33,6 @@ const ProductSearch = ({ value, suggestions, loading, onChange, onSelect }) => (
             key={`${item.key || item.id || item.product_id || item.barcode || item.name}-${item.batch_id || 'no-batch'}-${idx}`}
             type="button"
             className="billing-search-item"
-            onPointerDown={() => onSelect(item)}
             onClick={(event) => {
               event.preventDefault();
               onSelect(item);

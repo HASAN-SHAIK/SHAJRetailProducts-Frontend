@@ -22,6 +22,7 @@ const CartItemRow = ({
   const [qtyDraft, setQtyDraft] = useState(String(item.qty ?? ''));
   const [showActualPrice, setShowActualPrice] = useState(false);
   const actualPrice = Number(item?.actual_price ?? item?.purchase_price ?? 0);
+  const itemName = String(item?.name || 'item');
 
   useEffect(() => {
     setQtyDraft(String(item.qty ?? ''));
@@ -57,6 +58,7 @@ const CartItemRow = ({
           min="0"
           step={weightBased ? '0.01' : '1'}
           value={qtyDraft}
+          aria-label={`Quantity for ${itemName}`}
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => setQtyDraft(event.target.value)}
           onBlur={commitQty}
@@ -74,6 +76,7 @@ const CartItemRow = ({
             type="number"
             min="0"
             value={item.price}
+            aria-label={`Price for ${itemName}`}
             readOnly={!canEditPrice}
             disabled={!canEditPrice}
             onClick={(event) => event.stopPropagation()}
@@ -87,6 +90,8 @@ const CartItemRow = ({
               <button
                 type="button"
                 className="btn btn-sm btn-outline-secondary billing-actual-toggle"
+                aria-label={`${showActualPrice ? 'Hide' : 'Show'} actual price for ${itemName}`}
+                aria-expanded={showActualPrice}
                 onClick={(event) => {
                   event.stopPropagation();
                   setShowActualPrice((prev) => !prev);
@@ -110,6 +115,7 @@ const CartItemRow = ({
         <button
           type="button"
           className="btn btn-sm btn-outline-danger"
+          aria-label={`Remove ${itemName}`}
           onClick={(event) => {
             event.stopPropagation();
             onRemove(item.key);

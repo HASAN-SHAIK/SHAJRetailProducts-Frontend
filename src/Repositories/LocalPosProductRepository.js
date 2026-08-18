@@ -19,6 +19,28 @@ const normalizeProduct = (product) => {
 
 /** Keeps existing IndexedDB cache behavior while sourcing sale-time catalog data locally. */
 export class LocalPosProductRepository extends ApiProductRepository {
+  async updateBatchesBulk(batches) {
+    if (isLocalPosEnabled()) {
+      const error = new Error('Batch changes are Central-authoritative while local POS mode is enabled.');
+      error.code = 'LOCAL_POS_BATCH_MUTATION_CENTRAL_ONLY';
+      throw error;
+    }
+    return super.updateBatchesBulk(batches);
+  }
+
+  async searchLocalCatalog(search = '', limit = 50) {
+    if (!isLocalPosEnabled()) return [];
+    const query = String(search || '').trim();
+    if (!query) return [];
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const payload = await localPosRequest(
+      `/catalog/products?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(safeLimit))}`
+    );
+    const products = Array.isArray(payload?.items) ? payload.items.map(normalizeProduct) : [];
+    if (products.length) await this.cache.updateProductsBulk(products).catch(() => {});
+    return products;
+  }
+
   async getProductByBarcode(barcode, branchId = null) {
     if (!isLocalPosEnabled()) return super.getProductByBarcode(barcode, branchId);
     const normalizedBarcode = normalizeBarcode(barcode);

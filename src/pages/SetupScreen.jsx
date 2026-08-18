@@ -14,7 +14,7 @@ const SetupScreen = () => {
   const setupVideoSrc = `${process.env.PUBLIC_URL || ''}/videoes/SettingUp%20Video.mp4`;
   const videoRef = useRef(null);
   const hasMarkedPlayedRef = useRef(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [skipVideoToday, setSkipVideoToday] = useState(() => {
     try {
       const today = getTodayKey();
@@ -79,13 +79,16 @@ const SetupScreen = () => {
               autoPlay
               muted={isMuted}
               playsInline
+              aria-label="Business setup progress video"
               onClick={handleVideoClick}
               onPlay={markPlayedToday}
               onEnded={() => setVideoDone(true)}
+              onError={() => setVideoDone(true)}
             />
             <button
               className="setup-unmute"
               type="button"
+              aria-label={isMuted ? 'Unmute setup video' : 'Mute setup video'}
               onClick={isMuted ? handleUnmute : handleMute}
             >
               {isMuted ? 'Tap To Unmute' : 'Tap To Mute'}
@@ -94,8 +97,8 @@ const SetupScreen = () => {
         )}
         <div className="setup-caption">SettingUp Video</div>
       </div>
-      <div className={`setup-status${videoDone ? ' setup-status--done' : ''}`}>
-        <span className="setup-spinner" />
+      <div className={`setup-status${videoDone ? ' setup-status--done' : ''}`} role="status" aria-live="polite">
+        <span className="setup-spinner" aria-hidden="true" />
         <span>Setting Up Your Business</span>
       </div>
     </div>

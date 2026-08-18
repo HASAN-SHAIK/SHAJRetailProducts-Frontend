@@ -7,6 +7,7 @@ import {
   upsertReturn,
 } from '../services/returnsCorrectionsApi';
 import * as returnsLocal from '../services/local/returnsLocalService';
+import { isLegacyBrowserSyncAllowed, localPosSyncSkippedResult } from './legacyBrowserSyncAuthority';
 
 const normalizeAction = (value) => {
   const action = String(value || '').toUpperCase();
@@ -60,6 +61,9 @@ const syncGstEntry = async (entry) => {
 };
 
 export const syncReturnsCorrections = async () => {
+  if (!isLegacyBrowserSyncAllowed()) {
+    return localPosSyncSkippedResult({ processed: 0, failed: 0 });
+  }
   if (!navigator.onLine) return { processed: 0, failed: 0 };
 
   const [returns, corrections, gstEntries] = await Promise.all([
@@ -102,6 +106,9 @@ export const syncReturnsCorrections = async () => {
 };
 
 export const pullReturnsCorrectionsFromServer = async () => {
+  if (!isLegacyBrowserSyncAllowed()) {
+    return localPosSyncSkippedResult();
+  }
   if (!navigator.onLine) return;
   const { fetchReturns, fetchCorrections, fetchGstLedger } = await import('../services/returnsCorrectionsApi');
   const { fetchEwayBillsRemote } = await import('../Repositories/api/reportApiClient');
@@ -128,6 +135,9 @@ export const pullReturnsCorrectionsFromServer = async () => {
 export const syncReturnsCorrectionsQueue = syncReturnsCorrections;
 
 export const syncAllReturnsCorrections = async (options = {}) => {
+  if (!isLegacyBrowserSyncAllowed()) {
+    return localPosSyncSkippedResult({ processed: 0, failed: 0 });
+  }
   const queueResult = await syncReturnsCorrections();
   if (!navigator.onLine) return queueResult;
   const refreshRemote = options?.refreshRemote !== false;

@@ -7,6 +7,11 @@ import { setUserDetails } from '../../store/userSlice';
 import { clearTenantState } from '../../store/tenantSlice';
 import { useSelector } from 'react-redux';
 import { getSessionInfo } from '../../utils/sessionStorage';
+import {
+  isLocalPosEnabled,
+  validateLocalPosSession,
+} from '../../Repositories/local/posLocalApiClient';
+
 const ProtectedRoute = ({ children }) => {
   const [isAuth, setIsAuth] = useState(null);
   const [authMode, setAuthMode] = useState('online');
@@ -31,10 +36,18 @@ const ProtectedRoute = ({ children }) => {
           return;
         }
         const networkDown = status === 0 || err?.isNetworkError || !navigator.onLine;
-        if (networkDown) {
+        if (networkDown && isLocalPosEnabled()) {
           const session = await getSessionInfo().catch(() => null);
           const localUser = userDetails || session?.user || null;
           if (localUser) {
+            try {
+              await validateLocalPosSession();
+            } catch {
+              setAuthMode('offline');
+              setIsAuth(false);
+              return;
+            }
+            if (!active) return;
             if (!userDetails) {
               dispatch(setUserDetails(localUser));
             }

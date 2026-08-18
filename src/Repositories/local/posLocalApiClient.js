@@ -102,6 +102,12 @@ export const loginLocalPosUser = async ({ userId, pin }) => {
   return payload;
 };
 
+// Validate the browser's POS session against POSService itself. A cached Central
+// user is not sufficient offline authority: the local session token must still
+// be accepted by the on-device runtime.
+export const validateLocalPosSession = async () =>
+  request('/diagnostics', { method: 'GET', requireSession: true });
+
 export const logoutLocalPosUser = async () => {
   try { await request('/auth/logout', { method: 'POST' }); } finally { clearLocalPosSession(); }
 };
