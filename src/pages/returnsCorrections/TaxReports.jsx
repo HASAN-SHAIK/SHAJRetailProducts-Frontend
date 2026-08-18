@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ReturnsHeader from '../../components/returnsCorrections/ReturnsHeader';
 import { getLocalGstEntries } from '../../services/local';
 import { fetchGstReports } from '../../services/returnsCorrectionsApi';
+import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 import './ReturnsCorrections.css';
 
 const TaxReports = () => {
@@ -9,9 +10,12 @@ const TaxReports = () => {
   const [to, setTo] = useState('');
   const [entries, setEntries] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const loadEntries = useCallback(async () => {
     setIsLoading(true);
+    setLoadError('');
+    const centralReportingRequired = isLocalPosEnabled();
     try {
       if (navigator.onLine) {
         try {
@@ -29,12 +33,29 @@ const TaxReports = () => {
             }))
           );
           return;
-        } catch {
-          // fallback to local
+        } catch (error) {
+          if (centralReportingRequired) {
+            setEntries([]);
+            setLoadError(
+              error?.response?.data?.message ||
+              'Central GST reporting is unavailable. Check the connection and retry.'
+            );
+            return;
+          }
         }
+      } else if (centralReportingRequired) {
+        setEntries([]);
+        setLoadError('GST reports require Central reporting authority. Reconnect and retry.');
+        return;
       }
-      const list = await getLocalGstEntries({ from, to });
-      setEntries(list);
+
+      try {
+        const list = await getLocalGstEntries({ from, to });
+        setEntries(list);
+      } catch (error) {
+        setEntries([]);
+        setLoadError(error?.message || 'Failed to load GST entries. Retry the report.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -63,17 +84,17 @@ const TaxReports = () => {
   }, [entries]);
 
   return (
-    <div className="returns-page">
+    <div className="returns-page" aria-busy={isLoading}>
       <ReturnsHeader title="Tax Reports" />
       <div className="returns-card">
         <div className="row g-2">
           <div className="col-md-3">
-            <label className="form-label">From</label>
-            <input type="date" className="form-control" value={from} onChange={(event) => setFrom(event.target.value)} />
+            <label className="form-label" htmlFor="tax-report-from">From</label>
+            <input id="tax-report-from" type="date" className="form-control" value={from} onChange={(event) => setFrom(event.target.value)} />
           </div>
           <div className="col-md-3">
-            <label className="form-label">To</label>
-            <input type="date" className="form-control" value={to} onChange={(event) => setTo(event.target.value)} />
+            <label className="form-label" htmlFor="tax-report-to">To</label>
+            <input id="tax-report-to" type="date" className="form-control" value={to} onChange={(event) => setTo(event.target.value)} />
           </div>
           <div className="col-md-6">
             <span className="badge-flag">CGST {totals.cgst.toFixed(2)} | SGST {totals.sgst.toFixed(2)} | IGST {totals.igst.toFixed(2)}</span>
@@ -81,6 +102,14 @@ const TaxReports = () => {
         </div>
       </div>
       <div className="returns-card">
+        {loadError && !isLoading && (
+          <div className="alert alert-danger d-flex justify-content-between align-items-center gap-2" role="alert">
+            <span>{loadError}</span>
+            <button type="button" className="btn btn-outline-danger btn-sm" onClick={loadEntries}>
+              Retry GST report
+            </button>
+          </div>
+        )}
         <table className="returns-table">
           <thead>
             <tr>
@@ -96,19 +125,19 @@ const TaxReports = () => {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={7} className="text-center text-secondary">
+                <td colSpan={7} className="text-center text-secondary" role="status">
                   Loading GST entries...
                 </td>
               </tr>
             )}
-            {!isLoading && entries.length === 0 && (
+            {!isLoading && !loadError && entries.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center text-secondary">
                   No GST entries.
                 </td>
               </tr>
             )}
-            {entries.map((entry) => (
+            {!loadError && entries.map((entry) => (
               <tr key={entry.gstEntryId}>
                 <td>{entry.date}</td>
                 <td>{entry.billId}</td>
