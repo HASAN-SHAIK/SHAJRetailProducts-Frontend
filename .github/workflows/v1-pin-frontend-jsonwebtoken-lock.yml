@@ -21,19 +21,25 @@ jobs:
           ref: v1/security-pin-frontend-jsonwebtoken
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      - name: Refresh lockfile metadata without changing resolved versions
-        run: npm install --package-lock-only --ignore-scripts
-      - name: Verify jsonwebtoken remains resolved to 9.0.2
-        run: node -e "const l=require('./package-lock.json'); if(l.packages?.['node_modules/jsonwebtoken']?.version !== '9.0.2') process.exit(1)"
+          node-version: '24'
+      - name: Update only root lockfile dependency metadata
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('package-lock.json')
+          text = path.read_text()
+          old = '        "jsonwebtoken": "latest",'
+          new = '        "jsonwebtoken": "9.0.2",'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one root jsonwebtoken latest spec, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Verify locked resolution and exact manifest spec
+        run: node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.dependencies?.jsonwebtoken !== '9.0.2' || l.packages?.['']?.dependencies?.jsonwebtoken !== '9.0.2' || l.packages?.['node_modules/jsonwebtoken']?.version !== '9.0.2') process.exit(1)"
       - name: Commit refreshed lock metadata
         run: |
-          if git diff --quiet -- package-lock.json; then
-            echo 'package-lock.json already matches package.json'
-            exit 0
-          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add package-lock.json
-          git commit -m 'Refresh Frontend jsonwebtoken lock metadata'
+          git commit -m 'Pin Frontend jsonwebtoken lock metadata'
           git push origin HEAD:v1/security-pin-frontend-jsonwebtoken
