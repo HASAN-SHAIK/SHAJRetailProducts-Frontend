@@ -1,0 +1,39 @@
+name: V1 pin Frontend jsonwebtoken lock metadata
+
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - '.github/workflows/v1-pin-frontend-jsonwebtoken-lock.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lock-metadata:
+    if: github.head_ref == 'v1/security-pin-frontend-jsonwebtoken'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v1/security-pin-frontend-jsonwebtoken
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Refresh lockfile metadata without changing resolved versions
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Verify jsonwebtoken remains resolved to 9.0.2
+        run: node -e "const l=require('./package-lock.json'); if(l.packages?.['node_modules/jsonwebtoken']?.version !== '9.0.2') process.exit(1)"
+      - name: Commit refreshed lock metadata
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo 'package-lock.json already matches package.json'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          git commit -m 'Refresh Frontend jsonwebtoken lock metadata'
+          git push origin HEAD:v1/security-pin-frontend-jsonwebtoken
