@@ -21,7 +21,7 @@ jobs:
           ref: v1/security-pin-frontend-jsonwebtoken
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
       - name: Refresh lockfile metadata without changing resolved versions
         run: npm install --package-lock-only --ignore-scripts
       - name: Verify jsonwebtoken remains resolved to 9.0.2
