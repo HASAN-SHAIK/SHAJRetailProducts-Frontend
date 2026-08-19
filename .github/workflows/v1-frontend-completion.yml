@@ -30,6 +30,7 @@ on:
       - 'src/pages/SyncCenterContent.jsx'
       - 'src/pages/syncCenterAccess.js'
       - 'src/pages/syncCenterAccess.v1.test.js'
+      - 'src/pages/syncCenterObservability.v1.test.js'
       - 'src/pages/billing/RetailBilling.jsx'
       - 'src/pages/billing/retailBillingCheckout.v1.test.js'
       - 'src/pages/billing/retailBillingProductSearchAuthority.v1.test.js'
@@ -59,6 +60,7 @@ on:
       - 'src/pages/returnsCorrections/salesReturnAuthority.v1.test.js'
       - 'src/pages/returnsCorrections/TaxReports.jsx'
       - 'src/pages/returnsCorrections/taxReportsAuthority.v1.test.js'
+      - 'src/components/returnsCorrections/returnsHeaderSyncAuthority.v1.test.js'
       - 'src/mobile/pages/ReportsMobile.jsx'
       - 'src/mobile/pages/reportsMobileTruthStates.v1.test.js'
       - 'src/utils/offlineProducts.js'
@@ -91,6 +93,7 @@ jobs:
           src/utils/legacyBrowserSyncAuthority.v1.test.js
           src/utils/browserPersistenceBoundary.v1.test.js
           src/pages/syncCenterAccess.v1.test.js
+          src/pages/syncCenterObservability.v1.test.js
           src/pages/billing/retailBillingCheckout.v1.test.js
           src/pages/billing/retailBillingProductSearchAuthority.v1.test.js
           src/components/Billing/productSearchInteraction.v1.test.js
