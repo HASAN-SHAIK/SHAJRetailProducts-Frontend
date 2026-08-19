@@ -1,0 +1,28 @@
+name: V1 Frontend deployment acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.env.example'
+      - 'nginx.conf'
+      - 'scripts/v1-deployment-frontend-acceptance.js'
+      - '.github/workflows/v1-deployment-frontend.yml'
+
+jobs:
+  deployment-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Validate deployment context
+        run: node scripts/v1-deployment-frontend-acceptance.js
+      - name: Build production frontend
+        env:
+          CI: 'false'
+        run: npm run build
