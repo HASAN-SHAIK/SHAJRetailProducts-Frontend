@@ -53,6 +53,8 @@ on:
       - 'src/Repositories/LocalPosProductRepository.batchAuthority.v1.test.js'
       - 'src/Repositories/LocalPosInventoryRepository.js'
       - 'src/Repositories/localPosInventoryAuthority.v1.test.js'
+      - 'src/components/ProductsPage/ProductsPage.jsx'
+      - 'src/components/ProductsPage/stockModalStates.v1.test.js'
       - 'src/RepositoryFactory/index.js'
       - 'src/pages/customers/CustomerList.jsx'
       - 'src/pages/customers/customerListStates.v1.test.js'
@@ -105,6 +107,7 @@ jobs:
           src/components/common/PopUp/pricingPolicyMessages.v1.test.js
           src/Repositories/LocalPosProductRepository.batchAuthority.v1.test.js
           src/Repositories/localPosInventoryAuthority.v1.test.js
+          src/components/ProductsPage/stockModalStates.v1.test.js
           src/pages/customers/customerListStates.v1.test.js
           src/pages/returnsCorrections/salesReturnAuthority.v1.test.js
           src/pages/returnsCorrections/taxReportsAuthority.v1.test.js
