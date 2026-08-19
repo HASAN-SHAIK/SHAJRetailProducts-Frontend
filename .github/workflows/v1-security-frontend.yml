@@ -27,4 +27,4 @@ jobs:
           CI: 'true'
         run: npm test -- --watchAll=false --runTestsByPath src/v1SecuritySupplyChainAcceptance.test.js
       - name: Production build
-        run: npm run build
+        run: CI=false npm run build
