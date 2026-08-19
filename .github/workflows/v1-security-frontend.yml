@@ -1,0 +1,30 @@
+name: V1 Frontend Security acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/v1SecuritySupplyChainAcceptance.test.js'
+      - '.github/workflows/v1-security-frontend.yml'
+  workflow_dispatch:
+
+jobs:
+  frontend-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run V1 Frontend Security acceptance
+        env:
+          CI: 'true'
+        run: npm test -- --watchAll=false --runTestsByPath src/v1SecuritySupplyChainAcceptance.test.js
+      - name: Production build
+        run: CI=false npm run build
