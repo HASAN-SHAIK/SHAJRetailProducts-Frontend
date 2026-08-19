@@ -30,7 +30,7 @@ for (const key of ['REACT_APP_POS_LOCAL_API_TOKEN', 'REACT_APP_RESUME_PASSWORD']
   }
 }
 
-if (/^REACT_APP_[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN)\s*=\s*[^\s#]+/m.test(envExample)) {
+if (/^REACT_APP_[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN)[ \t]*=[ \t]*[^\s#]+/m.test(envExample)) {
   throw new Error('Committed REACT_APP secret/token/password values are forbidden');
 }
 
