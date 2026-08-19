@@ -1,0 +1,62 @@
+name: Apply V1 stock modal patch
+
+on:
+  push:
+    branches:
+      - v1/inventory-stock-modal-states
+    paths:
+      - '.github/workflows/v1-stock-modal-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v1/inventory-stock-modal-states
+      - name: Apply targeted stock modal state patch
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('src/components/ProductsPage/ProductsPage.jsx')
+          text = path.read_text()
+
+          replacements = []
+          replacements.append((
+          """ const [stockModalOpen, setStockModalOpen] = useState(false);\n const [stockLoading, setStockLoading] = useState(false);\n const [stockRows, setStockRows] = useState([]);\n const [stockTarget, setStockTarget] = useState(null);""",
+          """ const [stockModalOpen, setStockModalOpen] = useState(false);\n const [stockLoading, setStockLoading] = useState(false);\n const [stockError, setStockError] = useState('');\n const [stockRows, setStockRows] = useState([]);\n const [stockTarget, setStockTarget] = useState(null);"""
+          ))
+
+          replacements.append((
+          """  const openStockModal = async (product) => {\n    if (!product?.id) return;\n    setStockTarget(product);\n    setStockModalOpen(true);\n    setStockLoading(true);\n    try {\n      const payload = await getBranchStock(product.id);\n      setStockRows(Array.isArray(payload) ? payload : []);\n    } catch (err) {\n      setStockRows([]);\n      showPopup('Failed to load branch stock.', 'Error');\n    } finally {\n      setStockLoading(false);\n    }\n  };\n\n  const closeStockModal = () => {\n    setStockModalOpen(false);\n    setStockTarget(null);\n    setStockRows([]);\n  };""",
+          """  const loadStockForProduct = async (product) => {\n    if (!product?.id) return;\n    setStockLoading(true);\n    setStockError('');\n    try {\n      const payload = await getBranchStock(product.id);\n      setStockRows(Array.isArray(payload) ? payload : []);\n    } catch (err) {\n      setStockRows([]);\n      setStockError('POS inventory is unavailable. Check POSService and retry.');\n    } finally {\n      setStockLoading(false);\n    }\n  };\n\n  const openStockModal = async (product) => {\n    if (!product?.id) return;\n    setStockTarget(product);\n    setStockModalOpen(true);\n    await loadStockForProduct(product);\n  };\n\n  const retryStockModal = () => {\n    if (stockTarget) void loadStockForProduct(stockTarget);\n  };\n\n  const closeStockModal = () => {\n    setStockModalOpen(false);\n    setStockTarget(null);\n    setStockRows([]);\n    setStockError('');\n  };"""
+          ))
+
+          replacements.append((
+          """                    {stockLoading && (\n                      <tr>\n                        <td colSpan={2} className=\"text-center\">Loading...</td>\n                      </tr>\n                    )}\n                    {!stockLoading && stockRows.length === 0 && (\n                      <tr>\n                        <td colSpan={2} className=\"text-center\">No stock data.</td>\n                      </tr>\n                    )}\n                    {!stockLoading && stockRows.map((row) => (\n                      <tr key={row.branch_id || row.branch}>\n                        <td>{row.branch || '-'}</td>\n                        <td className=\"text-end\">{row.quantity ?? 0}</td>\n                      </tr>\n                    ))}""",
+          """                    {stockLoading && (\n                      <tr>\n                        <td colSpan={2} className=\"text-center\" role=\"status\">Loading POS inventory...</td>\n                      </tr>\n                    )}\n                    {!stockLoading && stockError && (\n                      <tr>\n                        <td colSpan={2} className=\"text-center\">\n                          <div role=\"alert\" className=\"text-danger mb-2\">{stockError}</div>\n                          <button type=\"button\" className=\"btn btn-outline-primary btn-sm\" onClick={retryStockModal}>\n                            Retry POS inventory\n                          </button>\n                        </td>\n                      </tr>\n                    )}\n                    {!stockLoading && !stockError && stockRows.length === 0 && (\n                      <tr>\n                        <td colSpan={2} className=\"text-center\">No stock data.</td>\n                      </tr>\n                    )}\n                    {!stockLoading && !stockError && stockRows.map((row) => (\n                      <tr key={row.branch_id || row.branch}>\n                        <td>{row.branch || '-'}</td>\n                        <td className=\"text-end\">\n                          <div>{row.quantity ?? 0}</div>\n                          {row.available_milli !== undefined && (\n                            <small className=\"text-muted\">\n                              Reserved {Number(row.reserved_milli ?? 0) / 1000} · Available {Number(row.available_milli ?? 0) / 1000}\n                            </small>\n                          )}\n                        </td>\n                      </tr>\n                    ))}"""
+          ))
+
+          for old, new in replacements:
+            count = text.count(old)
+            if count != 1:
+              raise SystemExit(f'Expected exactly one stock-modal patch target, found {count}')
+            text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+      - name: Commit targeted product-screen change
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/ProductsPage/ProductsPage.jsx
+          git diff --cached --check
+          git commit -m 'Add V1 stock modal error and retry states'
+          git push origin HEAD:v1/inventory-stock-modal-states
