@@ -1,9 +1,9 @@
 jest.mock('../../RepositoryFactory', () => ({
-  getOrderRepository: jest.fn(() => ({})),
+  getOrderRepository: () => ({}),
 }));
 
 jest.mock('../../Repositories/local/posLocalApiClient', () => ({
-  isLocalPosEnabled: jest.fn(() => true),
+  isLocalPosEnabled: () => true,
   localPosRequest: jest.fn(),
 }));
 
@@ -53,8 +53,12 @@ describe('manager-approved refund lifecycle certification', () => {
     });
 
     expect(requestManagerApproval).toHaveBeenCalledTimes(2);
-    expect(requestManagerApproval).toHaveBeenNthCalledWith(1, 'pos:refund');
-    expect(requestManagerApproval).toHaveBeenNthCalledWith(2, 'pos:refund');
+    expect(requestManagerApproval).toHaveBeenNthCalledWith(1, 'pos:refund', {
+      orderId: 'ord-full', actionScope: 'refund_full'
+    });
+    expect(requestManagerApproval).toHaveBeenNthCalledWith(2, 'pos:refund', {
+      orderId: 'ord-partial', actionScope: 'refund_partial'
+    });
 
     expect(localPosRequest).toHaveBeenCalledTimes(4);
     expect(localPosRequest.mock.calls[1][1].approvalToken).toBe('full-refund-token');

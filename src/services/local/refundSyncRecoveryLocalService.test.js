@@ -1,10 +1,10 @@
 jest.mock('../../Repositories/local/posLocalApiClient', () => ({
-  isLocalPosEnabled: jest.fn(() => true),
+  isLocalPosEnabled: () => true,
   localPosRequest: jest.fn(),
 }));
 
 jest.mock('../../utils/device', () => ({
-  getDeviceId: jest.fn(() => 'device-1'),
+  getDeviceId: () => 'device-1',
 }));
 
 jest.mock('../posSyncRecoveryService', () => ({
