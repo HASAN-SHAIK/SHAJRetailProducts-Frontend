@@ -1,11 +1,11 @@
 jest.mock('../../RepositoryFactory', () => ({
-  getOrderRepository: jest.fn(() => ({
+  getOrderRepository: () => ({
     deleteOrder: jest.fn(),
-  })),
+  }),
 }));
 
 jest.mock('../../Repositories/local/posLocalApiClient', () => ({
-  isLocalPosEnabled: jest.fn(() => true),
+  isLocalPosEnabled: () => true,
   localPosRequest: jest.fn(),
 }));
 
