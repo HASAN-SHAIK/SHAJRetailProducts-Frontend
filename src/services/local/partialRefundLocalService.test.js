@@ -1,5 +1,5 @@
 jest.mock('../../Repositories/local/posLocalApiClient', () => ({
-  isLocalPosEnabled: jest.fn(() => true),
+  isLocalPosEnabled: jest.fn(),
   localPosRequest: jest.fn(),
 }));
 
@@ -11,7 +11,7 @@ jest.mock('./refundDiagnosticsEvents', () => ({
   signalRefundDiagnosticsRefresh: jest.fn(),
 }));
 
-import { localPosRequest } from '../../Repositories/local/posLocalApiClient';
+import { isLocalPosEnabled, localPosRequest } from '../../Repositories/local/posLocalApiClient';
 import { requestManagerApproval } from '../managerApprovalService';
 import { signalRefundDiagnosticsRefresh } from './refundDiagnosticsEvents';
 import { refundOrderPartial } from './partialRefundLocalService';
@@ -19,6 +19,7 @@ import { refundOrderPartial } from './partialRefundLocalService';
 describe('local POS partial-refund contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    isLocalPosEnabled.mockReturnValue(true);
   });
 
   test('routes item-level return facts to the existing POS refund endpoint', async () => {
