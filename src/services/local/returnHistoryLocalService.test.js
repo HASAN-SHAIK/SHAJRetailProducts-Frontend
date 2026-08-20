@@ -1,5 +1,5 @@
 jest.mock('../../Repositories/local/posLocalApiClient', () => ({
-  isLocalPosEnabled: jest.fn(() => true),
+  isLocalPosEnabled: () => true,
   localPosRequest: jest.fn(),
 }));
 
