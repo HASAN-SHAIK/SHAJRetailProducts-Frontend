@@ -1,0 +1,12 @@
+# Never send local/build-time environment files into the CRA Docker build context.
+.env
+.env.*
+!.env.example
+
+# Reproducible build/runtime artifacts are created inside the image.
+node_modules
+build
+coverage
+.git
+.github
+*.log
