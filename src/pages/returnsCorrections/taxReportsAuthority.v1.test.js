@@ -29,7 +29,18 @@ describe('V1 GST reporting frontend authority', () => {
     expect(source).toContain('role="alert"');
     expect(source).toContain('Retry GST report');
     expect(source).toContain('!isLoading && !loadError && entries.length === 0');
-    expect(source).toContain('!loadError && entries.map((entry) => (');
+    expect(source).toContain('!loadError && entries.map((entry) => {');
+  });
+
+  test('canonical total GST stays truthful without inventing jurisdiction component splits', () => {
+    expect(source).toContain('taxableAmount: row.taxable_amount ?? 0');
+    expect(source).toContain('totalGst: row.total_gst ?? null');
+    expect(source).toContain('const hasComponentBreakdown = useMemo(');
+    expect(source).toContain('GST {totals.totalGst.toFixed(2)}');
+    expect(source).toContain("{cgst == null ? '—' : cgst.toFixed(2)}");
+    expect(source).toContain("{sgst == null ? '—' : sgst.toFixed(2)}");
+    expect(source).toContain("{igst == null ? '—' : igst.toFixed(2)}");
+    expect(source).toContain('Jurisdiction component split is unavailable for these canonical POS tax snapshots');
   });
 
   test('date filters and loading state expose basic accessible associations', () => {

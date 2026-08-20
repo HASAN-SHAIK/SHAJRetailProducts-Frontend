@@ -1,0 +1,46 @@
+name: V1 Frontend deployment acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.env.example'
+      - 'nginx.conf'
+      - 'scripts/v1-deployment-frontend-acceptance.js'
+      - '.github/workflows/v1-deployment-frontend.yml'
+
+jobs:
+  deployment-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Validate deployment context
+        run: node scripts/v1-deployment-frontend-acceptance.js
+      - name: Build production frontend
+        env:
+          CI: 'false'
+        run: npm run build
+      - name: Build production container
+        run: docker build --pull -t shajretail-frontend:v1-acceptance .
+      - name: Verify nginx static artifact and SPA fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d -p 127.0.0.1:8080:80 shajretail-frontend:v1-acceptance)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/ -o /tmp/root.html; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/nonexistent/v1/deep/link -o /tmp/fallback.html
+          test -s /tmp/root.html
+          cmp /tmp/root.html /tmp/fallback.html
+          grep -q '<div id="root"' /tmp/root.html

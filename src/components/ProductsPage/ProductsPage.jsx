@@ -245,6 +245,7 @@ const ProductsPage = ({ navigate }) => {
  const [savingBulk, setSavingBulk] = useState(false);
  const [stockModalOpen, setStockModalOpen] = useState(false);
  const [stockLoading, setStockLoading] = useState(false);
+ const [stockError, setStockError] = useState('');
  const [stockRows, setStockRows] = useState([]);
  const [stockTarget, setStockTarget] = useState(null);
  const [expandedProductKey, setExpandedProductKey] = useState(null);
@@ -1142,26 +1143,37 @@ const ProductsPage = ({ navigate }) => {
       setDeletingId(null);
     }
   };
-  const openStockModal = async (product) => {
+  const loadStockForProduct = async (product) => {
     if (!product?.id) return;
-    setStockTarget(product);
-    setStockModalOpen(true);
     setStockLoading(true);
+    setStockError('');
     try {
       const payload = await getBranchStock(product.id);
       setStockRows(Array.isArray(payload) ? payload : []);
     } catch (err) {
       setStockRows([]);
-      showPopup('Failed to load branch stock.', 'Error');
+      setStockError('POS inventory is unavailable. Check POSService and retry.');
     } finally {
       setStockLoading(false);
     }
+  };
+
+  const openStockModal = async (product) => {
+    if (!product?.id) return;
+    setStockTarget(product);
+    setStockModalOpen(true);
+    await loadStockForProduct(product);
+  };
+
+  const retryStockModal = () => {
+    if (stockTarget) void loadStockForProduct(stockTarget);
   };
 
   const closeStockModal = () => {
     setStockModalOpen(false);
     setStockTarget(null);
     setStockRows([]);
+    setStockError('');
   };
   const closeImportModal = () => {
     setImportModalOpen(false);
@@ -2218,18 +2230,35 @@ const ProductsPage = ({ navigate }) => {
                   <tbody>
                     {stockLoading && (
                       <tr>
-                        <td colSpan={2} className="text-center">Loading...</td>
+                        <td colSpan={2} className="text-center" role="status">Loading POS inventory...</td>
                       </tr>
                     )}
-                    {!stockLoading && stockRows.length === 0 && (
+                    {!stockLoading && stockError && (
+                      <tr>
+                        <td colSpan={2} className="text-center">
+                          <div role="alert" className="text-danger mb-2">{stockError}</div>
+                          <button type="button" className="btn btn-outline-primary btn-sm" onClick={retryStockModal}>
+                            Retry POS inventory
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                    {!stockLoading && !stockError && stockRows.length === 0 && (
                       <tr>
                         <td colSpan={2} className="text-center">No stock data.</td>
                       </tr>
                     )}
-                    {!stockLoading && stockRows.map((row) => (
+                    {!stockLoading && !stockError && stockRows.map((row) => (
                       <tr key={row.branch_id || row.branch}>
                         <td>{row.branch || '-'}</td>
-                        <td className="text-end">{row.quantity ?? 0}</td>
+                        <td className="text-end">
+                          <div>{row.quantity ?? 0}</div>
+                          {row.available_milli !== undefined && (
+                            <small className="text-muted">
+                              Reserved {Number(row.reserved_milli ?? 0) / 1000} · Available {Number(row.available_milli ?? 0) / 1000}
+                            </small>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

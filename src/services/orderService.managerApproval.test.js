@@ -1,6 +1,6 @@
 jest.mock('./local/orderLocalService', () => ({
   createOrder: jest.fn(),
-  upsertOrderDetailsCache: jest.fn().mockResolvedValue(undefined),
+  upsertOrderDetailsCache: () => Promise.resolve(),
 }));
 
 jest.mock('./managerApprovalService', () => ({
@@ -8,12 +8,12 @@ jest.mock('./managerApprovalService', () => ({
 }));
 
 jest.mock('../utils/offlineOrders', () => ({
-  buildLocalOrderFromEntry: jest.fn(({ id, createdAt, payload }) => ({
+  buildLocalOrderFromEntry: ({ id, createdAt, payload }) => ({
     id,
     created_at: createdAt,
     client_order_id: payload.client_order_id,
     transaction_type: payload.transaction_type || payload.type || 'sale',
-  })),
+  }),
 }));
 
 import { createOrder as createOrderRemote } from './local/orderLocalService';
