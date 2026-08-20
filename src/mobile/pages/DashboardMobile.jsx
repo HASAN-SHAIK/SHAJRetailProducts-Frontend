@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { preloadProductsToIndexedDb } from '../../utils/indexedDb';
 import { getDashboard, getSalesSummary } from '../../services/local';
 import MobileShell from '../components/MobileShell';
 import MetricCard from '../components/MetricCard';
@@ -10,19 +9,10 @@ import OrderItem from '../components/OrderItem';
 const formatCurrency = (value) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
 const DashboardMobile = () => {
-  const preloadRef = useRef(false);
   const [dashboard, setDashboard] = useState(null);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(true);
-
-  useEffect(() => {
-    if (preloadRef.current) return;
-    preloadRef.current = true;
-    preloadProductsToIndexedDb().catch(() => {
-      // Non-blocking for mobile dashboard load.
-    });
-  }, []);
 
   useEffect(() => {
     let active = true;

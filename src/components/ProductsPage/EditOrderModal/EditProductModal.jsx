@@ -121,7 +121,7 @@ const EditProductModal = ({ item, onClose, onSubmit, pieceBasedEnabled = true, w
           <div className={`edit-details-banner ${detailsStatus.state || ''}`}>
             <span>{detailsStatus.message}</span>
             <span className="details-source">
-              Source: {detailsStatus.source === 'server' ? 'Server' : 'IndexedDB'}
+              Source: {detailsStatus.source === 'server' ? 'Server' : 'Local SQLite'}
             </span>
           </div>
         )}

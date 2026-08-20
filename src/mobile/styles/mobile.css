@@ -90,6 +90,11 @@
   border-color: color-mix(in oklab, var(--mobile-accent) 60%, var(--mobile-border));
 }
 
+.mobile-branch-readonly {
+  border-color: color-mix(in oklab, var(--mobile-success) 45%, var(--mobile-border));
+  cursor: default;
+}
+
 .mobile-chip {
   display: inline-flex;
   align-items: center;

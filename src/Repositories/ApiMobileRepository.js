@@ -1,4 +1,3 @@
-import { IndexedDbMobileRepository } from './IndexedDbMobileRepository';
 import {
   fetchMobileDashboardRemote,
   fetchMobileLowStockRemote,
@@ -8,50 +7,36 @@ import {
 
 /** @implements {import('../Interfaces/IMobileRepository').IMobileRepository} */
 export class ApiMobileRepository {
-  constructor() {
-    this.cache = new IndexedDbMobileRepository();
-  }
-
   async getDashboard(options = {}) {
     if (isOnline()) {
       try {
-        const payload = await fetchMobileDashboardRemote(options);
-        if (payload) {
-          await this.cache.cacheDashboard(payload);
-          return payload;
-        }
+        return await fetchMobileDashboardRemote(options);
       } catch {
-        // fall back to cache
+        // fall back to empty payload
       }
     }
-    return this.cache.getDashboard();
+    return null;
   }
 
   async getSalesSummary() {
     if (isOnline()) {
       try {
-        const payload = await fetchMobileSalesSummaryRemote();
-        if (payload) {
-          await this.cache.cacheSalesSummary(payload);
-          return payload;
-        }
+        return await fetchMobileSalesSummaryRemote();
       } catch {
-        // fall back to cache
+        // fall back to empty payload
       }
     }
-    return this.cache.getSalesSummary();
+    return null;
   }
 
   async getLowStock(options = {}) {
     if (isOnline()) {
       try {
-        const payload = await fetchMobileLowStockRemote(options);
-        await this.cache.cacheLowStock(payload);
-        return payload;
+        return await fetchMobileLowStockRemote(options);
       } catch {
-        // fall back to cache
+        // fall back to empty payload
       }
     }
-    return this.cache.getLowStock(options);
+    return { products: [], meta: null };
   }
 }

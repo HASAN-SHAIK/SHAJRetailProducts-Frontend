@@ -11,10 +11,6 @@ import { useDispatch, useSelector } from 'react-redux';
 import Logout from './pages/Logout';
 import { setUserDetails } from './store/userSlice';
 import api from './utils/axios';
-import { preloadAllCaches, preloadOrdersToIndexedDb } from './utils/indexedDb';
-import { startImportSyncWorker, stopImportSyncWorker } from './utils/importSync';
-import { startCustomerSyncWorker, stopCustomerSyncWorker } from './utils/customersSync';
-import { startInventorySyncWorker, stopInventorySyncWorker } from './utils/inventorySync';
 import { setTenantConfig, setTenantConfigStatus, setSubscriptionStatus, setTenantIdentity } from './store/tenantSlice';
 import SubscriptionExpired from './pages/SubscriptionExpired';
 import { decodeJwtPayload } from './utils/jwt';
@@ -74,13 +70,30 @@ import OpeningSetup from './pages/accounts/OpeningSetup';
 // import BillingModule from './modules/billing';
 import BranchDevices from './pages/BranchDevices';
 import SetupScreen from './pages/SetupScreen';
-import { startDefaultOfflineSync, stopDefaultOfflineSync } from './offline-sync';
 import SyncCenter from './pages/SyncCenter';
 import BusinessSetup from './pages/settings/BusinessSetup';
 import { hasFeature, isFeatureEnabled } from './utils/entitlements';
 import { runAppSyncCycle } from './utils/appSyncOrchestrator';
+import { findBranchById, getBranchDisplayName, getBranchId } from './utils/branchLabels';
+import { getLocalPosDevice, isLocalPosEnabled } from './Repositories/local/posLocalApiClient';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
+
+const getLocalPosBranchName = (device, branches = [], fallback = '') => {
+  const storeId = device?.store_id == null ? null : String(device.store_id);
+  const matchedBranch = storeId ? findBranchById(branches, storeId) : null;
+  const matchedName = getBranchDisplayName(matchedBranch);
+  if (matchedName) return matchedName;
+  return getBranchDisplayName(
+    {
+      store_id: device?.store_id,
+      store_name: device?.store_name,
+      name: device?.branch_name,
+      terminal_id: device?.terminal_id,
+    },
+    fallback
+  );
+};
 
 const resolveValidBranchSelection = ({
   branches,
@@ -91,17 +104,17 @@ const resolveValidBranchSelection = ({
   const selected = selectedBranchId ? String(selectedBranchId) : '';
   const branchList = Array.isArray(branches) ? branches : [];
   const restrictedBranch = restrictedBranchId
-    ? branchList.find((branch) => String(branch?.id) === restrictedBranchId)
+    ? findBranchById(branchList, restrictedBranchId)
     : null;
 
   if (restrictedBranch) {
-    return { id: restrictedBranchId, name: restrictedBranch?.name || '' };
+    return { id: restrictedBranchId, name: getBranchDisplayName(restrictedBranch, restrictedBranchId) };
   }
 
   if (selected && selected !== 'all') {
-    const selectedBranch = branchList.find((branch) => String(branch?.id) === selected);
+    const selectedBranch = findBranchById(branchList, selected);
     if (selectedBranch) {
-      return { id: selected, name: selectedBranch?.name || '' };
+      return { id: selected, name: getBranchDisplayName(selectedBranch, selected) };
     }
   }
 
@@ -110,7 +123,9 @@ const resolveValidBranchSelection = ({
   }
 
   const firstBranch = branchList[0];
-  return firstBranch ? { id: firstBranch.id, name: firstBranch?.name || '' } : { id: null, name: '' };
+  return firstBranch
+    ? { id: getBranchId(firstBranch), name: getBranchDisplayName(firstBranch, getBranchId(firstBranch)) }
+    : { id: null, name: '' };
 };
 
 const ScrollToTop = () => {
@@ -134,8 +149,6 @@ function App() {
   const [tenantBanner, setTenantBanner] = useState(null);
   const [isOpeningCompleted, setIsOpeningCompleted] = useState(true);
   const bannerFetchRef = useRef({ userId: null, inFlight: false });
-  const preloadOnceRef = useRef(false);
-  const ordersPreloadOnceRef = useRef(false);
   const setupInProgressRef = useRef(false);
   const setupDidRunRef = useRef(false);
   const initialSyncDoneRef = useRef(false);
@@ -144,8 +157,10 @@ function App() {
   const location = useLocation();
   const { showPopup } = usePopup();
   const setWhatsappEnabled = useWhatsappStore((state) => state.setWhatsappEnabled);
+  const branches = useBranchStore((state) => state.branches);
   const setBranches = useBranchStore((state) => state.setBranches);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
+  const selectedBranchName = useBranchStore((state) => state.selectedBranchName);
   const setSelectedBranchId = useBranchStore((state) => state.setSelectedBranchId);
   const hasAllBranchAccess =
     String(userDetails?.role || '').toLowerCase() === 'admin' ||
@@ -164,16 +179,31 @@ function App() {
   const canUseMobileRoutes = tenantConfigStatus === 'loaded' ? mobileAccessEnabled : true;
   const isStaffUser = String(userDetails?.role || '').toLowerCase() === 'staff';
   const isAdminUser = String(userDetails?.role || '').toLowerCase() === 'admin';
-  const preloadOrdersOnce = async () => {
-    if (ordersPreloadOnceRef.current) return;
-    ordersPreloadOnceRef.current = true;
-    try {
-      await preloadOrdersToIndexedDb();
-    } catch (err) {
-      console.error('Orders preload failed', err);
-      ordersPreloadOnceRef.current = false;
-    }
-  };
+
+  useEffect(() => {
+    const applyLocalPosBranch = async () => {
+      if (!userDetails || !isLocalPosEnabled()) return;
+      try {
+        const device = await getLocalPosDevice();
+        const storeId = device?.store_id == null ? null : String(device.store_id);
+        if (!storeId) return;
+        const branchName = getLocalPosBranchName(device, branches, storeId);
+        if (
+          String(selectedBranchId || '') !== storeId ||
+          String(selectedBranchName || '') !== String(branchName || '')
+        ) {
+          setSelectedBranchId(storeId, {
+            confirmed: true,
+            name: branchName,
+          });
+        }
+      } catch {
+        // The POS branch is applied once POSService is reachable and registered.
+      }
+    };
+    applyLocalPosBranch();
+  }, [branches, userDetails, selectedBranchId, selectedBranchName, setSelectedBranchId]);
+
   useEffect(() => {
     const runSetup = async () => {
       if (!userDetails) {
@@ -190,11 +220,6 @@ function App() {
       setSetupInProgress(true);
       let setupMobileAccessEnabled = false;
       try {
-        await preloadAllCaches().catch((err) => {
-          console.error('IndexedDB preload failed', err);
-        });
-        await preloadOrdersOnce();
-
         if (tenantConfigStatus !== 'loading' && tenantConfigStatus !== 'loaded') {
           dispatch(setTenantConfigStatus('loading'));
         }
@@ -233,19 +258,24 @@ function App() {
             const list = payload?.branches || payload?.data?.branches || payload?.data || [];
             const branches = Array.isArray(list) ? list : [];
             setBranches(branches);
-            const nextBranch = resolveValidBranchSelection({
-              branches,
-              selectedBranchId,
-              hasAllBranchAccess,
-              restrictedBranchId
-            });
-            if (String(selectedBranchId || '') !== String(nextBranch.id || '')) {
-              setSelectedBranchId(nextBranch.id, {
-                confirmed: false,
-                name: nextBranch.name
+            if (!isLocalPosEnabled()) {
+              const nextBranch = resolveValidBranchSelection({
+                branches,
+                selectedBranchId,
+                hasAllBranchAccess,
+                restrictedBranchId
               });
+              if (
+                String(selectedBranchId || '') !== String(nextBranch.id || '') ||
+                String(selectedBranchName || '') !== String(nextBranch.name || '')
+              ) {
+                setSelectedBranchId(nextBranch.id, {
+                  confirmed: false,
+                  name: nextBranch.name
+                });
+              }
+              branchIdForSync = nextBranch.id;
             }
-            branchIdForSync = nextBranch.id;
           } catch {
             // keep previous branches on error
           }
@@ -306,6 +336,7 @@ function App() {
     setBranches,
     setSelectedBranchId,
     selectedBranchId,
+    selectedBranchName,
     hasAllBranchAccess,
     restrictedBranchId,
     isMobileDevice,
@@ -343,16 +374,6 @@ function App() {
   };
   checkSession();
 }, [dispatch, location.pathname, navigate]);
-
-  useEffect(() => {
-    if (!location.pathname.startsWith('/dashboard')) return;
-    if (preloadOnceRef.current) return;
-    if (setupInProgress) return;
-    preloadOnceRef.current = true;
-  preloadAllCaches().catch((err) => {
-    console.error('IndexedDB preload failed', err);
-  });
-}, [location.pathname]);
 
 useEffect(() => {
   if (!userDetails) return;
@@ -482,24 +503,29 @@ useEffect(() => {
       const list = payload?.branches || payload?.data?.branches || payload?.data || [];
       const branches = Array.isArray(list) ? list : [];
       setBranches(branches);
-      const nextBranch = resolveValidBranchSelection({
-        branches,
-        selectedBranchId,
-        hasAllBranchAccess,
-        restrictedBranchId
-      });
-      if (String(selectedBranchId || '') !== String(nextBranch.id || '')) {
-        setSelectedBranchId(nextBranch.id, {
-          confirmed: false,
-          name: nextBranch.name
+      if (!isLocalPosEnabled()) {
+        const nextBranch = resolveValidBranchSelection({
+          branches,
+          selectedBranchId,
+          hasAllBranchAccess,
+          restrictedBranchId
         });
+        if (
+          String(selectedBranchId || '') !== String(nextBranch.id || '') ||
+          String(selectedBranchName || '') !== String(nextBranch.name || '')
+        ) {
+          setSelectedBranchId(nextBranch.id, {
+            confirmed: false,
+            name: nextBranch.name
+          });
+        }
       }
     } catch (err) {
       // Keep previous branches on error to avoid flicker/reset.
     }
   };
   fetchBranches();
-}, [userDetails, selectedBranchId, setBranches, setSelectedBranchId, hasAllBranchAccess, restrictedBranchId]);
+}, [userDetails, selectedBranchId, selectedBranchName, setBranches, setSelectedBranchId, hasAllBranchAccess, restrictedBranchId]);
 
 useEffect(() => {
   const registerDeviceForBranch = async () => {
@@ -582,18 +608,12 @@ useEffect(() => {
   window.addEventListener('online', syncOfflineOrders);
   window.addEventListener('offline-order-enqueued', handleQueueEnqueued);
   syncInterval = setInterval(syncOfflineOrders, 60000);
-  startInventorySyncWorker();
-  startImportSyncWorker();
-  startCustomerSyncWorker();
   return () => {
     window.removeEventListener('online', syncOfflineOrders);
     window.removeEventListener('offline-order-enqueued', handleQueueEnqueued);
     if (syncInterval) {
       clearInterval(syncInterval);
     }
-    stopInventorySyncWorker();
-    stopImportSyncWorker();
-    stopCustomerSyncWorker();
   };
 }, [selectedBranchId, setupReady, userDetails?.id, userDetails?.tenant_id]);
 
@@ -607,26 +627,6 @@ useEffect(() => {
     window.removeEventListener('offline', handleOffline);
   };
 }, []);
-
-useEffect(() => {
-  const handleLoginSuccess = () => {
-    if (setupInProgress || setupDidRunRef.current) return;
-    preloadAllCaches().catch((err) => {
-      console.error('IndexedDB preload failed', err);
-    });
-    preloadOrdersOnce();
-    };
-    window.addEventListener('login-success', handleLoginSuccess);
-    return () => window.removeEventListener('login-success', handleLoginSuccess);
-  }, []);
-
-useEffect(() => {
-  if (!setupReady) return;
-  startDefaultOfflineSync();
-  return () => {
-    stopDefaultOfflineSync();
-  };
-}, [setupReady]);
 
 useEffect(() => {
   const handleServerStatus = (event) => {

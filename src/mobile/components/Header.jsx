@@ -1,5 +1,7 @@
 import { useSelector } from 'react-redux';
 import { useBranchStore } from '../../store/branchStore';
+import { findBranchById, getBranchDisplayName, getBranchId } from '../../utils/branchLabels';
+import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 
 const Header = () => {
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
@@ -11,16 +13,13 @@ const Header = () => {
   const setSelectedBranchId = useBranchStore((state) => state.setSelectedBranchId);
   const shopName = tenantConfig?.shop_name || tenantConfig?.shopName || 'SHAJRetail';
   const userName = userDetails?.user_name || userDetails?.name || 'Owner';
+  const localPosMode = isLocalPosEnabled();
+  const cleanSelectedBranchName = String(selectedBranchName || '').trim();
+  const currentBranchLabel =
+    (cleanSelectedBranchName && cleanSelectedBranchName.toLowerCase() !== 'all' ? cleanSelectedBranchName : '') ||
+    (selectedBranchId && selectedBranchId !== 'all' ? `POS ${selectedBranchId}` : 'POS Linked');
   const canSelectAllBranches =
     String(userRole || '').toLowerCase() === 'admin' || userDetails?.all_branch_access !== false;
-
-  const getBranchLabel = (branch, fallback = '') =>
-    String(
-      branch?.name ??
-      branch?.branch_name ??
-      branch?.title ??
-      fallback
-    ).trim();
 
   const handleBranchChange = (event) => {
     const value = String(event.target.value || '');
@@ -32,8 +31,8 @@ const Header = () => {
       setSelectedBranchId('all', { confirmed: true, name: 'All' });
       return;
     }
-    const matched = branches.find((branch) => String(branch?.id) === value);
-    const label = getBranchLabel(matched, selectedBranchName || 'Selected Branch');
+    const matched = findBranchById(branches, value);
+    const label = getBranchDisplayName(matched, selectedBranchName || 'Selected Branch');
     setSelectedBranchId(value, { confirmed: true, name: label });
   };
 
@@ -46,6 +45,15 @@ const Header = () => {
         </div>
         <div className="mobile-header-right">
           <label htmlFor="mobile-branch-select" className="mobile-branch-label">Branch</label>
+          {localPosMode ? (
+            <div
+              id="mobile-branch-select"
+              className="mobile-branch-select mobile-branch-readonly"
+              aria-readonly="true"
+            >
+              {currentBranchLabel}
+            </div>
+          ) : (
           <select
             id="mobile-branch-select"
             className="mobile-branch-select"
@@ -56,17 +64,18 @@ const Header = () => {
             {canSelectAllBranches && <option value="all">All</option>}
             {selectedBranchId &&
               selectedBranchId !== 'all' &&
-              !branches.some((branch) => String(branch?.id) === String(selectedBranchId)) && (
+              !findBranchById(branches, selectedBranchId) && (
                 <option value={String(selectedBranchId)}>
                   {selectedBranchName || 'Selected Branch'}
                 </option>
             )}
             {branches.map((branch, index) => (
-              <option key={branch?.id || `branch-${index}`} value={String(branch?.id || '')}>
-                {getBranchLabel(branch, `Branch ${index + 1}`)}
+              <option key={getBranchId(branch) || `branch-${index}`} value={String(getBranchId(branch) || '')}>
+                {getBranchDisplayName(branch, `Branch ${index + 1}`)}
               </option>
             ))}
           </select>
+          )}
         </div>
       </div>
     </header>

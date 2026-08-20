@@ -7,6 +7,7 @@ import {
   isLocalPosEnabled,
   registerLocalPosDevice,
 } from '../Repositories/local/posLocalApiClient';
+import { findBranchById, getBranchDisplayName } from '../utils/branchLabels';
 import './BranchDevices.css';
 
 const formatDate = (value) => {
@@ -44,8 +45,8 @@ const BranchDevices = () => {
   const [error, setError] = useState('');
 
   const branchName = useMemo(() => {
-    const branch = branches.find((item) => String(item.id) === effectiveBranchId);
-    return branch?.name || branch?.branch_name || '';
+    const branch = findBranchById(branches, effectiveBranchId);
+    return getBranchDisplayName(branch);
   }, [branches, effectiveBranchId]);
 
   const localStoreId = localDevice?.store_id == null ? null : String(localDevice.store_id);

@@ -119,7 +119,7 @@ const PurchaseBook = () => {
         return true;
       };
 
-      const loadFromIndexedDb = async () => {
+      const loadFromLocalStore = async () => {
         try {
           const local = await getLocalPurchases();
           const localList = Array.isArray(local) ? local : [];
@@ -131,7 +131,7 @@ const PurchaseBook = () => {
         }
       };
 
-      const localFiltered = await loadFromIndexedDb();
+      const localFiltered = await loadFromLocalStore();
       if (localFiltered.length) {
         const enriched = localFiltered.map((purchase) => {
           if (purchase.supplierName || purchase.supplier_name) return purchase;

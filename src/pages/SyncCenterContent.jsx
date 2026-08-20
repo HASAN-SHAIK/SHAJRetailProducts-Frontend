@@ -418,7 +418,7 @@ const SyncCenter = () => {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      showPopup('Full backup downloaded (IndexedDB + server export).', 'Backup');
+      showPopup('Full backup downloaded (local SQLite + server export).', 'Backup');
     } catch (err) {
       showPopup(err?.response?.data?.message || err?.message || 'Backup export failed.', 'Backup');
     } finally {
@@ -468,7 +468,7 @@ const SyncCenter = () => {
     setBackupBusy(true);
     try {
       await restoreLocalFromBackup(loadedBackup);
-      showPopup('Local IndexedDB restored from backup.', 'Backup');
+      showPopup('Local SQLite restored from backup.', 'Backup');
       await loadQueues(true);
     } catch (err) {
       showPopup(err?.message || 'Local restore failed.', 'Backup');

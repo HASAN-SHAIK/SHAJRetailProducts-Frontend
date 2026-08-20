@@ -1,4 +1,3 @@
-import { IndexedDbReportRepository } from './IndexedDbReportRepository';
 import {
   fetchDailyExpenseReportRemote,
   fetchEwayBillsRemote,
@@ -10,19 +9,15 @@ import {
 
 /** @implements {import('../Interfaces/IReportRepository').IReportRepository} */
 export class ApiReportRepository {
-  constructor() {
-    this.cache = new IndexedDbReportRepository();
-  }
-
   async getDailyExpenseReport(options = {}) {
     if (isOnline()) {
       try {
         return await fetchDailyExpenseReportRemote(options);
       } catch {
-        // fall back to local aggregation
+        // fall back to empty aggregation
       }
     }
-    return this.cache.getDailyExpenseReport(options);
+    return { total: 0, categories: [] };
   }
 
   async getMonthlyExpenseReport(options = {}) {
@@ -30,10 +25,10 @@ export class ApiReportRepository {
       try {
         return await fetchMonthlyExpenseReportRemote(options);
       } catch {
-        // fall back to local aggregation
+        // fall back to empty aggregation
       }
     }
-    return this.cache.getMonthlyExpenseReport(options);
+    return { total: 0, categories: [] };
   }
 
   async getStaffExpenses(options = {}) {
@@ -41,10 +36,10 @@ export class ApiReportRepository {
       try {
         return await fetchStaffExpensesRemote(options);
       } catch {
-        // fall back to local cache
+        // fall back to empty list
       }
     }
-    return this.cache.getStaffExpenses(options);
+    return [];
   }
 
   async getStaffExpenseTotal(options = {}) {
@@ -52,10 +47,10 @@ export class ApiReportRepository {
       try {
         return await fetchStaffExpenseTotalRemote(options);
       } catch {
-        // fall back to local aggregation
+        // fall back to empty total
       }
     }
-    return this.cache.getStaffExpenseTotal(options);
+    return 0;
   }
 
   async getEwayBills() {
@@ -68,9 +63,9 @@ export class ApiReportRepository {
         }
         return list;
       } catch {
-        // fall back to local cache
+        // fall back to empty list
       }
     }
-    return this.cache.getEwayBills();
+    return [];
   }
 }

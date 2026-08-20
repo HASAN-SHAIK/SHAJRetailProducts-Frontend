@@ -1,4 +1,4 @@
-import { IndexedDbSupplierRepository } from './IndexedDbSupplierRepository';
+import * as storage from './internal/storage';
 import {
   createSupplierRemote,
   deleteSupplierRemote,
@@ -13,7 +13,7 @@ import { filterSuppliersByTerm, isTempEntityId } from './api/supplierNormalizer'
 /** @implements {import('../Interfaces/ISupplierRepository').ISupplierRepository} */
 export class ApiSupplierRepository {
   constructor() {
-    this.cache = new IndexedDbSupplierRepository();
+    this.cache = storage;
   }
 
   updateSuppliersCacheBulk(suppliers) {

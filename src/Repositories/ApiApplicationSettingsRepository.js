@@ -1,17 +1,50 @@
-import { IndexedDbApplicationSettingsRepository } from './IndexedDbApplicationSettingsRepository';
 import {
   fetchApplicationSettingsRemote,
   isOnline,
+  readSettingsCache,
   updateApplicationSettingsRemote,
   writeSettingsCache,
 } from './api/applicationSettingsApiClient';
 
+const DEFAULT_SETTINGS = {
+  store: {
+    invoice_prefix: 'INV',
+    invoice_footer: 'Thank you for shopping with us.',
+    currency: 'INR',
+    auto_sync: true,
+    notifications_enabled: true,
+    biometric_lock: false,
+  },
+  tax: {
+    default_tax_percent: '18',
+    gst_mode: 'INCLUSIVE',
+  },
+  printer: {
+    receipt_paper_width_mm: 80,
+  },
+  theme: {
+    desktop: 'dark',
+    mobile: 'dark',
+  },
+  permissions: {
+    role: null,
+    permissions: [],
+    store_permissions: {},
+  },
+  company: {},
+};
+
+const mergeSettings = (incoming = {}) => ({
+  store: { ...DEFAULT_SETTINGS.store, ...(incoming.store || {}) },
+  tax: { ...DEFAULT_SETTINGS.tax, ...(incoming.tax || {}) },
+  printer: { ...DEFAULT_SETTINGS.printer, ...(incoming.printer || {}) },
+  theme: { ...DEFAULT_SETTINGS.theme, ...(incoming.theme || {}) },
+  permissions: { ...DEFAULT_SETTINGS.permissions, ...(incoming.permissions || {}) },
+  company: { ...(incoming.company || {}) },
+});
+
 /** @implements {import('../Interfaces/IApplicationSettingsRepository').IApplicationSettingsRepository} */
 export class ApiApplicationSettingsRepository {
-  constructor() {
-    this.cache = new IndexedDbApplicationSettingsRepository();
-  }
-
   async getApplicationSettings() {
     if (isOnline()) {
       try {
@@ -21,10 +54,11 @@ export class ApiApplicationSettingsRepository {
           return settings;
         }
       } catch {
-        // fall back to local cache
+        // fall back to in-memory/default settings
       }
     }
-    return this.cache.getApplicationSettings();
+    const cached = await readSettingsCache().catch(() => null);
+    return mergeSettings(cached || DEFAULT_SETTINGS);
   }
 
   async updateApplicationSettings(payload = {}) {
@@ -36,10 +70,11 @@ export class ApiApplicationSettingsRepository {
           return settings;
         }
       } catch {
-        // fall back to local cache
+        // fall back to in-memory/default settings
       }
     }
-    return this.cache.updateApplicationSettings(payload);
+    const current = await this.getApplicationSettings();
+    return mergeSettings({ ...current, ...payload });
   }
 
   async getSettingGroup(group) {

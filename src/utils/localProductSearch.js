@@ -1,4 +1,4 @@
-import { db } from '../core/db';
+import { getAllProductsCache, getProductByBarcode } from '../services/local/productLocalService';
 
 const normalizeName = (product) =>
   product?.name ||
@@ -59,30 +59,21 @@ export const searchLocalProducts = async (term) => {
   const candidates = [];
   const barcode = String(term || '').trim();
   if (barcode) {
-    const byBarcode = await db.products_cache.where('barcode').equals(barcode).toArray();
-    candidates.push(...byBarcode);
+    const byBarcode = await getProductByBarcode(barcode).catch(() => null);
+    if (byBarcode) candidates.push(byBarcode);
   }
 
   if (candidates.length < SEARCH_LIMIT) {
-    const byPrefix = await db.products_cache
-      .where('name_lower')
-      .startsWith(query)
-      .limit(SEARCH_LIMIT * 3)
-      .toArray();
-    candidates.push(...byPrefix);
-  }
-
-  if (candidates.length < SEARCH_LIMIT) {
-    const supplemental = await db.products_cache
+    const products = await getAllProductsCache().catch(() => []);
+    const supplemental = (Array.isArray(products) ? products : [])
       .filter((product) => {
         if (product?.is_deleted) return false;
         const name = normalizeName(product).toLowerCase();
         const company = String(product?.company || '').toLowerCase();
         const barcodeValue = String(product?.barcode || '').toLowerCase();
-        return name.includes(query) || company.includes(query) || barcodeValue.includes(query);
+        return name.startsWith(query) || name.includes(query) || company.includes(query) || barcodeValue.includes(query);
       })
-      .limit(SEARCH_LIMIT * 2)
-      .toArray();
+      .slice(0, SEARCH_LIMIT * 3);
     candidates.push(...supplemental);
   }
 

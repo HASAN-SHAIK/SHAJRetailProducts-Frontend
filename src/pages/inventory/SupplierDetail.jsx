@@ -66,7 +66,7 @@ const SupplierDetail = () => {
       if (!entry?.id) return;
       merged.set(String(entry.id), entry);
     });
-    // Payment rows are sourced from IndexedDB payment-entry data and take priority.
+    // Payment rows are sourced from local payment-entry data and take priority.
     (Array.isArray(payments) ? payments : []).forEach((entry) => {
       if (!entry?.id) return;
       const key = String(entry.id);
@@ -74,7 +74,7 @@ const SupplierDetail = () => {
         merged.set(key, entry);
         return;
       }
-      // Keep IndexedDB details (like payment_mode) in priority when available.
+      // Keep local details (like payment_mode) in priority when available.
       merged.set(key, { ...merged.get(key), ...entry });
     });
     return Array.from(merged.values());
@@ -95,13 +95,13 @@ const SupplierDetail = () => {
             upsertAccountingTransaction({ ...entry, source: 'supplier_ledger' }).catch(() => {});
           });
       }
-      const localPaymentLedgerFromIndexedDb = buildLocalPaymentLedger(cachedTxns);
+      const localPaymentLedger = buildLocalPaymentLedger(cachedTxns);
 
       const hasCachedLedger = Array.isArray(cachedLedger) && cachedLedger.length > 0;
       if (cachedSupplier) {
         setData({
           supplier: cachedSupplier,
-          ledger: mergeLedgerLists(cachedLedger, localPaymentLedgerFromIndexedDb),
+          ledger: mergeLedgerLists(cachedLedger, localPaymentLedger),
           offline: !navigator.onLine,
         });
         setLoading(false);
@@ -133,7 +133,7 @@ const SupplierDetail = () => {
             await saveTransactionsBulk(transactions).catch(() => {});
           }
           await upsertSupplierLedgerBulk(ledgerWithSupplier).catch(() => {});
-          serverData.ledger = mergeLedgerLists(ledgerWithSupplier, localPaymentLedgerFromIndexedDb);
+          serverData.ledger = mergeLedgerLists(ledgerWithSupplier, localPaymentLedger);
           await saveConfigValue(cacheKey, { ready: true, updatedAt: new Date().toISOString() }).catch(() => {});
         }
         setData(serverData);

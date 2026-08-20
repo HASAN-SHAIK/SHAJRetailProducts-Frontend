@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./DashboardOverview.css";
 import api from "../../../utils/axios";
-import { preloadProductsToIndexedDb } from "../../../utils/indexedDb";
 import LoadingSpinner from "../../common/LoadingSpinner/LoadingSpinner";
 import { usePopup } from "../../common/PopUp/PopupProvider";
 import { Line, Pie } from "react-chartjs-2";
@@ -63,7 +62,6 @@ const formatValue = (value, format) => {
 
 const DashboardOverview = ({ navigate }) => {
   const sidebarRef = useRef(null);
-  const preloadRef = useRef(false);
   const location = useLocation();
   const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const userDetails = useSelector((state) => state.user.userDetails);
@@ -111,14 +109,6 @@ const DashboardOverview = ({ navigate }) => {
       setActiveSection("overview");
     }
   }, [isStaff, activeSection]);
-
-  useEffect(() => {
-    if (preloadRef.current) return;
-    preloadRef.current = true;
-    preloadProductsToIndexedDb({ branchId: selectedBranchId }).catch((err) => {
-      console.error('IndexedDB preload failed', err);
-    });
-  }, [selectedBranchId]);
 
   useEffect(() => {
     setIsFetching(false);

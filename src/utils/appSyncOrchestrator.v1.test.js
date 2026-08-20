@@ -6,12 +6,6 @@ jest.mock('./importSync', () => ({ syncAllImports: jest.fn() }));
 jest.mock('./customersSync', () => ({ syncAllCustomers: jest.fn() }));
 jest.mock('./inventorySync', () => ({ processInventorySyncQueue: jest.fn() }));
 jest.mock('./deltaSync', () => ({ runDeltaSync: jest.fn() }));
-jest.mock('./indexedDb', () => ({
-  preloadAllCaches: jest.fn(),
-  preloadCustomersToIndexedDb: jest.fn(),
-  preloadOrdersToIndexedDb: jest.fn(),
-  preloadTransactionsToIndexedDb: jest.fn(),
-}));
 jest.mock('./syncStrategy', () => ({
   getSyncPlan: jest.fn(),
   markSyncPlanComplete: jest.fn(),
@@ -77,7 +71,7 @@ describe('V1 Frontend local POS sync authority', () => {
     expect(markSyncPlanComplete).not.toHaveBeenCalled();
   });
 
-  test('retains the legacy browser path only when local POS mode is disabled', async () => {
+  test('retains the central API sync path only when local POS mode is disabled', async () => {
     isLocalPosEnabled.mockReturnValue(false);
     getSyncPlan.mockResolvedValue({ mode: 'delta', reason: 'scheduled' });
 

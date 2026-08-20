@@ -5,14 +5,12 @@ import api from '../../utils/axios';
 import { Modal } from 'bootstrap';
 import AddProductModalComponent from './AddModalComponent/AddProductModalComponent';
 import { useSelector } from 'react-redux';
-import { preloadAllCaches, preloadProductsToIndexedDb } from '../../utils/indexedDb';
 import {
   getAllBatches,
   getAllProducts,
   getBranchStock,
   getProductByBarcode,
   updateBatchesBulk,
-  updateProductsBulk,
   getAllCategories,
 } from '../../services/local';
 import { runDeltaSync } from '../../utils/deltaSync';
@@ -21,6 +19,7 @@ import { useBranchStore } from '../../store/branchStore';
 import { createOfflineProduct, deleteOfflineProduct, updateOfflineProduct } from '../../utils/offlineProducts';
 import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 import { getSettings } from '../../services/settingsService';
+import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 
 const ProductsPage = ({ navigate }) => {
 //Modal data
@@ -180,10 +179,6 @@ const ProductsPage = ({ navigate }) => {
       showPopup("Product saved offline. Will sync in background.", "Offline");
       setForceApiFetch(true);
       setProductUpdateFlag((prev) => !prev);
-      if (navigator.onLine) {
-        preloadProductsToIndexedDb({ branchId: selectedBranchId }).catch(() => {});
-      }
-
     } catch (err) {
       if (err?.response?.data?.message === 'Invalid Token' || err?.response?.status === 401) {
         showPopup("Token Expired Please Login Again!", "Session");
@@ -555,7 +550,7 @@ const ProductsPage = ({ navigate }) => {
   const applyLocalFilters = useCallback((items) => {
     let filtered = Array.isArray(items) ? items : [];
 
-    if (effectiveBranchId) {
+    if (effectiveBranchId && !isLocalPosEnabled()) {
       filtered = filtered.filter((item) => {
         const productBranchId = item?.branch_id ?? item?.branchId ?? null;
         return String(productBranchId || '') === String(effectiveBranchId);
@@ -622,7 +617,7 @@ const ProductsPage = ({ navigate }) => {
         ));
       }
 
-      if (effectiveBranchId) {
+      if (effectiveBranchId && !isLocalPosEnabled()) {
         const allBatches = await getAllBatches();
         const productIdsWithBranchStock = new Set(
           (Array.isArray(allBatches) ? allBatches : [])
@@ -1840,7 +1835,6 @@ const ProductsPage = ({ navigate }) => {
               onClick={() => {
                 setForceApiFetch(true);
                 setProductUpdateFlag((prev) => !prev);
-                preloadAllCaches({ branchId: selectedBranchId }).catch(() => {});
               }}
               type="button"
             >

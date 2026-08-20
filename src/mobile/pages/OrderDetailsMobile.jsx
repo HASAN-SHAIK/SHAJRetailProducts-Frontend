@@ -47,7 +47,7 @@ const OrderDetailsMobile = () => {
     <MobileShell title={`Order #${id}`} subtitle="Order summary, customer details, and line items in one place.">
       <SectionCard title="Order Summary">
         {loading && <p className="mobile-muted" style={{ margin: 0, fontSize: 12 }}>Loading order details...</p>}
-        {!loading && !order && <p className="mobile-muted" style={{ margin: 0, fontSize: 12 }}>Order not found in IndexedDB.</p>}
+        {!loading && !order && <p className="mobile-muted" style={{ margin: 0, fontSize: 12 }}>Order not found in local SQLite/API.</p>}
 
         {!loading && order && (
           <>

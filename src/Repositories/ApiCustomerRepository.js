@@ -1,4 +1,4 @@
-import { IndexedDbCustomerRepository } from './IndexedDbCustomerRepository';
+import * as storage from './internal/storage';
 import {
   createCustomerRemote,
   fetchCustomerDetail,
@@ -11,7 +11,7 @@ import { filterCustomersByTerm, isTempEntityId } from './api/customerNormalizer'
 /** @implements {import('../Interfaces/ICustomerRepository').ICustomerRepository} */
 export class ApiCustomerRepository {
   constructor() {
-    this.cache = new IndexedDbCustomerRepository();
+    this.cache = storage;
   }
 
   getAllCustomers() {

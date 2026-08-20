@@ -1,4 +1,4 @@
-import { IndexedDbProductRepository } from './IndexedDbProductRepository';
+import * as storage from './internal/storage';
 import {
   fetchProductByBarcode,
   fetchProductById,
@@ -10,7 +10,7 @@ import { isTempEntityId } from './api/productNormalizer';
 /** @implements {import('../Interfaces/IProductRepository').IProductRepository} */
 export class ApiProductRepository {
   constructor() {
-    this.cache = new IndexedDbProductRepository();
+    this.cache = storage;
   }
 
   saveProductsBulk(products) {

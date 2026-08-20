@@ -1,6 +1,6 @@
 /**
  * Local data service layer — sole entry point for UI and app utilities.
- * Delegates to repositories; never touches IndexedDB directly.
+ * Delegates to repositories; never touches browser database storage directly.
  */
 export * from './databaseLocalService';
 export * from './productLocalService';

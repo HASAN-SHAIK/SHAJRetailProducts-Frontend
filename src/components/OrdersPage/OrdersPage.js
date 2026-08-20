@@ -13,7 +13,6 @@ import {
   upsertOrderDetailsCache,
   upsertOrders,
 } from '../../db/ordersDb';
-import { preloadOrdersToIndexedDb } from '../../utils/indexedDb';
 import {
   createOrderReturn,
   deleteOrder,
@@ -928,7 +927,7 @@ const OrdersPage = ({ navigate, mode }) => {
       }
 
       if (!finalOrder) {
-        setDrawerError('Order details are not available in IndexedDB yet.');
+        setDrawerError('Order details are not available from SQLite/API yet.');
       }
     } catch (err) {
       setDrawerError('Unable to load order details.');
@@ -1334,10 +1333,9 @@ const OrdersPage = ({ navigate, mode }) => {
     refreshClickArmedRef.current = false;
     try {
       setIsServerRefreshing(true);
-      const total = await preloadOrdersToIndexedDb();
       syncRequestedRef.current = false;
       await loadOrders(routeType);
-      showPopup(`Orders refreshed from server. Cached ${Number(total || 0)} order(s).`, 'Success');
+      showPopup('Orders refreshed from SQLite/API.', 'Success');
     } catch (err) {
       showPopup('Unable to refresh orders from server.', 'Error');
     } finally {
@@ -1772,7 +1770,7 @@ const OrdersPage = ({ navigate, mode }) => {
       const fallbackOrder = orders.find((entry) => String(entry?.id) === String(order.id));
       const resolved = cached || fallbackOrder || null;
       if (!resolved) {
-        setReceiptError('Order details are not available in IndexedDB yet.');
+        setReceiptError('Order details are not available from SQLite/API yet.');
         return;
       }
       setReceiptOrder(resolved);

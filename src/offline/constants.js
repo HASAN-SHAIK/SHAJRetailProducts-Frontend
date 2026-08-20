@@ -48,7 +48,7 @@ export const OFFLINE_EVENTS = Object.freeze({
 
 /**
  * Desktop-first modules that must remain usable offline.
- * SQL is the system of record once synchronized; IndexedDB is the local working set.
+ * SQL is the system of record once synchronized; local SQLite is the working set.
  */
 export const OFFLINE_FIRST_MODULES = Object.freeze([
   OFFLINE_MODULE.SALES,

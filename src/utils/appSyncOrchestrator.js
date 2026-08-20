@@ -6,12 +6,6 @@ import { syncAllImports } from './importSync';
 import { syncAllCustomers } from './customersSync';
 import { processInventorySyncQueue } from './inventorySync';
 import { runDeltaSync } from './deltaSync';
-import {
-  preloadAllCaches,
-  preloadCustomersToIndexedDb,
-  preloadOrdersToIndexedDb,
-  preloadTransactionsToIndexedDb,
-} from './indexedDb';
 import { getSyncPlan, markSyncPlanComplete } from './syncStrategy';
 import { isLocalPosEnabled } from '../Repositories/local/posLocalApiClient';
 
@@ -33,10 +27,7 @@ const runFullSeedSync = async ({ branchId }) => {
   await syncAllImports();
   await syncAllStaffExpenses({ refreshRemote: true });
   await syncAllReturnsCorrections({ refreshRemote: true });
-  await preloadCustomersToIndexedDb();
-  await preloadOrdersToIndexedDb();
-  await preloadTransactionsToIndexedDb();
-  await preloadAllCaches({ branchId, forceFull: true });
+  await runDeltaSync({ branchId, forceFull: true });
 };
 
 const runDeltaOnlySync = async ({ branchId }) => {
@@ -56,9 +47,8 @@ export const runAppSyncCycle = async ({
   forceFull = false,
 } = {}) => {
   // When the packaged local POS runtime is enabled, POSService/SQLite owns the
-  // durable outbox/inbox and reconnect lifecycle. The legacy browser IndexedDB
-  // orchestrator must not become a second transaction/customer/inventory sync
-  // authority. Screen-level reads continue through the configured repositories.
+  // durable outbox/inbox and reconnect lifecycle. Screen-level reads continue
+  // through the configured repositories.
   if (isLocalPosEnabled()) {
     return { mode: 'pos_edge', reason: 'local_pos_authoritative' };
   }

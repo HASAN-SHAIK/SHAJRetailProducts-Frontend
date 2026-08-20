@@ -56,12 +56,12 @@ describe('V1 browser persistence boundary', () => {
     });
   });
 
-  test('legacy IndexedDB session metadata is sanitized before browser migration', async () => {
+  test('legacy browser session metadata is sanitized before browser migration', async () => {
     const { localService, sessionStorage } = loadPersistenceModules();
     localService.getSessionValue.mockResolvedValueOnce({
       userId: 'legacy-user',
       role: 'cashier',
-      token: 'legacy-indexeddb-token',
+      token: 'legacy-browser-token',
     });
 
     const info = await sessionStorage.getSessionInfo();
@@ -79,7 +79,7 @@ describe('V1 browser persistence boundary', () => {
     expect(localService.clearSessionValue).toHaveBeenCalledWith('session_info');
   });
 
-  test('clearing session metadata removes browser copies and IndexedDB compatibility state', async () => {
+  test('clearing session metadata removes browser copies and local compatibility state', async () => {
     const { localService, sessionStorage } = loadPersistenceModules();
     window.localStorage.setItem('session_info', JSON.stringify({ userId: 'user-1', token: null }));
     window.sessionStorage.setItem('session_info', JSON.stringify({ userId: 'user-1', token: null }));

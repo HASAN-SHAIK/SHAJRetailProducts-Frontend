@@ -61,18 +61,18 @@ const purgeLegacyAccessToken = async () => {
   await clearSessionValue(AUTH_TOKEN_KEY).catch(() => {});
 };
 
-const migrateSessionInfoFromIndexedDbOnce = async () => {
+const migrateSessionInfoFromLocalStoreOnce = async () => {
   if (migrationAttempted) return;
   migrationAttempted = true;
   try {
-    // V1 Central auth is HttpOnly-cookie based. Old IndexedDB/local/session
+    // V1 Central auth is HttpOnly-cookie based. Old browser/local/session
     // access tokens are deleted rather than migrated back into JavaScript.
     await purgeLegacyAccessToken();
-    const indexedSession = await getSessionValue(SESSION_INFO_KEY);
-    if (indexedSession && !readBrowserValue(SESSION_INFO_KEY, true)) {
-      writeBrowserValue(SESSION_INFO_KEY, { ...indexedSession, token: null }, true);
+    const localSession = await getSessionValue(SESSION_INFO_KEY);
+    if (localSession && !readBrowserValue(SESSION_INFO_KEY, true)) {
+      writeBrowserValue(SESSION_INFO_KEY, { ...localSession, token: null }, true);
     }
-    if (indexedSession) {
+    if (localSession) {
       await clearSessionValue(SESSION_INFO_KEY).catch(() => {});
     }
   } catch (err) {
@@ -87,7 +87,7 @@ export const saveAuthToken = async () => {
 };
 
 export const getAuthToken = async () => {
-  await migrateSessionInfoFromIndexedDbOnce();
+  await migrateSessionInfoFromLocalStoreOnce();
   await purgeLegacyAccessToken();
   return null;
 };
@@ -106,12 +106,12 @@ export const saveSessionInfo = async (info) => {
 };
 
 export const getSessionInfo = async () => {
-  await migrateSessionInfoFromIndexedDbOnce();
+  await migrateSessionInfoFromLocalStoreOnce();
   const info = readBrowserValue(SESSION_INFO_KEY, true);
   if (info) return { ...info, token: null };
   try {
-    const indexed = await getSessionValue(SESSION_INFO_KEY);
-    return indexed ? { ...indexed, token: null } : null;
+    const localSession = await getSessionValue(SESSION_INFO_KEY);
+    return localSession ? { ...localSession, token: null } : null;
   } catch (err) {
     return null;
   }

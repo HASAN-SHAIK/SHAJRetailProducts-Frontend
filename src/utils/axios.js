@@ -14,13 +14,8 @@ if (isDev && !process.env.REACT_APP_CENTRAL_API_URL && process.env.REACT_APP_API
   );
 }
 
-// Lazy import breaks circular dependency:
-// axios -> indexedDb -> productLocalService -> RepositoryFactory -> ApiProductRepository -> productApiClient -> axios
-const preloadAllCachesLazy = () =>
-  import('./indexedDb').then((module) => module.preloadAllCaches());
-
 if (isDev) {
-  console.log('[cacheDB] axios module loaded');
+  console.log('[api] axios module loaded');
 }
 
 const api = axios.create({
@@ -142,31 +137,6 @@ api.interceptors.response.use(
     if (typeof window !== 'undefined') {
       window.__serverOffline = false;
       window.dispatchEvent(new CustomEvent('server-status', { detail: { offline: false } }));
-    }
-    if (typeof window !== 'undefined') {
-      const url = response?.config?.url || '';
-      if (url.includes('/platform/config') && !window.__cacheDbPreloadFired) {
-        window.__cacheDbPreloadFired = true;
-        if (isDev) {
-          console.log('[cacheDB] platform/config detected');
-        }
-        preloadAllCachesLazy()
-          .then((preloadAllCaches) => preloadAllCaches())
-          .catch((err) => {
-            if (isDev) {
-              console.error('[cacheDB] preload failed', err);
-            }
-          });
-      }
-      if (url.includes('/auth/logout')) {
-        window.__cacheDbPreloadFired = false;
-        if (isDev) {
-          console.log('[cacheDB] reset preload flag on logout');
-        }
-      }
-      if (isDev && url.includes('/auth/login')) {
-        console.log('[cacheDB] login response received');
-      }
     }
     return response;
   },

@@ -7,7 +7,7 @@ import {
   getOrderById,
   getOrderItems,
   saveOrder,
-} from './indexedDBService';
+} from './localSQLiteService';
 
 const SYNC_INTERVAL_MS = 30000;
 let syncTimer = null;

@@ -6,6 +6,8 @@ import { useSelector } from 'react-redux';
 import { useBranchStore } from '../../../store/branchStore';
 import { isFeatureEnabled } from '../../../utils/entitlements';
 import { ThemeContext } from '../../../ThemeContext';
+import { findBranchById, getBranchDisplayName, getBranchId, normalizeBranchLabel } from '../../../utils/branchLabels';
+import { isLocalPosEnabled } from '../../../Repositories/local/posLocalApiClient';
 
 
 const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) => {
@@ -26,36 +28,24 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [isProbingExpand, setIsProbingExpand] = useState(false);
+  const localPosMode = isLocalPosEnabled();
   const branchDropdownRef = useRef(null);
   const moreDropdownRef = useRef(null);
   const settingsDropdownRef = useRef(null);
   const navActionsRef = useRef(null);
   const navActionsRightRef = useRef(null);
   const rafRef = useRef(null);
-  const normalizeBranchLabel = useCallback((value) => {
-    // Remove invisible zero-width characters and normalize whitespace.
-    const cleaned = String(value ?? '')
-      .replace(/[\u200B-\u200D\uFEFF]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return cleaned;
-  }, []);
-
-  const getBranchDisplayName = useCallback((branch, fallback = '') => {
-    const name =
-      branch?.name ??
-      branch?.branch_name ??
-      branch?.title ??
-      branch?.branch ??
-      fallback;
-    return normalizeBranchLabel(name);
-  }, [normalizeBranchLabel]);
-
   const currentBranchLabel = (() => {
+    if (localPosMode) {
+      const selectedLabel = normalizeBranchLabel(selectedBranchName);
+      if (selectedLabel && selectedLabel.toLowerCase() !== 'all') return selectedLabel;
+      if (selectedBranchId && selectedBranchId !== 'all') return `POS ${selectedBranchId}`;
+      return 'POS Linked';
+    }
     if (selectedBranchId === 'all') return 'All';
     const selectedLabel = normalizeBranchLabel(selectedBranchName);
     if (selectedLabel) return selectedLabel;
-    const match = branches.find((branch) => String(branch.id) === String(selectedBranchId));
+    const match = findBranchById(branches, selectedBranchId);
     const matchName = getBranchDisplayName(match);
     return matchName || 'Select Branch';
   })();
@@ -212,14 +202,19 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
             <div className="me-2 d-flex align-items-center nav-branch-control" ref={branchDropdownRef}>
               <div className="dropdown nav-branch-dropdown">
                 <button
-                  className={`btn nav-branch-pill dropdown-toggle${branchOpen ? ' show' : ''}`}
+                  className={`btn nav-branch-pill dropdown-toggle${branchOpen ? ' show' : ''}${localPosMode ? ' is-readonly' : ''}`}
                   type="button"
-                  aria-expanded={branchOpen}
-                  onClick={() => setBranchOpen((prev) => !prev)}
+                  aria-expanded={localPosMode ? false : branchOpen}
+                  aria-disabled={localPosMode}
+                  onClick={() => {
+                    if (localPosMode) return;
+                    setBranchOpen((prev) => !prev);
+                  }}
                   title={currentBranchLabel || 'Select Branch'}
                 >
                   <span className="nav-branch-pill-label">{currentBranchLabel || 'Select Branch'}</span>
                 </button>
+                {!localPosMode && (
                 <ul className={`dropdown-menu nav-branch-menu${branchOpen ? ' show' : ''}`}>
                   <li>
                     <button
@@ -242,7 +237,7 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
                     </li>
                   )}
                   {selectedBranchId &&
-                    !branches.some((branch) => String(branch.id) === String(selectedBranchId)) &&
+                    !findBranchById(branches, selectedBranchId) &&
                     selectedBranchId !== 'all' && (
                       <li>
                         <button
@@ -261,17 +256,18 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
                       </li>
                     )}
                   {branches.map((branch, index) => {
+                    const branchId = getBranchId(branch);
                     const branchLabel = getBranchDisplayName(
                       branch,
                       `Branch ${index + 1}`
                     );
                     return (
-                    <li key={branch.id || `branch-${index}`}>
+                    <li key={branchId || `branch-${index}`}>
                       <button
                         type="button"
                         className="dropdown-item"
                         onClick={() =>
-                          handleBranchSelect(String(branch.id), branchLabel, true)
+                          handleBranchSelect(String(branchId || ''), branchLabel, true)
                         }
                       >
                         {branchLabel}
@@ -280,6 +276,7 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
                     );
                   })}
                 </ul>
+                )}
               </div>
             </div>
             <div className="nav-actions-right" ref={navActionsRightRef}>

@@ -5,7 +5,7 @@ import {
   updateOrdersBulk,
   replaceOrderItems,
   getOrderItems,
-} from './indexedDBService';
+} from './localSQLiteService';
 import { calculateGST, normalizeGstMode } from '../../../services/gstService';
 
 const ORDER_STATUS = {

@@ -8,16 +8,57 @@ const normalizeProduct = (product) => {
   if (!product) return product;
   const price = product.price || null;
   const primaryBarcode = product.barcode || (Array.isArray(product.barcodes) ? product.barcodes[0] : undefined);
+  const onHand =
+    product.stock_quantity ??
+    product.stockQuantity ??
+    product.quantity_remaining ??
+    product.quantityRemaining ??
+    product.available_quantity ??
+    product.availableQuantity ??
+    product.stock ??
+    product.quantity ??
+    null;
   return {
     ...product,
     barcode: primaryBarcode,
     product_id: product.product_id || product.id,
     selling_price: product.selling_price ?? (price ? Number(price.amount_minor || 0) / 100 : undefined),
     price: product.selling_price ?? (price ? Number(price.amount_minor || 0) / 100 : product.price),
+    stock_quantity: onHand,
+    __stock: onHand,
   };
 };
 
-/** Keeps existing IndexedDB cache behavior while sourcing sale-time catalog data locally. */
+const milliToQuantity = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed / 1000 : null;
+};
+
+const hydrateProductStock = async (product) => {
+  const normalized = normalizeProduct(product);
+  const productId = normalized?.product_id || normalized?.id;
+  if (!normalized || !productId) return normalized;
+
+  try {
+    const balance = await localPosRequest(`/inventory/balances/${encodeURIComponent(String(productId).trim())}`);
+    const onHand = milliToQuantity(balance?.on_hand_milli);
+    const available = milliToQuantity(balance?.available_milli);
+    if (!Number.isFinite(onHand) && !Number.isFinite(available)) return normalized;
+    const stock = Number.isFinite(onHand) ? onHand : available;
+    return {
+      ...normalized,
+      stock_quantity: stock,
+      quantity_remaining: stock,
+      available_quantity: Number.isFinite(available) ? available : stock,
+      __stock: stock,
+      stock_balance: balance,
+    };
+  } catch {
+    return normalized;
+  }
+};
+
+/** Sources sale-time catalog data from the local POSService/SQLite API. */
 export class LocalPosProductRepository extends ApiProductRepository {
   async updateBatchesBulk(batches) {
     if (isLocalPosEnabled()) {
@@ -31,14 +72,19 @@ export class LocalPosProductRepository extends ApiProductRepository {
   async searchLocalCatalog(search = '', limit = 50) {
     if (!isLocalPosEnabled()) return [];
     const query = String(search || '').trim();
-    if (!query) return [];
     const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
     const payload = await localPosRequest(
       `/catalog/products?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(safeLimit))}`
     );
-    const products = Array.isArray(payload?.items) ? payload.items.map(normalizeProduct) : [];
+    const catalogProducts = Array.isArray(payload?.items) ? payload.items : [];
+    const products = await Promise.all(catalogProducts.map(hydrateProductStock));
     if (products.length) await this.cache.updateProductsBulk(products).catch(() => {});
     return products;
+  }
+
+  async getAllProducts() {
+    if (!isLocalPosEnabled()) return super.getAllProducts();
+    return this.searchLocalCatalog('', 200);
   }
 
   async getProductByBarcode(barcode, branchId = null) {
@@ -47,7 +93,7 @@ export class LocalPosProductRepository extends ApiProductRepository {
     if (!normalizedBarcode) return null;
     let product = null;
     try {
-      product = normalizeProduct(
+      product = await hydrateProductStock(
         await localPosRequest(`/catalog/products/barcode/${encodeURIComponent(normalizedBarcode)}`)
       );
     } catch (error) {
@@ -69,7 +115,7 @@ export class LocalPosProductRepository extends ApiProductRepository {
   async getProductCacheById(productId) {
     const cached = await this.cache.getProductCacheById(productId);
     if (cached || !isLocalPosEnabled()) return cached || super.getProductCacheById(productId);
-    const product = normalizeProduct(
+    const product = await hydrateProductStock(
       await localPosRequest(`/catalog/products/${encodeURIComponent(String(productId || '').trim())}`)
     );
     if (product) await this.cache.updateProductsBulk([product]).catch(() => {});

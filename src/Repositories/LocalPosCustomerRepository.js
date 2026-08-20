@@ -10,7 +10,7 @@ const normalizeCustomer = (customer) => customer ? {
   current_balance: customer.current_balance ?? Number(customer.outstanding_minor || 0) / 100,
 } : customer;
 
-/** Local-first customer projection with the existing IndexedDB cache retained as a read-through cache. */
+/** Local-first customer projection backed by the local POSService/SQLite API. */
 export class LocalPosCustomerRepository extends ApiCustomerRepository {
   async searchCustomers(options = {}) {
     if (!isLocalPosEnabled()) return super.searchCustomers(options);
