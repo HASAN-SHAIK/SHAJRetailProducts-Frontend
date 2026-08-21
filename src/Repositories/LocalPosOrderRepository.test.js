@@ -179,6 +179,88 @@ describe('LocalPosOrderRepository checkout write authority', () => {
     });
   });
 
+  test('normalizes local partial refunds as returned value without creating balance due', async () => {
+    const localPosRequest = jest.fn(async (path) => {
+      if (path === '/orders/ord_return_1') {
+        return {
+          id: 'ord_return_1',
+          client_order_id: 'client-return-1',
+          store_id: 'store-1',
+          status: 'paid',
+          currency: 'INR',
+          subtotal_minor: 62000,
+          discount_minor: 0,
+          tax_minor: 0,
+          total_minor: 62000,
+          version: 3,
+          created_at: '2026-08-20T10:00:00Z',
+          updated_at: '2026-08-20T10:05:00Z',
+          items: [],
+        };
+      }
+      if (path === '/orders/ord_return_1/payments') {
+        return {
+          items: [
+            {
+              id: 'pay-capture',
+              order_id: 'ord_return_1',
+              mode: 'cash',
+              direction: 'in',
+              amount_minor: 62000,
+              currency: 'INR',
+              status: 'captured',
+              created_at: '2026-08-20T10:01:00Z',
+            },
+            {
+              id: 'pay-refund',
+              order_id: 'ord_return_1',
+              mode: 'cash',
+              direction: 'out',
+              amount_minor: 25000,
+              currency: 'INR',
+              status: 'refunded',
+              created_at: '2026-08-20T10:05:00Z',
+            },
+          ],
+          summary: {
+            order_id: 'ord_return_1',
+            total_minor: 62000,
+            paid_minor: 37000,
+            balance_minor: 25000,
+            order_status: 'partially_paid',
+          },
+        };
+      }
+      const error = new Error(`unexpected path ${path}`);
+      error.status = 404;
+      throw error;
+    });
+    jest.doMock('./ApiOrderRepository', () => ({
+      ApiOrderRepository: class ApiOrderRepository {},
+    }));
+    jest.doMock('./local/posLocalApiClient', () => ({
+      isLocalPosEnabled: () => true,
+      localPosRequest,
+    }));
+
+    const { LocalPosOrderRepository } = require('./LocalPosOrderRepository');
+    const detail = await new LocalPosOrderRepository().getOrderDetail('ord_return_1');
+
+    expect(detail).toMatchObject({
+      total_amount: 620,
+      total_paid: 620,
+      returned_amount: 250,
+      net_paid: 370,
+      balance: 0,
+      payment_status: 'paid',
+    });
+    expect(detail.payment_history[1]).toMatchObject({
+      amount: 250,
+      signed_amount: -250,
+      txn_type: 'refund',
+    });
+  });
+
   test('applies checkout-level discount to local POS order lines', async () => {
     const localPosRequest = jest.fn(async (path, options) => {
       if (path === '/orders' && options?.method === 'POST') {

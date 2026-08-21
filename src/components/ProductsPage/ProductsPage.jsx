@@ -652,7 +652,14 @@ const ProductsPage = ({ navigate }) => {
         total_records: totalRecords,
       }));
     } catch (err) {
-      if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
+      const localPosSessionMissing =
+        isLocalPosEnabled() &&
+        (err?.message === 'local_pos_session_unavailable' ||
+          err?.payload?.error === 'local_session_required' ||
+          err?.status === 401);
+      if (localPosSessionMissing) {
+        setErrorMessage('Local POS session expired. Sign out and sign in again with your POS PIN to load inventory.');
+      } else if (err.response?.data?.message === 'Invalid Token' || err.response?.status === 401) {
         showPopup("Token Expired Please Login Again!", "Session");
         navigate('/logout');
       } else {
@@ -1265,6 +1272,11 @@ const ProductsPage = ({ navigate }) => {
     batch_number: 'batch_number',
     batchno: 'batch_number',
     'batch no': 'batch_number',
+    'batch enabled': 'is_batch_enabled',
+    batch_enabled: 'is_batch_enabled',
+    batchenabled: 'is_batch_enabled',
+    'is batch enabled': 'is_batch_enabled',
+    is_batch_enabled: 'is_batch_enabled',
     'is weight based': 'is_weight_based',
     is_weight_based: 'is_weight_based',
     weight_based: 'is_weight_based',
@@ -1533,6 +1545,7 @@ const ProductsPage = ({ navigate }) => {
         const gst_percentage = toNumber(row.gst_percentage);
         const batch_number = row.batch_number ? String(row.batch_number).trim() : '';
         const expiry_date = toDateInput(row.expiry_date);
+        const is_batch_enabled = toFlagValue(row.is_batch_enabled, batch_number ? '1' : '0');
         const is_weight_based = toFlagValue(row.is_weight_based, '0');
         return {
           id,
@@ -1548,6 +1561,7 @@ const ProductsPage = ({ navigate }) => {
           batch_number,
           expiry_date,
           selling_price,
+          is_batch_enabled,
           is_weight_based
         };
       })
@@ -1663,6 +1677,21 @@ const ProductsPage = ({ navigate }) => {
       setImportParsing(false);
     }
   };
+  const waitForLocalPosCatalogPull = () =>
+    new Promise((resolve) => setTimeout(resolve, 2500));
+
+  const refreshProductsAfterImport = async () => {
+    if (isLocalPosEnabled()) {
+      await waitForLocalPosCatalogPull();
+    } else if (navigator.onLine) {
+      await runDeltaSync({ branchId: effectiveBranchId, forceFull: true }).catch((err) => {
+        console.warn('[Products] Import refresh sync failed', err);
+      });
+    }
+    setForceApiFetch(true);
+    setProductUpdateFlag((prev) => !prev);
+  };
+
   const handleImportConfirm = async () => {
     if (importing || importPreviewRows.length === 0) return;
     if (!effectiveBranchId) {
@@ -1686,6 +1715,7 @@ const ProductsPage = ({ navigate }) => {
       gst_percentage: toNumber(row.gst_percentage),
       batch_number: row.batch_number ? String(row.batch_number).trim() : null,
       expiry_date: row.expiry_date ? String(row.expiry_date).trim() : null,
+      is_batch_enabled: Number(toFlagValue(row.is_batch_enabled, row.batch_number ? '1' : '0')),
       is_weight_based: Number(toFlagValue(row.is_weight_based, '0')),
       selling_price: resolveImportSellingPrice(row),
       sellingPrice: resolveImportSellingPrice(row),
@@ -1712,9 +1742,8 @@ const ProductsPage = ({ navigate }) => {
       } catch {
         setIsOpeningCompleted(true);
       }
+      await refreshProductsAfterImport();
       showPopup('Imported Successfully', 'Success');
-      setForceApiFetch(true);
-      setProductUpdateFlag((prev) => !prev);
       setImportPreviewRows([]);
       setImportFile(null);
     } catch (err) {
@@ -2608,6 +2637,7 @@ const ProductsPage = ({ navigate }) => {
                   <strong>Products imported successfully</strong>
                   <span>Total: {importResult.total ?? 0}</span>
                   <span>Inserted: {importResult.inserted ?? 0}</span>
+                  <span>Updated: {importResult.updated ?? 0}</span>
                   <span>Skipped: {importResult.skipped ?? 0}</span>
                   {!isOpeningCompleted && (
                     <div className="alert alert-warning mt-2 mb-2">

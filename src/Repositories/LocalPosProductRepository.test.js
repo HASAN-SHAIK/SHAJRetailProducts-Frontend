@@ -101,6 +101,7 @@ describe('LocalPosProductRepository barcode lookup', () => {
               id: '201',
               name: 'Inventory Soap',
               barcode: '201201',
+              gst_rate_bps: 1800,
               price: { amount_minor: 3500 },
             },
           ],
@@ -122,6 +123,8 @@ describe('LocalPosProductRepository barcode lookup', () => {
       expect.objectContaining({
         id: '201',
         name: 'Inventory Soap',
+        gst_percent: 18,
+        gst_percentage: 18,
         stock_quantity: 9,
       }),
     ]);

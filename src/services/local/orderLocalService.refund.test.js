@@ -18,7 +18,7 @@ jest.mock('./refundDiagnosticsEvents', () => ({
 import { localPosRequest } from '../../Repositories/local/posLocalApiClient';
 import { requestManagerApproval } from '../managerApprovalService';
 import { signalRefundDiagnosticsRefresh } from './refundDiagnosticsEvents';
-import { refundOrder } from './orderLocalService';
+import { createOrderReturn, refundOrder } from './orderLocalService';
 
 describe('local POS full-refund contract', () => {
   beforeEach(() => {
@@ -96,5 +96,38 @@ describe('local POS full-refund contract', () => {
 
     expect(requestManagerApproval).not.toHaveBeenCalled();
     expect(localPosRequest).toHaveBeenCalledTimes(1);
+  });
+
+  test('routes Orders page item returns to the local POS refund endpoint', async () => {
+    localPosRequest.mockResolvedValue({ order: { id: 'ord-local', status: 'partially_returned' } });
+
+    await createOrderReturn('ord local', {
+      reason: 'Damaged',
+      return_id: 'ret-local',
+      items: [{ orderItemId: 'item-1', productId: 'product-1', quantity: 0.25 }],
+    });
+
+    expect(localPosRequest).toHaveBeenCalledWith('/orders/ord%20local/refund', {
+      method: 'POST',
+      body: {
+        reason: 'Damaged',
+        return_id: 'ret-local',
+        lines: [{ order_item_id: 'item-1', quantity_milli: 250 }],
+      },
+      approvalToken: null,
+    });
+    expect(signalRefundDiagnosticsRefresh).toHaveBeenCalledWith('ord local', 'partial_refund_succeeded');
+  });
+
+  test('does not call Central when a local POS return line is malformed', async () => {
+    await expect(
+      createOrderReturn('ord-local', {
+        reason: 'Damaged',
+        return_id: 'ret-local',
+        items: [{ productId: 'product-1', quantity: 1 }],
+      })
+    ).rejects.toThrow('partial_refund_line_invalid');
+
+    expect(localPosRequest).not.toHaveBeenCalled();
   });
 });

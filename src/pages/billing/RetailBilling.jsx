@@ -117,6 +117,14 @@ const isCashOrBankMode = (mode) => {
   return normalized === 'cash' || normalized === 'bank';
 };
 
+const isWeightBasedProduct = (product) => {
+  const raw = product?.is_weight_based ?? product?.isWeightBased ?? product?.weight_based ?? product?.type;
+  if (raw === true || raw === 1) return true;
+  return ['1', 'true', 'yes', 'y', 'weight', 'weighted', 'weight based', 'weight-based', 'kg', 'kgs', 'gram', 'grams'].includes(String(raw || '').trim().toLowerCase());
+};
+
+const isWholeQuantity = (value) => Number.isInteger(Number(value));
+
 const buildSearchUrl = (text, mode) => {
   if (mode === 'purchase') {
     return `/products/search/purchase?name=${encodeURIComponent(text)}`;
@@ -1438,6 +1446,10 @@ const RetailBilling = () => {
       }
       const key = getCartItemKey(resolvedProduct);
       const requestedQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
+      if (!isWeightBasedProduct(resolvedProduct) && !isWholeQuantity(requestedQty)) {
+        showPopup('Piece-based products must use whole-number quantity.', 'Validation');
+        return;
+      }
       const inCartQty = key
         ? items
             .filter((item) => String(item?.key) === String(key))
@@ -2254,6 +2266,10 @@ const RetailBilling = () => {
               }
               const qty = Number(quantityValue || 1);
               const requestedQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
+              if (!isWeightBasedProduct(resolvedProduct) && !isWholeQuantity(requestedQty)) {
+                showPopup('Piece-based products must use whole-number quantity.', 'Validation');
+                return;
+              }
               const key = getCartItemKey(resolvedProduct);
               const inCartQty = key
                 ? items

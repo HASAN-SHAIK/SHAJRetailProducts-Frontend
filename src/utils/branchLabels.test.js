@@ -16,6 +16,7 @@ describe('branch label helpers', () => {
     expect(getBranchDisplayName({ branch_name: 'Main Counter' })).toBe('Main Counter');
     expect(getBranchDisplayName({ branchName: 'North Store' })).toBe('North Store');
     expect(getBranchDisplayName({ store_name: 'Local POS' })).toBe('Local POS');
+    expect(getBranchDisplayName({ terminal_id: 'Mattampally-POS-1' })).toBe('Mattampally-POS-1');
     expect(getBranchDisplayName({}, 'Branch 1')).toBe('Branch 1');
   });
 

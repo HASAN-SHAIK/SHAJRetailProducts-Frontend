@@ -28,13 +28,25 @@ const CartItemRow = ({
     setQtyDraft(String(item.qty ?? ''));
   }, [item.qty]);
 
+  const updateQtyDraft = (value) => {
+    if (!weightBased && !/^\d*$/.test(String(value))) return;
+    setQtyDraft(value);
+  };
+
   const commitQty = () => {
     const trimmed = String(qtyDraft).trim();
     if (trimmed === '') {
       setQtyDraft(String(item.qty ?? 1));
       return;
     }
-    onQtyChange(item.key, trimmed);
+    const parsed = Number(trimmed);
+    const normalized = weightBased ? trimmed : String(Math.floor(parsed));
+    if (!weightBased && (!Number.isFinite(parsed) || parsed <= 0)) {
+      setQtyDraft(String(item.qty ?? 1));
+      return;
+    }
+    setQtyDraft(normalized);
+    onQtyChange(item.key, normalized);
   };
 
   return (
@@ -60,9 +72,13 @@ const CartItemRow = ({
           value={qtyDraft}
           aria-label={`Quantity for ${itemName}`}
           onClick={(event) => event.stopPropagation()}
-          onChange={(event) => setQtyDraft(event.target.value)}
+          onChange={(event) => updateQtyDraft(event.target.value)}
           onBlur={commitQty}
           onKeyDown={(event) => {
+            if (!weightBased && ['.', ',', 'e', 'E', '+', '-'].includes(event.key)) {
+              event.preventDefault();
+              return;
+            }
             if (event.key === 'Enter') {
               commitQty();
             }

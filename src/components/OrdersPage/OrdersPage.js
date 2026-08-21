@@ -149,6 +149,17 @@ const OrdersPage = ({ navigate, mode }) => {
     const normalized = String(mode || '').trim().toLowerCase();
     return normalized === 'cash' || normalized === 'bank' || normalized === 'upi' || normalized === 'online';
   };
+  const isRefundPaymentRow = (payment = {}) => {
+    const direction = String(payment?.direction || '').trim().toLowerCase();
+    const status = String(payment?.status || '').trim().toLowerCase();
+    const txnType = String(payment?.txn_type || payment?.type || '').trim().toLowerCase();
+    return direction === 'out' || status === 'refunded' || txnType === 'refund';
+  };
+  const getPaymentAmountValue = (payment = {}) => {
+    const raw = payment?.amount ?? payment?.total_price ?? payment?.amount_paid ?? payment?.signed_amount ?? 0;
+    const amount = Number(raw);
+    return Number.isFinite(amount) ? amount : 0;
+  };
   const getValidPaymentRows = (order = {}) => {
     const history = Array.isArray(order?.payment_history)
       ? order.payment_history
@@ -156,13 +167,20 @@ const OrdersPage = ({ navigate, mode }) => {
         ? order.payments
         : [];
     return history.filter((payment) => {
-      const amount = Number(payment?.amount ?? payment?.total_price ?? payment?.amount_paid);
-      return Number.isFinite(amount) && amount > 0;
+      const amount = Math.abs(getPaymentAmountValue(payment));
+      return !isRefundPaymentRow(payment) && Number.isFinite(amount) && amount > 0;
     });
   };
   const sumPayments = (payments = []) =>
     (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
-      const amount = Number(payment?.amount ?? payment?.total_price ?? payment?.amount_paid ?? 0);
+      if (isRefundPaymentRow(payment)) return sum;
+      const amount = Math.abs(getPaymentAmountValue(payment));
+      return sum + (Number.isFinite(amount) ? amount : 0);
+    }, 0);
+  const sumReturnedPayments = (payments = []) =>
+    (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
+      if (!isRefundPaymentRow(payment)) return sum;
+      const amount = Math.abs(getPaymentAmountValue(payment));
       return sum + (Number.isFinite(amount) ? amount : 0);
     }, 0);
   const getActualPaidFromHistory = (order = {}) => {
@@ -208,11 +226,16 @@ const OrdersPage = ({ navigate, mode }) => {
     const paidFromHistory = getActualPaidFromHistory(order);
     const paidFromOrder = toOptionalNumber(order?.total_paid ?? order?.paid_amount) ?? 0;
     const totalPaid = Math.max(paidFromHistory, paidFromOrder);
+    const returnedAmount = Math.max(
+      toOptionalNumber(order?.returned_amount ?? order?.returnedAmount) ?? 0,
+      sumReturnedPayments(paymentHistory)
+    );
+    const netTotalAmount = Math.max(totalAmount - returnedAmount, 0);
     const orderKind = getOrderKind(order);
     const rawBalance = toOptionalNumber(order?.balance);
     const balance = rawBalance !== null
-      ? Math.max(rawBalance, 0)
-      : Math.max(totalAmount - totalPaid, 0);
+      ? Math.max(Math.min(rawBalance, Math.max(netTotalAmount - totalPaid, 0)), 0)
+      : Math.max(netTotalAmount - totalPaid, 0);
     if (orderKind === 'purchase' && isCreditMode(order?.payment_mode ?? order?.paymentMode)) {
       return balance > 0 ? 'pending' : totalPaid > 0 ? 'paid' : 'pending';
     }
@@ -953,13 +976,15 @@ const OrdersPage = ({ navigate, mode }) => {
   useEffect(() => {
     if (!drawerOrder?.id) return;
     const total = Number(drawerOrder.total_amount || 0);
+    const returned = Math.max(Number(drawerOrder.returned_amount || 0), 0);
     const payments = Array.isArray(drawerOrder?.payment_history)
       ? drawerOrder.payment_history
       : Array.isArray(drawerOrder?.payments)
         ? drawerOrder.payments
         : [];
     const paid = sumPayments(payments);
-    const balance = Math.max(total - paid, 0);
+    const refundRows = sumReturnedPayments(payments);
+    const balance = Math.max(total - Math.max(returned, refundRows) - paid, 0);
     setPaymentAmount(balance > 0 ? balance.toFixed(2) : '');
     setPaymentMethod(
       String(
@@ -990,6 +1015,7 @@ const OrdersPage = ({ navigate, mode }) => {
           : Number(item?.selling_price ?? item?.price ?? 0);
       return {
         key: item?.product_id ?? item?.id ?? `${idx}`,
+        order_item_id: item?.order_item_id ?? item?.orderItemId ?? item?.item_id ?? item?.id,
         product_id: item?.product_id ?? item?.id,
         product_name: item?.product_name || item?.name || '-',
         sold_qty: soldQty,
@@ -1185,6 +1211,7 @@ const OrdersPage = ({ navigate, mode }) => {
     }
     const payloadItems = returnItems
       .map((item) => ({
+        orderItemId: item.order_item_id,
         productId: item.product_id,
         quantity: Number(item.return_qty || 0),
         unitPrice: Number(item.unit_price || 0),
@@ -1229,6 +1256,7 @@ const OrdersPage = ({ navigate, mode }) => {
       const customerId = returnOrder?.customer_id || returnOrder?.customer?.id || null;
       await createOrderReturn(returnOrder.id, {
         items: payloadItems.map((item) => ({
+          orderItemId: item.orderItemId,
           productId: item.productId,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
@@ -2167,19 +2195,25 @@ const OrdersPage = ({ navigate, mode }) => {
     0
   );
   const summaryTotalPaid = paymentHistory.length ? sumPayments(paymentHistory) : 0;
+  const summaryReturnedAmount = Math.max(
+    Number(drawerOrder?.returned_amount || 0),
+    sumReturnedPayments(paymentHistory)
+  );
+  const summaryNetAmount = Math.max(summaryTotalAmount - summaryReturnedAmount, 0);
   const isCreditPurchaseOrder = getOrderKind(drawerOrder) === 'purchase' &&
     isCreditMode(drawerOrder?.payment_mode ?? drawerOrder?.paymentMode);
   const summaryBalanceRaw = Number(drawerOrder?.balance);
   const balance = isCreditPurchaseOrder
     ? Math.max(summaryTotalAmount - summaryTotalPaid, 0)
     : Number.isFinite(summaryBalanceRaw)
-      ? Math.max(summaryBalanceRaw, 0)
-      : Math.max(summaryTotalAmount - summaryTotalPaid, 0);
+      ? Math.max(Math.min(summaryBalanceRaw, summaryNetAmount - summaryTotalPaid), 0)
+      : Math.max(summaryNetAmount - summaryTotalPaid, 0);
   const summaryStatus = getOrderPaymentSummaryStatus({
     ...(drawerOrder || {}),
     payment_history: paymentHistory,
     total_amount: summaryTotalAmount,
     total_paid: summaryTotalPaid,
+    returned_amount: summaryReturnedAmount,
     balance,
   });
   const gstEnabledForOrder =
@@ -2552,7 +2586,7 @@ const OrdersPage = ({ navigate, mode }) => {
                     </div>
                     <div>
                       <span>Returned</span>
-                      <strong>{formatMoney(drawerOrder.returned_amount || 0)}</strong>
+                      <strong>{formatMoney(summaryReturnedAmount)}</strong>
                     </div>
                     <div>
                       <span>Balance</span>
@@ -2593,14 +2627,19 @@ const OrdersPage = ({ navigate, mode }) => {
                             )}
                           </td>
                           <td>
-                            {payment.method ||
+                            {isRefundPaymentRow(payment) ? 'refund' : (
+                              payment.method ||
                               payment.mode ||
                               payment.payment_mode ||
                               payment.payment_method ||
                               payment.paymentMethod ||
-                              '-'}
+                              '-'
+                            )}
                           </td>
-                          <td>{formatMoney(payment.amount ?? payment.total_price)}</td>
+                          <td>
+                            {isRefundPaymentRow(payment) ? '-' : ''}
+                            {formatMoney(Math.abs(getPaymentAmountValue(payment)))}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

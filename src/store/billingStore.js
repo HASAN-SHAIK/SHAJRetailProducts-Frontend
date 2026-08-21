@@ -114,10 +114,16 @@ const normalizeItem = (product, qty = 1, gstMode = 'INCLUSIVE') => ({
 });
 
 const isWeightBased = (item) => {
-  const value = item?.is_weight_based;
+  const value = item?.is_weight_based ?? item?.isWeightBased ?? item?.weight_based ?? item?.type;
   if (value === true) return true;
   if (value === false || value == null) return false;
-  return String(value) === '1';
+  return ['1', 'true', 'yes', 'y', 'weight', 'weighted', 'weight based', 'weight-based', 'kg', 'kgs', 'gram', 'grams'].includes(String(value).trim().toLowerCase());
+};
+
+const normalizeQuantityForProduct = (product, qty, fallback = 1) => {
+  const parsed = Number(qty);
+  const safe = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return isWeightBased(product) ? safe : Math.floor(safe);
 };
 
 export const useBillingStore = create((set, get) => ({
@@ -157,13 +163,13 @@ export const useBillingStore = create((set, get) => ({
   addItem: (product, qty = 1) => {
     const key = toKey(product);
     if (!key) return;
-    const parsedQty = Number(qty);
-    const safeQty = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
+    const safeQty = normalizeQuantityForProduct(product, qty, 1);
+    if (safeQty <= 0) return;
     const gstMode = get().gstMode;
     set((state) => {
       const existing = state.items.find((item) => item.key === key);
       if (existing) {
-        const updatedQty = (itemQty) => itemQty + safeQty;
+        const updatedQty = (itemQty) => normalizeQuantityForProduct(existing, Number(itemQty || 0) + safeQty, safeQty);
         const updated = state.items.map((item) =>
           item.key === key
             ? {

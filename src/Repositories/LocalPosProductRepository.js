@@ -8,6 +8,8 @@ const normalizeProduct = (product) => {
   if (!product) return product;
   const price = product.price || null;
   const primaryBarcode = product.barcode || (Array.isArray(product.barcodes) ? product.barcodes[0] : undefined);
+  const gstRateBps = Number(product.gst_rate_bps);
+  const gstPercent = Number.isFinite(gstRateBps) ? gstRateBps / 100 : undefined;
   const onHand =
     product.stock_quantity ??
     product.stockQuantity ??
@@ -24,6 +26,8 @@ const normalizeProduct = (product) => {
     product_id: product.product_id || product.id,
     selling_price: product.selling_price ?? (price ? Number(price.amount_minor || 0) / 100 : undefined),
     price: product.selling_price ?? (price ? Number(price.amount_minor || 0) / 100 : product.price),
+    gst_percent: product.gst_percent ?? product.gst_percentage ?? gstPercent,
+    gst_percentage: product.gst_percentage ?? product.gst_percent ?? gstPercent,
     stock_quantity: onHand,
     __stock: onHand,
   };

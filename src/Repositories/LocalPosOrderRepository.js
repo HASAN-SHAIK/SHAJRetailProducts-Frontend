@@ -119,17 +119,28 @@ const toPaymentInput = (payload = {}, fallbackCurrency = 'INR') => ({
 
 const fromMinor = (value) => Number(value || 0) / 100;
 
-const normalizeLocalPayment = (payment = {}) => ({
-  ...payment,
-  amount: fromMinor(payment.amount_minor),
-  total_price: fromMinor(payment.amount_minor),
-  payment_mode: payment.mode,
-  payment_method: payment.mode,
-  method: payment.mode,
-  date: payment.created_at,
-  paid_at: payment.created_at,
-  txn_type: 'receipt',
-});
+const isRefundPayment = (payment = {}) => {
+  const direction = String(payment.direction || '').toLowerCase();
+  const status = String(payment.status || '').toLowerCase();
+  return direction === 'out' || status === 'refunded';
+};
+
+const normalizeLocalPayment = (payment = {}) => {
+  const amount = fromMinor(payment.amount_minor);
+  const refund = isRefundPayment(payment);
+  return {
+    ...payment,
+    amount,
+    signed_amount: refund ? -Math.abs(amount) : amount,
+    total_price: amount,
+    payment_mode: payment.mode,
+    payment_method: payment.mode,
+    method: payment.mode,
+    date: payment.created_at,
+    paid_at: payment.created_at,
+    txn_type: refund ? 'refund' : 'receipt',
+  };
+};
 
 const normalizeLocalItem = (item = {}) => ({
   ...item,
@@ -145,14 +156,25 @@ const normalizeLocalItem = (item = {}) => ({
 const normalizeLocalOrder = (order = {}, { payments = [], paymentSummary = null, receipt = null } = {}) => {
   const normalizedPayments = (Array.isArray(payments) ? payments : []).map(normalizeLocalPayment);
   const status = paymentSummary?.order_status || order.status;
-  const paidMinor = paymentSummary?.paid_minor ?? normalizedPayments.reduce((sum, payment) => {
+  const netPaidMinor = paymentSummary?.paid_minor ?? normalizedPayments.reduce((sum, payment) => {
     const amountMinor = Number(payment?.amount_minor || 0);
-    return payment?.direction === 'out' ? sum - amountMinor : sum + amountMinor;
+    return isRefundPayment(payment) ? sum - amountMinor : sum + amountMinor;
   }, 0);
-  const effectivePaidMinor = !paymentSummary && paidMinor === 0 && status === 'paid'
+  const grossPaidMinor = normalizedPayments.reduce((sum, payment) => {
+    const amountMinor = Number(payment?.amount_minor || 0);
+    return isRefundPayment(payment) ? sum : sum + amountMinor;
+  }, 0);
+  const returnedMinor = normalizedPayments.reduce((sum, payment) => {
+    const amountMinor = Number(payment?.amount_minor || 0);
+    return isRefundPayment(payment) ? sum + amountMinor : sum;
+  }, 0);
+  const effectiveNetPaidMinor = !paymentSummary && netPaidMinor === 0 && status === 'paid'
     ? Number(order.total_minor || 0)
-    : paidMinor;
-  const balanceMinor = paymentSummary?.balance_minor ?? Math.max(Number(order.total_minor || 0) - effectivePaidMinor, 0);
+    : netPaidMinor;
+  const netSaleMinor = Math.max(Number(order.total_minor || 0) - returnedMinor, 0);
+  const balanceMinor = returnedMinor > 0 || paymentSummary?.balance_minor == null
+    ? Math.max(netSaleMinor - effectiveNetPaidMinor, 0)
+    : Math.max(Number(paymentSummary.balance_minor || 0), 0);
   return {
     ...order,
     branch_id: order.branch_id || order.store_id,
@@ -161,7 +183,7 @@ const normalizeLocalOrder = (order = {}, { payments = [], paymentSummary = null,
     order_status: status,
     payment_status: balanceMinor <= 0 && Number(order.total_minor || 0) > 0
       ? 'paid'
-      : paidMinor > 0
+      : effectiveNetPaidMinor > 0 || grossPaidMinor > 0
         ? 'partial'
         : 'pending',
     payment_mode: normalizedPayments[0]?.payment_mode || 'cash',
@@ -171,8 +193,10 @@ const normalizeLocalOrder = (order = {}, { payments = [], paymentSummary = null,
     subtotal: fromMinor(order.subtotal_minor),
     discount: fromMinor(order.discount_minor),
     tax: fromMinor(order.tax_minor),
-    total_paid: fromMinor(effectivePaidMinor),
-    paid_amount: fromMinor(effectivePaidMinor),
+    total_paid: fromMinor(grossPaidMinor || effectiveNetPaidMinor),
+    paid_amount: fromMinor(grossPaidMinor || effectiveNetPaidMinor),
+    net_paid: fromMinor(effectiveNetPaidMinor),
+    returned_amount: fromMinor(returnedMinor),
     balance: fromMinor(balanceMinor),
     products: (Array.isArray(order.items) ? order.items : []).map(normalizeLocalItem),
     items: (Array.isArray(order.items) ? order.items : []).map(normalizeLocalItem),

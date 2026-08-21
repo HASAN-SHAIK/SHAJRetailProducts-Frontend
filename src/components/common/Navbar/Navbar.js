@@ -38,8 +38,13 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
   const currentBranchLabel = (() => {
     if (localPosMode) {
       const selectedLabel = normalizeBranchLabel(selectedBranchName);
-      if (selectedLabel && selectedLabel.toLowerCase() !== 'all') return selectedLabel;
-      if (selectedBranchId && selectedBranchId !== 'all') return `POS ${selectedBranchId}`;
+      if (
+        selectedLabel &&
+        selectedLabel.toLowerCase() !== 'all' &&
+        selectedLabel !== String(selectedBranchId || '')
+      ) {
+        return selectedLabel;
+      }
       return 'POS Linked';
     }
     if (selectedBranchId === 'all') return 'All';

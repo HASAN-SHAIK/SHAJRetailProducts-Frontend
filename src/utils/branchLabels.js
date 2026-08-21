@@ -16,6 +16,10 @@ export const getBranchDisplayName = (branch, fallback = '') => {
     branch?.displayName ??
     branch?.store_name ??
     branch?.storeName ??
+    branch?.terminal_name ??
+    branch?.terminalName ??
+    branch?.terminal_id ??
+    branch?.terminalId ??
     branch?.title ??
     branch?.branch?.name ??
     branch?.branch ??

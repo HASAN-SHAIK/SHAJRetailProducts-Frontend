@@ -30,9 +30,29 @@ describe('V1 product/admin import screen states', () => {
     const source = readProductsPage();
 
     expect(source).toContain("showPopup('Imported Successfully', 'Success')");
+    expect(source).toContain('await refreshProductsAfterImport();');
+    expect(source).toContain('forceFull: true');
     expect(source).toContain('setForceApiFetch(true)');
     expect(source).toContain('setProductUpdateFlag((prev) => !prev)');
     expect(source).toContain('setImportResult({');
+    expect(source).toContain('updated: Number(summary.updated || 0)');
+    expect(source).toContain('<span>Updated: {importResult.updated ?? 0}</span>');
     expect(source).toContain('errors: Array.isArray(summary.errors) ? summary.errors : []');
+  });
+
+  test('preserves imported batch-enabled column in preview and API payload', () => {
+    const source = readProductsPage();
+
+    expect(source).toContain("is_batch_enabled: 'is_batch_enabled'");
+    expect(source).toContain("const is_batch_enabled = toFlagValue(row.is_batch_enabled, batch_number ? '1' : '0')");
+    expect(source).toContain("is_batch_enabled: Number(toFlagValue(row.is_batch_enabled, row.batch_number ? '1' : '0'))");
+  });
+
+  test('distinguishes missing local POS session from import/product failure', () => {
+    const source = readProductsPage();
+
+    expect(source).toContain('local_pos_session_unavailable');
+    expect(source).toContain('local_session_required');
+    expect(source).toContain('Local POS session expired. Sign out and sign in again with your POS PIN to load inventory.');
   });
 });
