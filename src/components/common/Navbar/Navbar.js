@@ -105,9 +105,6 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
     location.pathname === route || location.pathname.startsWith(`${route}/`);
 
   const hasSecondaryActive =
-    isActive('/customers') ||
-    (!isStaffUser && isActive('/staff-expenses')) ||
-    (!isStaffUser && isActive('/accounts')) ||
     (!isStaffUser && isActive('/returns-corrections')) ||
     isActive('/sync-center');
 
@@ -307,28 +304,6 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
             </div>
             {(!showMore || isProbingExpand) && (
               <div className={`nav-secondary-links${isProbingExpand ? ' nav-probe-hidden' : ''}`}>
-                <button className={`btn btn-outline-primary nav-pill${isActive('/customers') ? ' active' : ''}`} onClick={() => navigateTo('/customers')}>
-                  <span className="nav-pill-content">
-                    <i className="bi bi-people fs-6" aria-hidden="true" />
-                    <span className="nav-pill-label">Customers</span>
-                  </span>
-                </button>
-                {isOpeningCompleted && !isStaffUser && (
-                  <button className={`btn btn-outline-primary nav-pill${isActive('/staff-expenses') ? ' active' : ''}`} onClick={() => navigateTo('/staff-expenses/staff/list')}>
-                    <span className="nav-pill-content">
-                      <i className="bi bi-people-fill fs-6" aria-hidden="true" />
-                      <span className="nav-pill-label">Staff & Expenses</span>
-                    </span>
-                  </button>
-                )}
-                {isOpeningCompleted && !isStaffUser && (
-                  <button className={`btn btn-outline-primary nav-pill${isActive('/accounts') ? ' active' : ''}`} onClick={() => navigateTo('/accounts/receipt')}>
-                    <span className="nav-pill-content">
-                      <i className="bi bi-journal-text fs-6" aria-hidden="true" />
-                      <span className="nav-pill-label">Accounts</span>
-                    </span>
-                  </button>
-                )}
                 {isOpeningCompleted && !isStaffUser && (
                   <button className={`btn btn-outline-primary nav-pill${isActive('/returns-corrections') ? ' active' : ''}`} onClick={() => navigateTo('/returns-corrections/returns/new')}>
                     <span className="nav-pill-content">
@@ -362,34 +337,6 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
                   </span>
                 </button>
                 <ul className={`dropdown-menu nav-more-menu${moreOpen ? ' show' : ''}`}>
-                  <li>
-                    <button type="button" className="dropdown-item" onClick={() => navigateTo('/customers')}>
-                      <span className="nav-pill-content">
-                        <i className="bi bi-people fs-6" aria-hidden="true" />
-                        <span className="nav-pill-label">Customers</span>
-                      </span>
-                    </button>
-                  </li>
-                  {isOpeningCompleted && !isStaffUser && (
-                    <li>
-                      <button type="button" className="dropdown-item" onClick={() => navigateTo('/staff-expenses/staff/list')}>
-                        <span className="nav-pill-content">
-                          <i className="bi bi-people-fill fs-6" aria-hidden="true" />
-                          <span className="nav-pill-label">Staff & Expenses</span>
-                        </span>
-                      </button>
-                    </li>
-                  )}
-                  {isOpeningCompleted && !isStaffUser && (
-                    <li>
-                      <button type="button" className="dropdown-item" onClick={() => navigateTo('/accounts/receipt')}>
-                        <span className="nav-pill-content">
-                          <i className="bi bi-journal-text fs-6" aria-hidden="true" />
-                          <span className="nav-pill-label">Accounts</span>
-                        </span>
-                      </button>
-                    </li>
-                  )}
                   {isOpeningCompleted && !isStaffUser && (
                     <li>
                       <button type="button" className="dropdown-item" onClick={() => navigateTo('/returns-corrections/returns/new')}>
