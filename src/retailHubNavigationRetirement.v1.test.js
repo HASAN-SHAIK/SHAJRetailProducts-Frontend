@@ -26,7 +26,7 @@ describe('RetailHub POS management navigation retirement', () => {
 
   test('opening setup remains only a RetailHub handoff target while incomplete', () => {
     const navbar = read('components/common/Navbar/Navbar.js');
-    const openingSetup = read('pages/accounts/OpeningSetup.js');
+    const openingSetup = read('pages/accounts/OpeningSetup.jsx');
 
     expect(navbar).toContain("navigateTo('/accounts/opening-setup')");
     expect(openingSetup).toContain('REACT_APP_RETAIL_HUB_URL');
