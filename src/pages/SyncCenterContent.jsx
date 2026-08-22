@@ -43,6 +43,17 @@ const formatJSON = (value) => {
 
 const getInboxID = (message) => message?.message_id || message?.id || '';
 
+const describeLocalPosDiagnosticsError = (error, fallback = 'Local POS diagnostics unavailable') => {
+  const code = error?.payload?.error || error?.message || '';
+  if (code === 'local_pos_token_unavailable') return 'Local POS token unavailable';
+  if (code === 'local_pos_session_unavailable') return 'Local POS session missing';
+  if (code === 'local_auth_required' || error?.status === 401) return 'Local POS token rejected';
+  if (code === 'origin_not_allowed' || error?.status === 403) return 'Local POS origin blocked';
+  if (code === 'Failed to fetch' || error?.name === 'TypeError') return 'POSService unreachable';
+  if (Number(error?.status || 0) >= 500) return 'Local POS diagnostics failed';
+  return fallback;
+};
+
 const SyncCenter = () => {
   const { showPopup } = usePopup();
   const userDetails = useSelector((state) => state.user.userDetails);
@@ -70,7 +81,7 @@ const SyncCenter = () => {
     }
     try {
       const diagnosticsResult = isLocalPosEnabled()
-        ? await localPosRequest('/diagnostics')
+        ? await localPosRequest('/diagnostics', { requireSession: false })
             .then((payload) => ({ ok: true, payload }))
             .catch((error) => ({ ok: false, error }))
         : { ok: false, disabled: true };
@@ -79,11 +90,11 @@ const SyncCenter = () => {
         setPosDiagnosticsError('');
       } else {
         setPosDiagnostics(null);
-        setPosDiagnosticsError(diagnosticsResult.disabled ? 'Local POS mode disabled' : 'Local POS diagnostics unavailable');
+        setPosDiagnosticsError(diagnosticsResult.disabled ? 'Local POS mode disabled' : describeLocalPosDiagnosticsError(diagnosticsResult.error));
       }
       if (isLocalPosEnabled()) {
         setDetailsLoading(true);
-        const detailsResult = await localPosRequest('/diagnostics/sync-events?limit=100')
+        const detailsResult = await localPosRequest('/diagnostics/sync-events?limit=100', { requireSession: false })
           .then((payload) => ({ ok: true, payload }))
           .catch((error) => ({ ok: false, error }));
         if (detailsResult.ok) {
@@ -91,7 +102,7 @@ const SyncCenter = () => {
           setSyncEventDetailsError('');
         } else {
           setSyncEventDetails(null);
-          setSyncEventDetailsError('Unable to load stuck sync event details.');
+          setSyncEventDetailsError(describeLocalPosDiagnosticsError(detailsResult.error, 'Unable to load stuck sync event details.'));
         }
       } else {
         setSyncEventDetails(null);

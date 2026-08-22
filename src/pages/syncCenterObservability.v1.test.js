@@ -8,11 +8,13 @@ describe('V1 Sync Center observability presentation', () => {
   test('presents POSService operational truth with actionable refresh and failure states', () => {
     const source = readSyncCenter();
 
-    expect(source).toContain("localPosRequest('/diagnostics')");
-    expect(source).toContain("localPosRequest('/diagnostics/sync-events?limit=100')");
+    expect(source).toContain("localPosRequest('/diagnostics', { requireSession: false })");
+    expect(source).toContain("localPosRequest('/diagnostics/sync-events?limit=100', { requireSession: false })");
     expect(source).toContain('Local POS Sync Queues');
     expect(source).toContain('SQLite outbox and inbox status from POSService.');
     expect(source).toContain("'Local POS diagnostics unavailable'");
+    expect(source).toContain("'Local POS token rejected'");
+    expect(source).toContain("'POSService unreachable'");
     expect(source).toContain("{posStats.databaseOK ? 'SQLite OK' : posDiagnosticsError || 'Unavailable'}");
     expect(source).toContain('Outbox Pending');
     expect(source).toContain('Outbox Failed');
@@ -37,5 +39,6 @@ describe('V1 Sync Center observability presentation', () => {
     expect(source).toContain("handleSkipSyncMessage('outbox', event)");
     expect(source).toContain("handleSkipSyncMessage('inbox', message)");
     expect(source).toContain("localPosRequest(`/diagnostics/${queue}/${encodeURIComponent(id)}/skip`");
+    expect(source).toContain("body: { reason: 'Skipped from Sync Center by operator' }");
   });
 });
