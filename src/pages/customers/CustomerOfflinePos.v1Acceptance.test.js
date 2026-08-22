@@ -1,21 +1,26 @@
 const fs = require('fs');
 const path = require('path');
 
-describe('V1 customer frontend offline POS authority', () => {
-  test('customer list always attempts the configured repository and surfaces fallback state', () => {
-    const source = fs.readFileSync(path.join(__dirname, 'CustomerList.jsx'), 'utf8');
-    expect(source).toContain('const list = await searchCustomers({');
-    expect(source).not.toContain('if (!navigator.onLine) return;');
-    expect(source).toContain('Customer service is unavailable. Showing locally cached customers.');
+const read = (name) => fs.readFileSync(path.join(__dirname, name), 'utf8');
+
+describe('RetailHub customer management retirement boundary', () => {
+  test('POS customer management screens redirect back to store execution', () => {
+    for (const file of ['CustomerList.jsx', 'CustomerForm.jsx', 'CustomerDetail.jsx', 'CustomerReorder.jsx']) {
+      const source = read(file);
+      expect(source).toContain('Navigate');
+      expect(source).toContain('to="/billing/retail"');
+      expect(source).not.toContain('credit_limit');
+      expect(source).not.toContain('current_balance');
+    }
   });
 
-  test('customer form always attempts repository create/update before legacy queue fallback', () => {
-    const source = fs.readFileSync(path.join(__dirname, 'CustomerForm.jsx'), 'utf8');
-    expect(source).not.toContain('if (navigator.onLine) {');
-    expect(source).toContain('savedCustomer = await createCustomer(payload);');
-    expect(source).toContain('savedCustomer = await updateCustomer(id, payload);');
-    expect(source).toContain('await addSyncQueueItem({');
-    expect(source).toContain('Credit Limit (Central)');
-    expect(source).toContain('Current Balance (Central)');
+  test('customer management screens no longer perform repository writes or local sync queue mutation', () => {
+    const combined = ['CustomerList.jsx', 'CustomerForm.jsx', 'CustomerDetail.jsx', 'CustomerReorder.jsx']
+      .map(read)
+      .join('\n');
+    expect(combined).not.toContain('createCustomer(');
+    expect(combined).not.toContain('updateCustomer(');
+    expect(combined).not.toContain('addSyncQueueItem(');
+    expect(combined).not.toContain('searchCustomers(');
   });
 });
