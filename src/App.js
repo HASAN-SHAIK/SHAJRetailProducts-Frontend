@@ -323,7 +323,7 @@ function App() {
         setSetupInProgress(false);
         setSetupReady(true);
         setupInProgressRef.current = false;
-        navigate(isMobileDevice && setupMobileAccessEnabled ? '/m/dashboard' : '/dashboard', { replace: true });
+        navigate(isMobileDevice && setupMobileAccessEnabled ? '/m/neworder' : '/billing/retail', { replace: true });
       }
     };
     runSetup();

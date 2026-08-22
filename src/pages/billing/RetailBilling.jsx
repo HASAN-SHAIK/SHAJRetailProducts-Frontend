@@ -84,6 +84,17 @@ const getNextDraftLabel = (drafts) => {
   return `Bill ${nextIndex}`;
 };
 
+const createEmptyDraft = (drafts, overrides = {}) => ({
+  id: createDraftId(),
+  label: getNextDraftLabel(drafts),
+  items: [],
+  selectedKey: null,
+  isGSTEnabled: true,
+  transactionType: 'sale',
+  paymentMethod: 'cash',
+  ...overrides,
+});
+
 const loadDraftsFromStorage = () => {
   try {
     const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -479,15 +490,7 @@ const RetailBilling = () => {
       initialDraftsRef.current = stored;
     } else {
       initialDraftsRef.current = [
-        {
-          id: createDraftId(),
-          label: 'Bill 1',
-          items: [],
-          selectedKey: null,
-          isGSTEnabled: true,
-          transactionType: 'sale',
-          paymentMethod: 'cash',
-        },
+        createEmptyDraft([], { label: 'Bill 1' }),
       ];
     }
   }
@@ -2205,15 +2208,7 @@ const RetailBilling = () => {
   };
 
   const handleAddDraft = () => {
-    const next = {
-      id: createDraftId(),
-      label: getNextDraftLabel(drafts),
-      items: [],
-      selectedKey: null,
-      isGSTEnabled,
-      transactionType: 'sale',
-      paymentMethod: 'cash',
-    };
+    const next = createEmptyDraft(drafts, { isGSTEnabled });
     setDrafts((prev) => [...prev, next]);
     setActiveDraftId(next.id);
   };
@@ -2225,6 +2220,53 @@ const RetailBilling = () => {
     if (activeDraftId === draftId) {
       setActiveDraftId(nextDrafts[0]?.id || null);
     }
+  };
+
+  const handleSkipDraft = () => {
+    const activeDraft = drafts.find((draft) => draft.id === activeDraftId);
+    if (!activeDraft) return;
+    const hasBillWork =
+      items.length > 0 ||
+      String(customerDetails.name || customerDetails.mobile || '').trim() ||
+      String(discountValue || '').trim() ||
+      String(paymentAmount || '').trim();
+    if (hasBillWork && !window.confirm('Skip this stuck bill and start a fresh bill? The skipped bill will be cleared.')) {
+      return;
+    }
+    const next = createEmptyDraft(drafts.filter((draft) => draft.id !== activeDraftId), { isGSTEnabled });
+    setDrafts((prev) => prev.map((draft) => (draft.id === activeDraftId ? next : draft)));
+    setActiveDraftId(next.id);
+    clearCart();
+    setBarcodeValue('');
+    setQuantityValue('1');
+    setSearchText('');
+    setSearchSuggestions([]);
+    setSearchError('');
+    setMessage('');
+    setDiscountType('flat');
+    setDiscountValue('');
+    setPaymentMethod('cash');
+    setPaymentAmount('');
+    setCustomerModalOpen(false);
+    setCustomerDetails({
+      id: null,
+      name: '',
+      mobile: '',
+      location: '',
+      address: '',
+      type: 'retail',
+      credit_limit: 0,
+      current_balance: 0,
+    });
+    setCustomerSuggestions([]);
+    setLocationSuggestions([]);
+    setCustomerFieldErrors({});
+    setLastOrderId(null);
+    setSelectedOrderId(null);
+    showPopup('Skipped stuck bill. Fresh bill is ready.', 'Billing');
+    setTimeout(() => {
+      if (barcodeRef.current) barcodeRef.current.focus();
+    }, 0);
   };
 
   return (
@@ -2333,6 +2375,15 @@ const RetailBilling = () => {
             ))}
             <button type="button" className="btn btn-sm btn-outline-light" onClick={handleAddDraft}>
               Add Bill
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm billing-skip-draft"
+              onClick={handleSkipDraft}
+              disabled={isConfirmSubmitting}
+              title="Clear the stuck bill and start a fresh bill"
+            >
+              Skip Bill
             </button>
           </div>
 

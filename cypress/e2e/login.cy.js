@@ -6,7 +6,7 @@ describe('Login Test', () => {
     cy.get('input[type="password"]').type('admin');
     cy.get('button[type="submit"]').click();
     cy.wait(7000); // Wait for the login to complete
-    cy.url().should('include', '/dashboard');
-    cy.contains('Dashboard').should('exist');
+    cy.url().should('include', '/billing/retail');
+    cy.contains('Checkout').should('exist');
   });
 });

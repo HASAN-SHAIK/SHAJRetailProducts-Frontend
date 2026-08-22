@@ -8,7 +8,7 @@ describe('Create Order Page Functionalities', () => {
     cy.get('input[type="password"]').type('admin');
     cy.get('button').contains(`Let's Go`).click();
     cy.wait(10000); // Wait for the login to complete
-    cy.url().should('include', '/dashboard');
+    cy.url().should('include', '/billing/retail');
     cy.contains('New Order').click();
   });
 

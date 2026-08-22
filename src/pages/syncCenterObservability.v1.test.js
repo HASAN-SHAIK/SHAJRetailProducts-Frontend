@@ -34,5 +34,8 @@ describe('V1 Sync Center observability presentation', () => {
     expect(source).toContain('<summary>View JSON</summary>');
     expect(source).toContain('event.last_error ||');
     expect(source).toContain('message.last_error ||');
+    expect(source).toContain("handleSkipSyncMessage('outbox', event)");
+    expect(source).toContain("handleSkipSyncMessage('inbox', message)");
+    expect(source).toContain("localPosRequest(`/diagnostics/${queue}/${encodeURIComponent(id)}/skip`");
   });
 });

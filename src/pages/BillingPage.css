@@ -87,6 +87,19 @@
   padding: 4px 10px;
 }
 
+.billing-skip-draft {
+  color: #fed7aa;
+  border: 1px solid rgba(251, 146, 60, 0.45);
+  background: rgba(154, 52, 18, 0.18);
+}
+
+.billing-skip-draft:hover,
+.billing-skip-draft:focus {
+  color: #fff7ed;
+  border-color: rgba(251, 146, 60, 0.8);
+  background: rgba(234, 88, 12, 0.32);
+}
+
 .billing-table-wrapper {
   flex: 1;
   overflow: auto;

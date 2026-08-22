@@ -14,7 +14,7 @@ Cypress.Commands.add('login', (email, password) => {
   cy.contains('button', /let's go/i).click();
   cy.location('pathname', { timeout: 60000 }).should((pathname) => {
     expect(
-      ['/dashboard', '/setup', '/m/dashboard'].some((route) => pathname.includes(route))
+      ['/billing/retail', '/setup', '/m/neworder'].some((route) => pathname.includes(route))
     ).to.eq(true);
   });
   cy.location('pathname', { timeout: 90000 }).should('not.include', '/setup');

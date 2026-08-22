@@ -101,6 +101,12 @@
   color: #f8fafc;
 }
 
+.sync-stat-card strong.sync-stat-text {
+  font-size: 14px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .sync-stat-card small {
   color: #cbd5e1;
   font-size: 12px;

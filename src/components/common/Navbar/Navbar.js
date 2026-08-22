@@ -4,7 +4,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import './Navbar.css'
 import { useSelector } from 'react-redux';
 import { useBranchStore } from '../../../store/branchStore';
-import { isFeatureEnabled } from '../../../utils/entitlements';
 import { ThemeContext } from '../../../ThemeContext';
 import { findBranchById, getBranchDisplayName, getBranchId, normalizeBranchLabel } from '../../../utils/branchLabels';
 import { isLocalPosEnabled } from '../../../Repositories/local/posLocalApiClient';
@@ -13,14 +12,12 @@ import { isLocalPosEnabled } from '../../../Repositories/local/posLocalApiClient
 const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const tenantConfig = useSelector((state) => state.tenant.tenantConfig);
   const userRole = useSelector((state) => state.tenant.role);
   const userDetails = useSelector((state) => state.user.userDetails);
   const branches = useBranchStore((state) => state.branches);
   const selectedBranchId = useBranchStore((state) => state.selectedBranchId);
   const selectedBranchName = useBranchStore((state) => state.selectedBranchName);
   const setSelectedBranchId = useBranchStore((state) => state.setSelectedBranchId);
-  const reportsEnabled = isFeatureEnabled(tenantConfig, 'reports_enabled', true);
   const { theme, toggleTheme } = useContext(ThemeContext);
   const [menuOpen, setMenuOpen] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
@@ -158,7 +155,6 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
     evaluateMoreVisibility();
   }, [
     evaluateMoreVisibility,
-    reportsEnabled,
     selectedBranchId,
     selectedBranchName,
     branches.length,
@@ -286,14 +282,6 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
             </div>
             <div className="nav-actions-right" ref={navActionsRightRef}>
             <div className="nav-main-links">
-              {reportsEnabled && isOpeningCompleted && (
-                <button className={`btn btn-outline-primary nav-pill${isActive('/dashboard') ? ' active' : ''}`} onClick={() => navigateTo('/dashboard')}>
-                  <span className="nav-pill-content">
-                    <i className="bi bi-speedometer2 fs-6" aria-hidden="true" />
-                    <span className="nav-pill-label">Dashboard</span>
-                  </span>
-                </button>
-              )}
               {isOpeningCompleted && (
               <button className={`btn btn-outline-primary nav-pill${isActive('/orders') ? ' active' : ''}`} onClick={() => navigateTo('/orders')}>
                 <span className="nav-pill-content">
