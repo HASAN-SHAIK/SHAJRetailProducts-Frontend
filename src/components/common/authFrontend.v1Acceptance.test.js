@@ -26,13 +26,13 @@ describe('V1 Frontend authentication authorization boundary', () => {
 
   test('local session validation uses an authenticated POSService endpoint', () => {
     expect(localClient).toContain("export const validateLocalPosSession = async () =>");
-    expect(localClient).toContain("request('/diagnostics', { method: 'GET', requireSession: true })");
+    expect(localClient).toContain("request('/diagnostics',{method:'GET',requireSession:true})");
   });
 
   test('logout clears both Central/browser auth and the POS local session', () => {
     expect(logout).toContain('await sqlLogout()');
     expect(logout).toContain('await logoutLocalPosUser()');
-    expect(localClient).toContain('finally { clearLocalPosSession(); }');
+    expect(localClient).toContain('finally{clearLocalPosSession();}');
   });
 
   test('Central browser auth uses HttpOnly cookies instead of JavaScript-readable bearer persistence', () => {
