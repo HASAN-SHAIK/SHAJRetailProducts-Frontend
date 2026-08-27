@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'shaj_pos_registration_request_v1';
+const STORAGE_KEY = 'shaj_pos_registration_request_v2';
 
 const centralBase = () => {
   const configured = String(process.env.REACT_APP_CENTRAL_API_URL || 'http://localhost:5001/api').replace(/\/$/, '');
@@ -42,7 +42,15 @@ const savePending = (value) => {
   } catch {}
 };
 
-export const requestPosRegistration = async ({ tenantId, device }) => {
+export const requestPosRegistration = async ({ tenantId, device, storeNumber, posNo, touchpointId }) => {
+  const businessIdentity = {
+    store_number: String(storeNumber || '').trim().toUpperCase(),
+    pos_no: String(posNo || '').trim().toUpperCase(),
+    touchpoint_id: String(touchpointId || '').trim().toUpperCase(),
+  };
+  if (!businessIdentity.store_number || !businessIdentity.pos_no || !businessIdentity.touchpoint_id) {
+    throw new Error('store_number_pos_no_touchpoint_id_required');
+  }
   const payload = await jsonFetch('/pos-registration/requests', {
     method: 'POST',
     tenantId,
@@ -51,6 +59,7 @@ export const requestPosRegistration = async ({ tenantId, device }) => {
       installation_id: String(device?.installation_id || '').trim() || undefined,
       device_name: String(device?.device_name || window?.navigator?.platform || 'SHAJ POS').trim(),
       os_info: String(window?.navigator?.userAgent || '').slice(0, 500),
+      ...businessIdentity,
     },
   });
   const pending = {
@@ -58,6 +67,7 @@ export const requestPosRegistration = async ({ tenantId, device }) => {
     request_id: payload.request_id,
     request_token: payload.request_token,
     device_id: String(device?.device_id || ''),
+    ...businessIdentity,
     status: payload.status || 'PENDING',
   };
   savePending(pending);

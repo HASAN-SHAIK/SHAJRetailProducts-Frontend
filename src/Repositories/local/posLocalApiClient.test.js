@@ -99,22 +99,36 @@ describe('local POS API client security contract', () => {
     });
   });
 
-  test('device registration uses machine trust and binds store plus terminal without a cashier session', async () => {
+  test('device registration uses machine trust and binds store, POS and touchpoint without a cashier session', async () => {
     global.fetch.mockResolvedValue(jsonResponse({
       device_id: 'dev_pos_1',
       store_id: 'store-1',
+      store_number: 'STORE-001',
+      pos_no: 'POS-01',
+      touchpoint_id: 'TP-01',
       terminal_id: 'POS-01',
       status: 'active',
     }));
 
-    const device = await registerLocalPosDevice({ storeId: 'store-1', terminalId: ' POS-01 ' });
+    const device = await registerLocalPosDevice({
+      storeId: 'store-1',
+      storeNumber: ' STORE-001 ',
+      posNo: ' POS-01 ',
+      touchpointId: ' TP-01 ',
+    });
 
     const [url, options] = global.fetch.mock.calls[0];
     expect(url).toContain('/device/registration');
     expect(options.method).toBe('PUT');
     expect(options.headers['X-POS-Local-Token']).toBe('machine-token-test');
     expect(options.headers['X-POS-Session-Token']).toBeUndefined();
-    expect(JSON.parse(options.body)).toEqual({ store_id: 'store-1', terminal_id: 'POS-01' });
+    expect(JSON.parse(options.body)).toEqual({
+      store_id: 'store-1',
+      store_number: 'STORE-001',
+      pos_no: 'POS-01',
+      touchpoint_id: 'TP-01',
+      terminal_id: 'POS-01',
+    });
     expect(device.status).toBe('active');
   });
 

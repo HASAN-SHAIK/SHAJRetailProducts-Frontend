@@ -1,29 +1,36 @@
 let cachedDeviceId = null;
 
+const createDeviceId = () => {
+  const canUseCrypto = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function';
+  return canUseCrypto ? crypto.randomUUID() : `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
 export function getDeviceId() {
-  if (cachedDeviceId) {
-    return cachedDeviceId;
-  }
-
-  let deviceId;
+  if (cachedDeviceId) return cachedDeviceId;
   try {
-    deviceId = localStorage.getItem('device_id');
-  } catch (err) {
-    deviceId = null;
-  }
+    const deviceId = localStorage.getItem('device_id');
+    if (deviceId) cachedDeviceId = deviceId;
+    return deviceId || null;
+  } catch { return null; }
+}
 
-  if (!deviceId) {
-    const canUseCrypto = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function';
-    deviceId = canUseCrypto
-      ? crypto.randomUUID()
-      : `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    try {
-      localStorage.setItem('device_id', deviceId);
-    } catch (err) {
-      // Ignore storage failures (private mode / blocked storage)
-    }
-  }
+export function setDeviceId(deviceId) {
+  const normalized = String(deviceId || '').trim();
+  if (!normalized) return null;
+  try { localStorage.setItem('device_id', normalized); } catch {}
+  cachedDeviceId = normalized;
+  return normalized;
+}
 
-  cachedDeviceId = deviceId;
-  return deviceId;
+// IDs are created only as part of registration. Opening the browser alone must
+// never make a new machine appear registered.
+export function ensureRegistrationDeviceId(preferredDeviceId = '') {
+  const existing = getDeviceId();
+  if (existing) return existing;
+  return setDeviceId(String(preferredDeviceId || '').trim() || createDeviceId());
+}
+
+export function clearDeviceId() {
+  cachedDeviceId = null;
+  try { localStorage.removeItem('device_id'); } catch {}
 }
