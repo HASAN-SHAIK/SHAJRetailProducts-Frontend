@@ -13,6 +13,7 @@ import { getSessionInfo } from '../../utils/sessionStorage';
 import { login as sqlLogin, issueOfflinePosGrant } from '../../services/authService';
 import {
   enrollLocalPosUser,
+  claimLocalPosSetupCode,
   getCachedLocalPosUserId,
   getLocalPosDevice,
   isLocalPosEnabled,
@@ -37,6 +38,7 @@ const Login = () => {
   const [registrationTenantId, setRegistrationTenantId] = useState(process.env.REACT_APP_POS_TENANT_ID || '');
   const [registration, setRegistration] = useState(() => loadPendingPosRegistration());
   const [registrationBusy, setRegistrationBusy] = useState(false);
+  const [setupCode, setSetupCode] = useState('');
   const posEnabled = isLocalPosEnabled();
   const resumeEmail = process.env.REACT_APP_RESUME_EMAIL || 'admin@hasan.com';
   const resumePassword = process.env.REACT_APP_RESUME_PASSWORD || 'admin';
@@ -138,7 +140,12 @@ const Login = () => {
           setError('Central server is offline and this device has no enrolled offline cashier. Connect once and sign in online to enroll a POS PIN.');
         }
       } else {
-        setError(err?.response?.data?.message || err?.payload?.error || err?.message || 'Login failed');
+        if (err?.code === 'DEV_POS_PROFILE_MISMATCH') {
+          const profile = err.profile;
+          setError(`${profile?.label || 'This tab'} must be attached to ${profile?.storeName || 'its configured store'} / ${profile?.terminalId || 'terminal'} through ${profile?.baseUrl || 'its configured POS API'}. Restart the matching simulated POS service or delete the stale sim-pos database.`);
+        } else {
+          setError(err?.response?.data?.message || err?.payload?.error || err?.message || 'Login failed');
+        }
       }
     } finally {
       setIsLoading(false);
@@ -188,6 +195,26 @@ const Login = () => {
     } catch (err) {
       setError(err?.payload?.message || err?.payload?.error || err?.message || 'Unable to activate approved POS registration.');
     } finally { setRegistrationBusy(false); }
+  };
+
+  const handleClaimSetupCode = async () => {
+    if (registrationBusy) return;
+    const code = String(setupCode || '').trim();
+    if (!code) { setError('Enter the setup code shown in Retail Hub.'); return; }
+    setRegistrationBusy(true);
+    setError('');
+    try {
+      const result = await claimLocalPosSetupCode({ setupCode: code });
+      const localDevice = result?.device || await getLocalPosDevice();
+      setRegistrationDevice(localDevice);
+      setRegistration(null);
+      setSetupCode('');
+      setError(`POS activated for store ${localDevice?.store_id || result?.central?.branch_id} as terminal ${localDevice?.terminal_id || result?.central?.terminal_id}. Sign in to enroll your POS PIN.`);
+    } catch (err) {
+      setError(err?.payload?.message || err?.payload?.error || err?.message || 'Unable to activate POS with this setup code.');
+    } finally {
+      setRegistrationBusy(false);
+    }
   };
 
   const handleContinueOffline = async () => {
@@ -242,6 +269,10 @@ const Login = () => {
         {unregistered && <div className="mb-3 p-3 rounded border" style={{position:'relative',zIndex:1000}} aria-busy={registrationBusy}>
           <strong>Activate this POS</strong>
           <div className="small text-muted mb-2">Device: {registrationDevice?.device_id}</div>
+          <label className="form-label" htmlFor="pos-setup-code">Setup code</label>
+          <input id="pos-setup-code" className="form-control loginzindex" value={setupCode} onChange={e=>setSetupCode(e.target.value.toUpperCase())} placeholder="Paste code from Retail Hub" disabled={registrationBusy}/>
+          <button type="button" className="letsgo" style={{marginTop:12,zIndex:1000}} disabled={registrationBusy} onClick={handleClaimSetupCode}>{registrationBusy?'Activating...':'Activate with setup code'}</button>
+          <div className="small text-muted mt-2">Or use the older approval request flow below.</div>
           <label className="form-label" htmlFor="pos-registration-tenant">Tenant ID</label>
           <input id="pos-registration-tenant" className="form-control loginzindex" value={registrationTenantId} onChange={e=>setRegistrationTenantId(e.target.value)} placeholder="e.g. 11" disabled={Boolean(registration?.request_id) || registrationBusy}/>
           {!registration?.request_id && <button type="button" className="letsgo" style={{marginTop:12,zIndex:1000}} disabled={registrationBusy} onClick={handleRequestRegistration}>{registrationBusy?'Sending...':'Register this POS'}</button>}

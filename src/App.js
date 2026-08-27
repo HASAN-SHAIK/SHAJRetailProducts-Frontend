@@ -75,7 +75,7 @@ import BusinessSetup from './pages/settings/BusinessSetup';
 import { hasFeature, isFeatureEnabled } from './utils/entitlements';
 import { runAppSyncCycle } from './utils/appSyncOrchestrator';
 import { findBranchById, getBranchDisplayName, getBranchId } from './utils/branchLabels';
-import { getLocalPosDevice, isLocalPosEnabled } from './Repositories/local/posLocalApiClient';
+import { getDevelopmentPosProfile, getLocalPosDevice, isLocalPosEnabled } from './Repositories/local/posLocalApiClient';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
@@ -179,6 +179,14 @@ function App() {
   const canUseMobileRoutes = tenantConfigStatus === 'loaded' ? mobileAccessEnabled : true;
   const isStaffUser = String(userDetails?.role || '').toLowerCase() === 'staff';
   const isAdminUser = String(userDetails?.role || '').toLowerCase() === 'admin';
+
+  useEffect(() => {
+    const profile = getDevelopmentPosProfile();
+    if (!profile) return undefined;
+    const previousTitle = document.title;
+    document.title = `${profile.label} ${profile.storeName} ${profile.terminalId} - SHAJRetail`;
+    return () => { document.title = previousTitle; };
+  }, []);
 
   useEffect(() => {
     const applyLocalPosBranch = async () => {

@@ -2,11 +2,63 @@ const DEFAULT_BASE_URL = 'http://127.0.0.1:4782/api/v1';
 const POS_SESSION_KEY = 'pos_local_session_token';
 const POS_USER_KEY = 'pos_local_user_id';
 
+const DEV_POS_PROFILES = Object.freeze({
+  3001: {
+    id: 'pos1',
+    label: 'POS1',
+    baseUrl: 'http://127.0.0.1:4781/api/v1',
+    deviceId: 'SIM-POS-DTN-01',
+    storeId: '11111111-1111-4111-8111-111111111111',
+    terminalId: 'T01',
+    storeName: 'Downtown Hub',
+  },
+  3002: {
+    id: 'pos2',
+    label: 'POS2',
+    baseUrl: 'http://127.0.0.1:4782/api/v1',
+    deviceId: 'SIM-POS-DTN-02',
+    storeId: '11111111-1111-4111-8111-111111111111',
+    terminalId: 'T02',
+    storeName: 'Downtown Hub',
+  },
+  3003: {
+    id: 'pos3',
+    label: 'POS3',
+    baseUrl: 'http://127.0.0.1:4783/api/v1',
+    deviceId: 'SIM-POS-WE-01',
+    storeId: '22222222-2222-4222-8222-222222222222',
+    terminalId: 'T01',
+    storeName: 'West End',
+  },
+});
+
+const isDevelopmentRuntime = () => process.env.NODE_ENV !== 'production';
+let developmentProfilePortOverride = null;
+
+const isLoopbackHost = (hostname) =>
+  ['localhost', '127.0.0.1', '[::1]', '::1'].includes(String(hostname || '').toLowerCase());
+
+export const getDevelopmentPosProfile = () => {
+  if (!isDevelopmentRuntime() || typeof window === 'undefined') return null;
+  if (developmentProfilePortOverride) return DEV_POS_PROFILES[Number(developmentProfilePortOverride)] || null;
+  if (!isLoopbackHost(window.location.hostname)) return null;
+  return DEV_POS_PROFILES[Number(window.location.port)] || null;
+};
+
+export const __setDevelopmentPosProfilePortForTests = (port) => {
+  if (process.env.NODE_ENV === 'test') developmentProfilePortOverride = port ? Number(port) : null;
+};
+
+const scopedKey = (key) => {
+  const profile = getDevelopmentPosProfile();
+  return profile?.id ? `${key}:${profile.id}` : key;
+};
+
 export const isLocalPosEnabled = () =>
   String(process.env.REACT_APP_POS_LOCAL_API_ENABLED || 'false').toLowerCase() === 'true';
 
 const getBaseUrl = () =>
-  String(process.env.REACT_APP_POS_LOCAL_API_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
+  String(getDevelopmentPosProfile()?.baseUrl || process.env.REACT_APP_POS_LOCAL_API_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
 
 if (isLocalPosEnabled()) {
   try {
@@ -34,23 +86,23 @@ const getRuntimeToken = async () => {
 
 const getLocalSessionToken = () => {
   if (typeof window === 'undefined') return null;
-  try { return window.sessionStorage.getItem(POS_SESSION_KEY); } catch { return null; }
+  try { return window.sessionStorage.getItem(scopedKey(POS_SESSION_KEY)); } catch { return null; }
 };
 
 const setLocalSession = (token, userId) => {
   if (typeof window === 'undefined') return;
-  window.sessionStorage.setItem(POS_SESSION_KEY, token);
-  if (userId) window.localStorage.setItem(POS_USER_KEY, String(userId));
+  window.sessionStorage.setItem(scopedKey(POS_SESSION_KEY), token);
+  if (userId) window.localStorage.setItem(scopedKey(POS_USER_KEY), String(userId));
 };
 
 export const clearLocalPosSession = () => {
   if (typeof window === 'undefined') return;
-  try { window.sessionStorage.removeItem(POS_SESSION_KEY); } catch {}
+  try { window.sessionStorage.removeItem(scopedKey(POS_SESSION_KEY)); } catch {}
 };
 
 export const getCachedLocalPosUserId = () => {
   if (typeof window === 'undefined') return null;
-  try { return window.localStorage.getItem(POS_USER_KEY); } catch { return null; }
+  try { return window.localStorage.getItem(scopedKey(POS_USER_KEY)); } catch { return null; }
 };
 
 const request = async (path, { method = 'GET', body, signal, requireSession = true, approvalToken = null } = {}) => {
@@ -85,14 +137,40 @@ const request = async (path, { method = 'GET', body, signal, requireSession = tr
 export const enrollLocalPosUser = async ({ offlineGrant, pin }) =>
   request('/auth/enroll', { method: 'POST', requireSession: false, body: { offline_grant: offlineGrant, pin } });
 
-export const getLocalPosDevice = async () =>
-  request('/device', { method: 'GET', requireSession: false });
+const assertDevelopmentProfileMatchesDevice = (device) => {
+  const profile = getDevelopmentPosProfile();
+  if (!profile || !device) return;
+  const mismatches = [
+    ['device_id', device.device_id, profile.deviceId],
+    ['store_id', device.store_id, profile.storeId],
+    ['terminal_id', device.terminal_id, profile.terminalId],
+  ].filter(([, actual, expected]) => String(actual || '') !== String(expected || ''));
+  if (!mismatches.length) return;
+  const error = new Error(`dev_pos_profile_mismatch:${profile.label}`);
+  error.code = 'DEV_POS_PROFILE_MISMATCH';
+  error.profile = profile;
+  error.mismatches = mismatches.map(([field, actual, expected]) => ({ field, actual, expected }));
+  throw error;
+};
+
+export const getLocalPosDevice = async () => {
+  const device = await request('/device', { method: 'GET', requireSession: false });
+  assertDevelopmentProfileMatchesDevice(device);
+  return device;
+};
 
 export const registerLocalPosDevice = async ({ storeId, terminalId }) =>
   request('/device/registration', {
     method: 'PUT',
     requireSession: false,
     body: { store_id: String(storeId), terminal_id: String(terminalId).trim() },
+  });
+
+export const claimLocalPosSetupCode = async ({ setupCode }) =>
+  request('/device/setup-code', {
+    method: 'POST',
+    requireSession: false,
+    body: { setup_code: String(setupCode || '').trim() },
   });
 
 export const loginLocalPosUser = async ({ userId, pin }) => {
