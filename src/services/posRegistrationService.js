@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'shaj_pos_registration_request_v2';
+const STATUS_CHECK_THROTTLE_MS = 60 * 1000;
 
 const centralBase = () => {
   const configured = String(process.env.REACT_APP_CENTRAL_API_URL || 'http://localhost:5001/api').replace(/\/$/, '');
@@ -8,6 +9,7 @@ const centralBase = () => {
 const jsonFetch = async (path, { method = 'GET', tenantId, registrationToken, body } = {}) => {
   const response = await fetch(`${centralBase()}${path}`, {
     method,
+    cache: 'no-store',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
@@ -42,6 +44,11 @@ const savePending = (value) => {
   } catch {}
 };
 
+const recentlyChecked = (pending) => {
+  const checkedAt = Number(pending?.status_checked_at || 0);
+  return checkedAt > 0 && Date.now() - checkedAt < STATUS_CHECK_THROTTLE_MS;
+};
+
 export const requestPosRegistration = async ({ tenantId, device, storeNumber, posNo, touchpointId }) => {
   const businessIdentity = {
     store_number: String(storeNumber || '').trim().toUpperCase(),
@@ -69,18 +76,20 @@ export const requestPosRegistration = async ({ tenantId, device, storeNumber, po
     device_id: String(device?.device_id || ''),
     ...businessIdentity,
     status: payload.status || 'PENDING',
+    status_checked_at: Date.now(),
   };
   savePending(pending);
   return pending;
 };
 
-export const getPosRegistrationStatus = async (pending = loadPendingPosRegistration()) => {
+export const getPosRegistrationStatus = async (pending = loadPendingPosRegistration(), { force = false } = {}) => {
   if (!pending?.request_id || !pending?.request_token || !pending?.tenant_id) return null;
+  if (!force && recentlyChecked(pending)) return pending;
   const payload = await jsonFetch(`/pos-registration/requests/${encodeURIComponent(pending.request_id)}`, {
     tenantId: pending.tenant_id,
     registrationToken: pending.request_token,
   });
-  const next = { ...pending, ...payload, tenant_id: pending.tenant_id, request_token: pending.request_token };
+  const next = { ...pending, ...payload, tenant_id: pending.tenant_id, request_token: pending.request_token, status_checked_at: Date.now() };
   savePending(next);
   return next;
 };

@@ -1,4 +1,10 @@
-import { POS_PERMISSIONS, canAccessModule, canPerformPosAction } from './permissions';
+import {
+  POS_PERMISSIONS,
+  canAccessModule,
+  canPerformPosAction,
+  canReadSettings,
+  isPosRestrictedRole,
+} from './permissions';
 
 describe('POS capability helpers', () => {
   test('cashier-style permissions can access POS and sell', () => {
@@ -24,5 +30,11 @@ describe('POS capability helpers', () => {
 
   test('legacy order permissions keep POS module visible during migration', () => {
     expect(canAccessModule({ permissions: ['orders:write'] }, 'pos')).toBe(true);
+  });
+
+  test('cashier remains POS-restricted and cannot read settings', () => {
+    const user = { role: 'cashier', permissions: [POS_PERMISSIONS.SALE, 'orders:read'] };
+    expect(isPosRestrictedRole(user)).toBe(true);
+    expect(canReadSettings(user)).toBe(false);
   });
 });

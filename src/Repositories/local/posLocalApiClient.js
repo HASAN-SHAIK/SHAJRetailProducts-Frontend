@@ -5,7 +5,7 @@ const POS_USER_KEY = 'pos_local_user_id';
 const DEV_POS_PROFILES = Object.freeze({
   3001: { id:'pos1', label:'POS1', baseUrl:'http://127.0.0.1:4781/api/v1', deviceId:'SIM-POS-DTN-01', storeId:'11111111-1111-4111-8111-111111111111', storeNumber:'STORE-001', posNo:'POS-01', touchpointId:'TP-01', storeName:'Downtown Hub' },
   3002: { id:'pos2', label:'POS2', baseUrl:'http://127.0.0.1:4782/api/v1', deviceId:'SIM-POS-DTN-02', storeId:'11111111-1111-4111-8111-111111111111', storeNumber:'STORE-001', posNo:'POS-02', touchpointId:'TP-02', storeName:'Downtown Hub' },
-  3003: { id:'pos3', label:'POS3', baseUrl:'http://127.0.0.1:4783/api/v1', deviceId:'SIM-POS-WE-01', storeId:'22222222-2222-4222-8222-222222222222', storeNumber:'STORE-002', posNo:'POS-01', touchpointId:'TP-01', storeName:'West End' },
+  3003: { id:'pos3', label:'POS3', baseUrl:'http://127.0.0.1:4783/api/v1', deviceId:'SIM-POS-WE-01', storeId:'1b7a691b-6eae-42e8-8501-0ec366396f8e', storeNumber:'STORE-002', posNo:'POS-01', touchpointId:'TP-01', storeName:'Hyderabad' },
 });
 
 const isDevelopmentRuntime = () => process.env.NODE_ENV !== 'production';

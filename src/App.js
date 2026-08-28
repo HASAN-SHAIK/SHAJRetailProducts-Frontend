@@ -76,6 +76,7 @@ import { hasFeature, isFeatureEnabled } from './utils/entitlements';
 import { runAppSyncCycle } from './utils/appSyncOrchestrator';
 import { findBranchById, getBranchDisplayName, getBranchId } from './utils/branchLabels';
 import { getDevelopmentPosProfile, getLocalPosDevice, isLocalPosEnabled } from './Repositories/local/posLocalApiClient';
+import { canReadSettings, isPosRestrictedRole } from './utils/permissions';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
@@ -177,7 +178,7 @@ function App() {
   const reportsEnabled = isFeatureEnabled(tenantConfig, 'reports_enabled', true);
   const mobileAccessEnabled = isFeatureEnabled(tenantConfig, 'mobile_access', false);
   const canUseMobileRoutes = tenantConfigStatus === 'loaded' ? mobileAccessEnabled : true;
-  const isStaffUser = String(userDetails?.role || '').toLowerCase() === 'staff';
+  const isStaffUser = isPosRestrictedRole(userDetails);
   const isAdminUser = String(userDetails?.role || '').toLowerCase() === 'admin';
 
   useEffect(() => {
@@ -461,6 +462,11 @@ useEffect(() => {
     if (setupInProgress || setupDidRunRef.current) return;
     if (!userDetails) return;
     if (!navigator.onLine) return;
+    if (!canReadSettings(userDetails)) {
+      setWhatsappEnabled(false);
+      setIsOpeningCompleted(true);
+      return;
+    }
     try {
       const payload = await getSettings();
       setWhatsappEnabled(hasFeature(payload, 'whatsapp_bill_enabled'));

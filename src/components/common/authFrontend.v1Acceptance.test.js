@@ -20,6 +20,11 @@ describe('V1 Frontend authentication authorization boundary', () => {
 
   test('offline login remains explicit PIN authentication against POSService', () => {
     expect(login).toContain("loginLocalPosUser({ userId: cachedUserId, pin: form.posPin })");
+    expect(login).toContain('branch_id: localDevice?.store_id || undefined');
+    expect(login).toContain('This cashier is not assigned to this POS branch.');
+    expect(login).toContain('shouldPollRegistrationStatus(registration)');
+    expect(login).toContain("[registration?.request_id, registration?.request_token, registration?.tenant_id, registration?.status]");
+    expect(login).not.toContain('setInterval(check');
     expect(login).toContain('Central server is offline. Enter your POS PIN and choose Continue Offline.');
     expect(login).toContain('Offline authorization has expired. Connect to the central server and sign in again.');
   });

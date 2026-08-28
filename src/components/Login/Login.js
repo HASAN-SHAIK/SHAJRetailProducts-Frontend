@@ -29,6 +29,11 @@ import {
 
 const validPin = (value) => /^\d{4,8}$/.test(String(value || ''));
 const normalizeCode = (value) => String(value || '').trim().toUpperCase();
+const shouldPollRegistrationStatus = (registration) => {
+  if (!registration?.request_id || !registration?.request_token) return false;
+  const status = String(registration.status || 'PENDING').toUpperCase();
+  return status === 'PENDING';
+};
 const isRegisteredPos = (device) => Boolean(
   device && String(device.status || '').toLowerCase() === 'active' && device.store_id &&
   device.store_number && (device.pos_no || device.terminal_id) && device.touchpoint_id
@@ -40,14 +45,13 @@ const Login = () => {
   const [error, setError] = useState('');
   const [offlineSessionUser, setOfflineSessionUser] = useState(null);
   const [registrationDevice, setRegistrationDevice] = useState(null);
+  const [registrationDeviceError, setRegistrationDeviceError] = useState('');
   const [registrationTenantId, setRegistrationTenantId] = useState(process.env.REACT_APP_POS_TENANT_ID || '');
   const [registrationIdentity, setRegistrationIdentity] = useState({ storeNumber: '', posNo: '', touchpointId: '' });
   const [registration, setRegistration] = useState(() => loadPendingPosRegistration());
   const [registrationBusy, setRegistrationBusy] = useState(false);
   const [setupCode, setSetupCode] = useState('');
   const posEnabled = isLocalPosEnabled();
-  const resumeEmail = process.env.REACT_APP_RESUME_EMAIL || 'admin@hasan.com';
-  const resumePassword = process.env.REACT_APP_RESUME_PASSWORD || 'admin';
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
@@ -57,6 +61,7 @@ const Login = () => {
   useEffect(() => {
     if (!posEnabled) return;
     getLocalPosDevice().then((device) => {
+      setRegistrationDeviceError('');
       setRegistrationDevice(device || null);
       const pending = loadPendingPosRegistration();
       if (pending) {
@@ -74,11 +79,19 @@ const Login = () => {
           touchpointId: device?.touchpoint_id || '',
         });
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      setRegistrationDevice(null);
+      if (err?.code === 'DEV_POS_PROFILE_MISMATCH') {
+        const profile = err.profile;
+        setRegistrationDeviceError(`${profile?.label || 'This tab'} must use ${profile?.storeNumber || 'its configured store'} / ${profile?.posNo || 'POS'} / ${profile?.touchpointId || 'touchpoint'}.`);
+      } else {
+        setRegistrationDeviceError('Local POS service is not ready. Restart POSService and wait for the device endpoint.');
+      }
+    });
   }, [posEnabled]);
 
   useEffect(() => {
-    if (!registration?.request_id || !registration?.request_token) return undefined;
+    if (!shouldPollRegistrationStatus(registration)) return undefined;
     let cancelled = false;
     const check = async () => {
       try {
@@ -89,9 +102,8 @@ const Login = () => {
       }
     };
     check();
-    const id = setInterval(check, 5000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [registration?.request_id, registration?.request_token]);
+    return () => { cancelled = true; };
+  }, [registration?.request_id, registration?.request_token, registration?.tenant_id, registration?.status]);
 
   const applyUser = (userPayload, decoded = null) => {
     if (decoded) dispatch(setTenantIdentity({ tenantId: decoded.tenant_id, role: decoded.role, userId: decoded.user_id }));
@@ -104,7 +116,7 @@ const Login = () => {
     if (isLoading) return;
     setError('');
     if (posEnabled && !validPin(form.posPin)) {
-      setError('Enter a 4–8 digit POS PIN. This PIN is used only for verified offline cashier login on this device.');
+      setError('Enter a 4-8 digit POS PIN. This PIN is used only for verified offline cashier login on this device.');
       return;
     }
     setIsLoading(true);
@@ -121,7 +133,13 @@ const Login = () => {
       }
 
       const deviceId = getDeviceId();
-      const data = await sqlLogin({ device_id: deviceId, remember_me: true, email: form.email, password: form.password });
+      const data = await sqlLogin({
+        device_id: deviceId,
+        branch_id: localDevice?.store_id || undefined,
+        remember_me: true,
+        email: form.email,
+        password: form.password,
+      });
       let decoded = null;
       if (data?.token && typeof window !== 'undefined') { try { decoded = decodeJwtPayload(data.token); } catch { decoded = null; } }
       const userPayload = data.user || (decoded ? { id: decoded.user_id, role: decoded.role, tenant_id: decoded.tenant_id } : null);
@@ -147,6 +165,8 @@ const Login = () => {
         const cachedLocalUserId = getCachedLocalPosUserId();
         if (cachedUser && cachedLocalUserId) { setOfflineSessionUser(cachedUser); setError('Central server is offline. Enter your POS PIN and choose Continue Offline.'); }
         else setError('Central server is offline and this device has no enrolled offline cashier. Connect once and sign in online to enroll a POS PIN.');
+      } else if (err?.response?.data?.code === 'POS_DEVICE_BRANCH_FORBIDDEN' || err?.payload?.code === 'POS_DEVICE_BRANCH_FORBIDDEN') {
+        setError('This cashier is not assigned to this POS branch. Use a cashier for this store, or update the user branch assignment in Retail Hub.');
       } else if (err?.code === 'DEV_POS_PROFILE_MISMATCH') {
         const profile = err.profile;
         setError(`${profile?.label || 'This tab'} must be attached to ${profile?.storeName || 'its configured store'} / ${profile?.posNo || profile?.terminalId || 'POS'} / ${profile?.touchpointId || 'touchpoint'} through ${profile?.baseUrl || 'its configured POS API'}.`);
@@ -165,7 +185,8 @@ const Login = () => {
     if (!storeNumber || !posNo || !touchpointId) { setError('Store Number, POS No and Touchpoint ID are all required.'); return; }
     setRegistrationBusy(true);
     try {
-      const device = registrationDevice || await getLocalPosDevice();
+      const device = await getLocalPosDevice();
+      setRegistrationDeviceError('');
       if (!device?.device_id) throw new Error('local_pos_device_missing');
       // The browser identity is bound only after the operator explicitly starts registration.
       setDeviceId(device.device_id);
@@ -175,8 +196,18 @@ const Login = () => {
       setError('Registration request sent with the Store/POS/Touchpoint identity. Retail Hub can now approve this exact POS.');
     } catch (err) {
       if (err?.payload?.code === 'REGISTRATION_REQUEST_EXISTS') setError('A pending request already exists for this POS. Complete or reject that request before starting another.');
-      else if (err?.payload?.code === 'DEVICE_ALREADY_REGISTERED') setError('This device already exists in the backend. Verify its Store Number, POS No and Touchpoint ID in Retail Hub before retrying.');
-      else setError(err?.payload?.message || err?.message || 'Unable to send POS registration request.');
+      else if (err?.payload?.code === 'DEVICE_ALREADY_REGISTERED') {
+        const existing = err.payload.registration || {};
+        const existingLocation = [existing.store_number, existing.pos_no || existing.terminal_id, existing.touchpoint_id].filter(Boolean).join(' / ');
+        setError(existingLocation ? `This POS device is already registered as ${existingLocation}. Restart POSService and refresh this page before retrying.` : 'This POS device is already registered. Restart POSService and refresh this page before retrying.');
+      }
+      else {
+        if (err?.code === 'DEV_POS_PROFILE_MISMATCH') {
+          const profile = err.profile;
+          setRegistrationDeviceError(`${profile?.label || 'This tab'} must use ${profile?.storeNumber || 'its configured store'} / ${profile?.posNo || 'POS'} / ${profile?.touchpointId || 'touchpoint'}.`);
+        }
+        setError(err?.payload?.message || err?.message || 'Unable to send POS registration request.');
+      }
     } finally { setRegistrationBusy(false); }
   };
 
@@ -185,7 +216,7 @@ const Login = () => {
     setRegistrationBusy(true);
     setError('');
     try {
-      const current = await getPosRegistrationStatus(registration);
+      const current = await getPosRegistrationStatus(registration, { force: true });
       if (current?.status !== 'APPROVED' || !current?.branch_id || !current?.store_number || !current?.pos_no || !current?.touchpoint_id) {
         setRegistration(current || registration);
         setError(current?.status === 'REJECTED' ? 'This POS registration request was rejected.' : 'Still waiting for Retail Hub approval.');
@@ -222,7 +253,7 @@ const Login = () => {
     if (isLoading) return;
     setError('');
     if (!offlineSessionUser) return;
-    if (!validPin(form.posPin)) { setError('Enter your 4–8 digit POS PIN.'); return; }
+    if (!validPin(form.posPin)) { setError('Enter your 4-8 digit POS PIN.'); return; }
     const cachedUserId = getCachedLocalPosUserId();
     if (!cachedUserId) { setError('No offline cashier is enrolled on this device.'); return; }
     setIsLoading(true);
@@ -241,59 +272,101 @@ const Login = () => {
   const browserDeviceMissing = posEnabled && !getDeviceId();
   const unregistered = posEnabled && (browserDeviceMissing || !isRegisteredPos(registrationDevice));
   const registrationStatus = String(registration?.status || '').toUpperCase();
+  const canRequestRegistration = Boolean(registrationDevice?.device_id) && !registrationBusy;
 
   return (
-    <div className="login-wrapper">
-      <img className='companyLogo' src={logo} alt="SHAJ Logo" width="30%" height="20%"/>
+    <div className="login-wrapper wow-page login-page">
       <div className="login-container">
-        <h2 className="tenant-name">SHAJ NextGen Technologies</h2>
-        {process.env.REACT_APP_FOR_RESUME && <p className='demoCredentials'>Demo credentials: {resumeEmail} / {resumePassword}</p>}
-        <div className="floating-shape logincube green"></div>
-        <div className="floating-shape logincircle red"></div>
-        {error && <div className="alert text-danger text-center loginErrorMessage" role="alert" aria-live="assertive">{error}</div>}
+        <header className="login-header">
+          <img className="companyLogo" src={logo} alt="SHAJ Retail Products" />
+          <div>
+            <h1 className="tenant-name">SHAJ Retail</h1>
+            <p className="login-subtitle">{unregistered ? 'Register this terminal before sign in' : 'Sign in to continue billing'}</p>
+          </div>
+        </header>
 
-        {unregistered && <div className="mb-3 p-3 rounded border" style={{position:'relative',zIndex:1000}} aria-busy={registrationBusy}>
-          <strong>Register this POS</strong>
-          <div className="small text-muted mb-2">{browserDeviceMissing ? 'This browser has no registered Device ID.' : `Device: ${registrationDevice?.device_id || 'initializing...'}`}</div>
-          <label className="form-label" htmlFor="pos-registration-store">Store Number</label>
-          <input id="pos-registration-store" name="storeNumber" className="form-control loginzindex" value={registrationIdentity.storeNumber} onChange={handleRegistrationIdentityChange} placeholder="e.g. STORE-001" disabled={Boolean(registration?.request_id) || registrationBusy}/>
-          <label className="form-label" htmlFor="pos-registration-pos">POS No</label>
-          <input id="pos-registration-pos" name="posNo" className="form-control loginzindex" value={registrationIdentity.posNo} onChange={handleRegistrationIdentityChange} placeholder="e.g. POS-01" disabled={Boolean(registration?.request_id) || registrationBusy}/>
-          <label className="form-label" htmlFor="pos-registration-touchpoint">Touchpoint ID</label>
-          <input id="pos-registration-touchpoint" name="touchpointId" className="form-control loginzindex" value={registrationIdentity.touchpointId} onChange={handleRegistrationIdentityChange} placeholder="e.g. TP-01" disabled={Boolean(registration?.request_id) || registrationBusy}/>
-          <label className="form-label" htmlFor="pos-registration-tenant">Tenant ID</label>
-          <input id="pos-registration-tenant" className="form-control loginzindex" value={registrationTenantId} onChange={e=>setRegistrationTenantId(e.target.value)} placeholder="e.g. 11" disabled={Boolean(registration?.request_id) || registrationBusy}/>
-          {!registration?.request_id && <button type="button" className="letsgo" style={{marginTop:12,zIndex:1000}} disabled={registrationBusy || !registrationDevice?.device_id} onClick={handleRequestRegistration}>{registrationBusy?'Sending...':'Register this POS'}</button>}
-          {registration?.request_id && <div className="mt-2">
-            <div className="small">Request: <span className="mono">{registration.request_id}</span></div>
-            <div className="small">Store {registration.store_number} / POS {registration.pos_no} / Touchpoint {registration.touchpoint_id}</div>
-            <div className="small" role="status" aria-live="polite">Status: <strong>{registrationStatus||'PENDING'}</strong></div>
-            <button type="button" className="letsgo" style={{marginTop:10,zIndex:1000}} disabled={registrationBusy} onClick={handleActivateApprovedRegistration}>{registrationStatus==='APPROVED'?'Activate approved POS':'Check approval'}</button>
-          </div>}
-          <div className="small text-muted mt-3">Setup-code activation remains supported for Retail Hub provisioned devices.</div>
-          <label className="form-label" htmlFor="pos-setup-code">Setup code</label>
-          <input id="pos-setup-code" className="form-control loginzindex" value={setupCode} onChange={e=>setSetupCode(e.target.value.toUpperCase())} placeholder="Paste code from Retail Hub" disabled={registrationBusy}/>
-          <button type="button" className="letsgo" style={{marginTop:12,zIndex:1000}} disabled={registrationBusy} onClick={handleClaimSetupCode}>{registrationBusy?'Activating...':'Activate with setup code'}</button>
-        </div>}
+        {error && <div className="alert alert-warning login-alert" role="alert" aria-live="assertive">{error}</div>}
 
-        <form onSubmit={handleSubmit} aria-busy={isLoading}>
-          <label className='form-label' htmlFor="login-email">Email</label>
-          <input id="login-email" className='form-control loginzindex' type="email" name="email" value={form.email} onChange={handleChange} required placeholder="admin@example.com" autoComplete="username" />
-          <label className='form-label' htmlFor="login-password">Password</label>
-          <input id="login-password" className='form-control loginpasswordinput' name="password" type="password" value={form.password} onChange={handleChange} required placeholder="••••••" autoComplete="current-password" />
-          {posEnabled && <>
-            <label className='form-label' htmlFor="login-pos-pin">POS PIN</label>
-            <input id="login-pos-pin" className='form-control loginpasswordinput' name="posPin" type="password" inputMode="numeric" pattern="[0-9]{4,8}" autoComplete="off" value={form.posPin} onChange={handleChange} placeholder="4–8 digits" required />
-            <small className="form-text text-muted">Used for cashier login when this POS is offline. Your central password is never stored locally.</small>
-          </>}
-          <div className="floating-shape loginring orange"></div>
-          <button style={{zIndex:1000}} type="submit" className='letsgo' disabled={isLoading || registrationBusy || unregistered}>
-            {isLoading ? <div className="spinner-border spinner-style text-light" role="status" aria-label="Signing in"></div> : `Let's Go`}
-          </button>
-          {offlineSessionUser && posEnabled && !unregistered && <button style={{zIndex:1000,marginTop:10}} type="button" className='letsgo' onClick={handleContinueOffline} disabled={isLoading || registrationBusy}>Continue Offline</button>}
-        </form>
+        {unregistered ? (
+          <section className="registration-panel" aria-busy={registrationBusy}>
+            <div className="section-heading">
+              <h2>POS Registration</h2>
+              <span className="badge rounded-pill text-bg-info">{registrationStatus || 'NEW'}</span>
+            </div>
+            <p className="device-note">
+              {registrationDeviceError || (browserDeviceMissing ? 'This browser is not linked to a POS device.' : `Device: ${registrationDevice?.device_id || 'waiting for local POS service...'}`)}
+            </p>
+
+            <div className="input-grid">
+              <div className="field">
+                <label className="form-label" htmlFor="pos-registration-store">Store Number</label>
+                <input id="pos-registration-store" name="storeNumber" className="form-control" value={registrationIdentity.storeNumber} onChange={handleRegistrationIdentityChange} placeholder="STORE-001" disabled={Boolean(registration?.request_id) || registrationBusy} />
+              </div>
+              <div className="field">
+                <label className="form-label" htmlFor="pos-registration-pos">POS No</label>
+                <input id="pos-registration-pos" name="posNo" className="form-control" value={registrationIdentity.posNo} onChange={handleRegistrationIdentityChange} placeholder="POS-01" disabled={Boolean(registration?.request_id) || registrationBusy} />
+              </div>
+              <div className="field">
+                <label className="form-label" htmlFor="pos-registration-touchpoint">Touchpoint ID</label>
+                <input id="pos-registration-touchpoint" name="touchpointId" className="form-control" value={registrationIdentity.touchpointId} onChange={handleRegistrationIdentityChange} placeholder="TP-01" disabled={Boolean(registration?.request_id) || registrationBusy} />
+              </div>
+              <div className="field">
+                <label className="form-label" htmlFor="pos-registration-tenant">Tenant ID</label>
+                <input id="pos-registration-tenant" className="form-control" value={registrationTenantId} onChange={e=>setRegistrationTenantId(e.target.value)} placeholder="2" disabled={Boolean(registration?.request_id) || registrationBusy} />
+              </div>
+            </div>
+
+            {!registration?.request_id && (
+              <button type="button" className="btn btn-primary w-100 mt-3" disabled={!canRequestRegistration} onClick={handleRequestRegistration}>
+                {registrationBusy ? 'Sending request...' : registrationDevice?.device_id ? 'Register POS' : 'Waiting for POS service'}
+              </button>
+            )}
+            {registration?.request_id && (
+              <div className="request-summary">
+                <div>Request <span>{registration.request_id}</span></div>
+                <div>Store {registration.store_number} / POS {registration.pos_no} / Touchpoint {registration.touchpoint_id}</div>
+                <button type="button" className="btn btn-primary w-100 mt-3" disabled={registrationBusy} onClick={handleActivateApprovedRegistration}>
+                  {registrationStatus === 'APPROVED' ? 'Activate Approved POS' : 'Check Approval'}
+                </button>
+              </div>
+            )}
+
+            <div className="setup-code-row">
+              <label className="form-label" htmlFor="pos-setup-code">Setup Code</label>
+              <div className="setup-code-actions">
+                <input id="pos-setup-code" className="form-control" value={setupCode} onChange={e=>setSetupCode(e.target.value.toUpperCase())} placeholder="Paste code from Retail Hub" disabled={registrationBusy} />
+                <button type="button" className="btn btn-outline-primary" disabled={registrationBusy} onClick={handleClaimSetupCode}>
+                  {registrationBusy ? 'Activating...' : 'Activate'}
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : (
+          <form className="login-form" onSubmit={handleSubmit} aria-busy={isLoading}>
+            <div className="field">
+              <label className="form-label" htmlFor="login-email">Email</label>
+              <input id="login-email" className="form-control" type="email" name="email" value={form.email} onChange={handleChange} required placeholder="cashier@store.com" autoComplete="username" />
+            </div>
+            <div className="field">
+              <label className="form-label" htmlFor="login-password">Password</label>
+              <input id="login-password" className="form-control" name="password" type="password" value={form.password} onChange={handleChange} required placeholder="Password" autoComplete="current-password" />
+            </div>
+            {posEnabled && (
+            <div className="field">
+              <label className="form-label" htmlFor="login-pos-pin">POS PIN</label>
+              <input id="login-pos-pin" className="form-control" name="posPin" type="password" inputMode="numeric" pattern="[0-9]{4,8}" autoComplete="off" value={form.posPin} onChange={handleChange} placeholder="4-8 digits" required />
+              <small className="field-help">Used for cashier login when this POS is offline.</small>
+            </div>
+            )}
+            <button type="submit" className="btn btn-primary w-100 mt-2" disabled={isLoading || registrationBusy}>
+              {isLoading ? <span className="spinner-border spinner-border-sm text-light" role="status" aria-label="Signing in"></span> : 'Sign In'}
+            </button>
+            {offlineSessionUser && posEnabled && (
+              <button type="button" className="btn btn-outline-primary w-100" onClick={handleContinueOffline} disabled={isLoading || registrationBusy}>Continue Offline</button>
+            )}
+          </form>
+        )}
       </div>
-      <div className="floating-shape circle red"></div><div className="floating-shape triangle purple"></div><div className="floating-shape square yellow"></div><div className="floating-shape wave pink"></div><div className="floating-shape ring orange"></div><div className="floating-shape cube green"></div>
     </div>
   );
 };

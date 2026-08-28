@@ -7,6 +7,7 @@ import { useBranchStore } from '../../../store/branchStore';
 import { ThemeContext } from '../../../ThemeContext';
 import { findBranchById, getBranchDisplayName, getBranchId, normalizeBranchLabel } from '../../../utils/branchLabels';
 import { isLocalPosEnabled } from '../../../Repositories/local/posLocalApiClient';
+import { isPosRestrictedRole } from '../../../utils/permissions';
 
 
 const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) => {
@@ -53,8 +54,7 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
   })();
   const canSelectAllBranches =
     String(userRole || '').toLowerCase() === 'admin' || userDetails?.all_branch_access !== false;
-  const isStaffUser =
-    String(userDetails?.role || userRole || '').toLowerCase() === 'staff';
+  const isStaffUser = isPosRestrictedRole(userDetails || userRole);
 
   useEffect(() => {
     if (!branchOpen) return;
