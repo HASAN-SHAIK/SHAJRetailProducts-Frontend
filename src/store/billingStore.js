@@ -83,40 +83,35 @@ const toKey = (product) => {
   return null;
 };
 
-const normalizeItem = (product, qty = 1, gstMode = 'INCLUSIVE') => {
-  const catalogPrice = getProductPrice(product);
-  return {
-    key: toKey(product),
-    id: product?.id ?? product?.product_id ?? product?.productId ?? null,
-    batch_id: product?.batch_id ?? product?.batchId ?? null,
-    batch_number: product?.batch_number ?? product?.batchNumber ?? null,
-    barcode: product?.barcode ?? null,
-    name: product?.name ?? product?.product_name ?? '-',
-    mrp: Number(product?.mrp ?? product?.mrp_price ?? 0) || 0,
-    actual_price:
-      Number(
-        product?.actual_price ??
-        product?.purchase_price ??
-        product?.purchasePrice ??
-        0
-      ) || 0,
-    purchase_price:
-      Number(
-        product?.purchase_price ??
-        product?.purchasePrice ??
-        product?.actual_price ??
-        0
-      ) || 0,
-    price: catalogPrice,
-    catalog_price: catalogPrice,
-    price_overridden: false,
-    gstPercent: getProductGst(product),
-    ...applyGstTotals(catalogPrice, qty, getProductGst(product), gstMode),
-    qty,
-    is_weight_based: product?.is_weight_based ?? product?.isWeightBased ?? product?.weight_based ?? 0,
-    __stock: getProductStock(product),
-  };
-};
+const normalizeItem = (product, qty = 1, gstMode = 'INCLUSIVE') => ({
+  key: toKey(product),
+  id: product?.id ?? product?.product_id ?? product?.productId ?? null,
+  batch_id: product?.batch_id ?? product?.batchId ?? null,
+  batch_number: product?.batch_number ?? product?.batchNumber ?? null,
+  barcode: product?.barcode ?? null,
+  name: product?.name ?? product?.product_name ?? '-',
+  mrp: Number(product?.mrp ?? product?.mrp_price ?? 0) || 0,
+  actual_price:
+    Number(
+      product?.actual_price ??
+      product?.purchase_price ??
+      product?.purchasePrice ??
+      0
+    ) || 0,
+  purchase_price:
+    Number(
+      product?.purchase_price ??
+      product?.purchasePrice ??
+      product?.actual_price ??
+      0
+    ) || 0,
+  price: getProductPrice(product),
+  gstPercent: getProductGst(product),
+  ...applyGstTotals(getProductPrice(product), qty, getProductGst(product), gstMode),
+  qty,
+  is_weight_based: product?.is_weight_based ?? product?.isWeightBased ?? product?.weight_based ?? 0,
+  __stock: getProductStock(product),
+});
 
 const isWeightBased = (item) => {
   const value = item?.is_weight_based ?? item?.isWeightBased ?? item?.weight_based ?? item?.type;
@@ -158,8 +153,6 @@ export const useBillingStore = create((set, get) => ({
     const nextItems = Array.isArray(items) ? items : [];
     const normalized = nextItems.map((item) => ({
       ...item,
-      catalog_price: item.catalog_price ?? item.price,
-      price_overridden: item.price_overridden === true,
       ...applyGstTotals(item.price, item.qty, item.gstPercent, gstMode),
     }));
     return { items: normalized };
@@ -239,7 +232,6 @@ export const useBillingStore = create((set, get) => ({
           ? {
               ...item,
               price: parsed,
-              price_overridden: parsed !== Number(item.catalog_price ?? item.price),
               ...applyGstTotals(parsed, item.qty, item.gstPercent, gstMode),
             }
           : item
