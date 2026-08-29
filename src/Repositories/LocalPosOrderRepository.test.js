@@ -93,6 +93,167 @@ describe('LocalPosOrderRepository checkout write authority', () => {
     });
   });
 
+  test('creates missing local customer before local POS checkout so sale is not anonymous', async () => {
+    const notFound = new Error('customer_not_found');
+    notFound.status = 404;
+    notFound.payload = { error: 'customer_not_found' };
+    const localPosRequest = jest.fn(async (path, options) => {
+      if (path === '/customers/42') throw notFound;
+      if (path === '/customers' && options?.method === 'POST') {
+        return { id: 'cus_local_42', name: options.body.name, phone: options.body.phone };
+      }
+      if (path === '/customers/cus_local_42') {
+        return { id: 'cus_local_42', name: 'Saved Customer', phone: '9876543210' };
+      }
+      if (path === '/catalog/products/667') return { id: '667', price: { amount_minor: 25000 } };
+      if (path === '/orders' && options?.method === 'POST') {
+        return {
+          id: 'ord_customer_1',
+          client_order_id: options.body.client_order_id,
+          store_id: 'store-1',
+          customer_id: options.body.customer_id,
+          status: 'confirmed',
+          currency: 'INR',
+          subtotal_minor: 25000,
+          discount_minor: 0,
+          tax_minor: 0,
+          total_minor: 25000,
+          items: [],
+        };
+      }
+      if (path === '/orders/ord_customer_1/payments' && options?.method === 'POST') {
+        return { id: 'pay_customer_1', order_id: 'ord_customer_1', amount_minor: 25000, mode: 'cash' };
+      }
+      if (path === '/orders/ord_customer_1/complete') {
+        return {
+          order: {
+            id: 'ord_customer_1',
+            store_id: 'store-1',
+            customer_id: 'cus_local_42',
+            status: 'paid',
+            currency: 'INR',
+            subtotal_minor: 25000,
+            discount_minor: 0,
+            tax_minor: 0,
+            total_minor: 25000,
+            items: [],
+          },
+        };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    jest.doMock('./ApiOrderRepository', () => ({
+      ApiOrderRepository: class ApiOrderRepository {},
+    }));
+    jest.doMock('./local/posLocalApiClient', () => ({
+      isLocalPosEnabled: () => true,
+      localPosRequest,
+    }));
+
+    const { LocalPosOrderRepository } = require('./LocalPosOrderRepository');
+
+    const result = await new LocalPosOrderRepository().createOrder({
+      client_order_id: 'client-customer-1',
+      customer_id: '42',
+      customer_name: 'Saved Customer',
+      customer_phone: '9876543210',
+      products: [{ product_id: '667', quantity: 1, price: 250 }],
+      payments: [{ amount_paid: 250, payment_mode: 'cash' }],
+    });
+
+    expect(localPosRequest).toHaveBeenCalledWith('/customers', expect.objectContaining({
+      method: 'POST',
+      body: expect.objectContaining({ name: 'Saved Customer', phone: '9876543210' }),
+    }));
+    expect(localPosRequest).toHaveBeenCalledWith('/orders', expect.objectContaining({
+      method: 'POST',
+      body: expect.objectContaining({ customer_id: 'cus_local_42' }),
+    }));
+    expect(result.order).toMatchObject({
+      customer_id: 'cus_local_42',
+      customer_name: 'Saved Customer',
+      customer_phone: '9876543210',
+    });
+  });
+
+  test('creates local customer from checkout details when no customer id exists yet', async () => {
+    const localPosRequest = jest.fn(async (path, options) => {
+      if (path === '/customers' && options?.method === 'POST') {
+        return { id: 'cus_local_new', name: options.body.name, phone: options.body.phone };
+      }
+      if (path === '/customers/cus_local_new') {
+        return { id: 'cus_local_new', name: 'New Customer', phone: '9876543210' };
+      }
+      if (path === '/catalog/products/667') return { id: '667', price: { amount_minor: 25000 } };
+      if (path === '/orders' && options?.method === 'POST') {
+        return {
+          id: 'ord_customer_new',
+          client_order_id: options.body.client_order_id,
+          store_id: 'store-1',
+          customer_id: options.body.customer_id,
+          status: 'confirmed',
+          currency: 'INR',
+          subtotal_minor: 25000,
+          discount_minor: 0,
+          tax_minor: 0,
+          total_minor: 25000,
+          items: [],
+        };
+      }
+      if (path === '/orders/ord_customer_new/payments' && options?.method === 'POST') {
+        return { id: 'pay_customer_new', order_id: 'ord_customer_new', amount_minor: 25000, mode: 'cash' };
+      }
+      if (path === '/orders/ord_customer_new/complete') {
+        return {
+          order: {
+            id: 'ord_customer_new',
+            store_id: 'store-1',
+            customer_id: 'cus_local_new',
+            status: 'paid',
+            currency: 'INR',
+            subtotal_minor: 25000,
+            discount_minor: 0,
+            tax_minor: 0,
+            total_minor: 25000,
+            items: [],
+          },
+        };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    jest.doMock('./ApiOrderRepository', () => ({
+      ApiOrderRepository: class ApiOrderRepository {},
+    }));
+    jest.doMock('./local/posLocalApiClient', () => ({
+      isLocalPosEnabled: () => true,
+      localPosRequest,
+    }));
+
+    const { LocalPosOrderRepository } = require('./LocalPosOrderRepository');
+
+    const result = await new LocalPosOrderRepository().createOrder({
+      client_order_id: 'client-customer-new',
+      customer_name: 'New Customer',
+      customer_phone: '9876543210',
+      products: [{ product_id: '667', quantity: 1, price: 250 }],
+      payments: [{ amount_paid: 250, payment_mode: 'cash' }],
+    });
+
+    expect(localPosRequest).toHaveBeenCalledWith('/customers', expect.objectContaining({
+      method: 'POST',
+      body: expect.objectContaining({ name: 'New Customer', phone: '9876543210' }),
+    }));
+    expect(localPosRequest).toHaveBeenCalledWith('/orders', expect.objectContaining({
+      method: 'POST',
+      body: expect.objectContaining({ customer_id: 'cus_local_new' }),
+    }));
+    expect(result.order).toMatchObject({
+      customer_id: 'cus_local_new',
+      customer_name: 'New Customer',
+      customer_phone: '9876543210',
+    });
+  });
+
   test('loads order detail, payments, and receipt from local POS API only', async () => {
     const centralDetail = jest.fn();
     const localPosRequest = jest.fn(async (path) => {

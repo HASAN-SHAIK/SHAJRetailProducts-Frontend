@@ -16,6 +16,8 @@ import { searchLocalProducts } from '../../utils/localProductSearch';
 import { enqueueOfflineOrder, processOfflineQueue } from '../../utils/offlineOrders';
 import { enqueueReceipt } from '../../utils/accountingOffline';
 import { syncAllCustomers } from '../../utils/customersSync';
+import { createOrder } from '../../services/orderService';
+import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 import api from '../../utils/axios';
 import CartList from '../../components/Billing/CartList';
 import BarcodeInput from '../../components/Billing/BarcodeInput';
@@ -218,9 +220,10 @@ const WholesaleBilling = () => {
       showPopup('Customer name and phone are required.', 'Validation');
       return;
     }
+    const localPosMode = isLocalPosEnabled();
     const linkedCustomerId =
-      customer.id || (customer.name || customer.phone ? await queueCustomerSync(customer) : null);
-    if (!linkedCustomerId) {
+      customer.id || (!localPosMode && (customer.name || customer.phone) ? await queueCustomerSync(customer) : null);
+    if (!linkedCustomerId && !localPosMode) {
       showPopup('Select a saved customer for wholesale billing.', 'Validation');
       return;
     }
@@ -273,6 +276,13 @@ const WholesaleBilling = () => {
           is_weight_based: item.is_weight_based,
         })),
       };
+      if (localPosMode) {
+        await createOrder(payload);
+        clearCart();
+        setCustomer({ id: null, name: '', phone: '', type: 'wholesale', credit_limit: 0, current_balance: 0 });
+        showPopup('Wholesale order saved in local POS.', 'Success');
+        return;
+      }
       const offlineEntry = await enqueueOfflineOrder({ type: 'create', payload });
       if (!isCredit && linkedCustomerId && (paymentMethod === 'cash' || paymentMethod === 'bank')) {
         await enqueueReceipt({

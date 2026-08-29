@@ -1,5 +1,6 @@
 import { ApiOrderRepository } from './ApiOrderRepository';
 import { isLocalPosEnabled, localPosRequest } from './local/posLocalApiClient';
+import { toLocalCustomerPayload } from './local/customerPayload';
 
 const uuid = (prefix) => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -114,14 +115,36 @@ const applyLocalCatalogPriceAuthority = async (payload = {}) => {
   return { ...payload, items };
 };
 
-const dropMissingLocalCustomer = async (payload) => {
+const ensureLocalCustomer = async (payload, sourcePayload = {}) => {
   const customerId = payload?.customer_id;
-  if (!customerId) return payload;
+  if (!customerId) {
+    const customerPayload = toLocalCustomerPayload(sourcePayload);
+    if (String(customerPayload.name || '').trim()) {
+      const created = await localPosRequest('/customers', {
+        method: 'POST',
+        body: customerPayload,
+      });
+      if (created?.id) {
+        return { ...payload, customer_id: created.id };
+      }
+    }
+    return payload;
+  }
   try {
     await localPosRequest(`/customers/${encodeURIComponent(String(customerId))}`);
     return payload;
   } catch (error) {
     if (error?.status === 404 || error?.payload?.error === 'customer_not_found') {
+      const customerPayload = toLocalCustomerPayload(sourcePayload);
+      if (String(customerPayload.name || '').trim()) {
+        const created = await localPosRequest('/customers', {
+          method: 'POST',
+          body: customerPayload,
+        });
+        if (created?.id) {
+          return { ...payload, customer_id: created.id };
+        }
+      }
       const next = { ...payload };
       delete next.customer_id;
       return next;
@@ -235,6 +258,29 @@ const normalizeLocalOrder = (order = {}, { payments = [], paymentSummary = null,
   };
 };
 
+const enrichLocalOrderCustomer = async (order) => {
+  const customerId = order?.customer_id || order?.customerId;
+  if (!customerId) return order;
+  try {
+    const customer = await localPosRequest(`/customers/${encodeURIComponent(String(customerId))}`);
+    if (!customer) return order;
+    return {
+      ...order,
+      customer_id: customer.id || customerId,
+      customer_name: customer.name || order.customer_name || null,
+      customer_phone: customer.phone || customer.mobile || order.customer_phone || null,
+      customer: {
+        id: customer.id || customerId,
+        name: customer.name || '',
+        mobile: customer.phone || customer.mobile || null,
+        phone: customer.phone || customer.mobile || null,
+      },
+    };
+  } catch {
+    return order;
+  }
+};
+
 /**
  * Local-first sales repository. It preserves every existing ApiOrderRepository
  * method and redirects the checkout-critical paths to the store-local POS
@@ -249,8 +295,13 @@ export class LocalPosOrderRepository extends ApiOrderRepository {
     if (options.offset) params.set('offset', String(options.offset));
     if (options.status) params.set('status', String(options.status));
     const payload = await localPosRequest(`/orders${params.toString() ? `?${params}` : ''}`);
+    const list = await Promise.all(
+      (Array.isArray(payload?.items) ? payload.items : []).map(async (order) =>
+        enrichLocalOrderCustomer(normalizeLocalOrder(order))
+      )
+    );
     return {
-      list: (Array.isArray(payload?.items) ? payload.items : []).map((order) => normalizeLocalOrder(order)),
+      list,
       pagination: {
         page: options.page || 1,
         limit: options.limit || payload?.count || 0,
@@ -270,18 +321,18 @@ export class LocalPosOrderRepository extends ApiOrderRepository {
     } catch (error) {
       if (error?.status !== 404 && error?.payload?.error !== 'receipt_not_found') throw error;
     }
-    return normalizeLocalOrder(order, {
+    return enrichLocalOrderCustomer(normalizeLocalOrder(order, {
       payments: paymentsPayload?.items || [],
       paymentSummary: paymentsPayload?.summary || null,
       receipt,
-    });
+    }));
   }
 
   async createOrder(payload, options = {}) {
     if (!isLocalPosEnabled()) return super.createOrder(payload, options);
 
     const localCreatePayload = toLocalCreatePayload(payload);
-    const customerCheckedPayload = await dropMissingLocalCustomer(localCreatePayload);
+    const customerCheckedPayload = await ensureLocalCustomer(localCreatePayload, payload);
     const createPayload = await applyLocalCatalogPriceAuthority(customerCheckedPayload);
     if (process.env.NODE_ENV === 'development') {
       console.info('[POS order payload]', JSON.stringify({
@@ -319,7 +370,9 @@ export class LocalPosOrderRepository extends ApiOrderRepository {
     }
 
     const completed = await localPosRequest(`/orders/${encodeURIComponent(String(orderId))}/complete`, { method: 'POST' });
-    const completedOrder = normalizeLocalOrder(completed?.order || completed || order, { receipt: completed?.receipt || null });
+    const completedOrder = await enrichLocalOrderCustomer(
+      normalizeLocalOrder(completed?.order || completed || order, { receipt: completed?.receipt || null })
+    );
     return {
       order: completedOrder,
       orderId,

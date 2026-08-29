@@ -1040,7 +1040,7 @@ const OrdersPage = ({ navigate, mode }) => {
     setRefundMode('cash');
   };
 
-  const openReturnModal = async (event, orderId) => {
+  const openReturnModal = async (event, orderId, clickedOrder = null) => {
     if (event) {
       event.stopPropagation();
     }
@@ -1075,6 +1075,9 @@ const OrdersPage = ({ navigate, mode }) => {
         };
       };
 
+      const clickedOrderItems = buildReturnItems(clickedOrder || {});
+      const clickedOrderFallback = clickedOrderItems.length > 0 ? clickedOrder : null;
+
       let orderData = null;
       if (drawerOrder?.id === orderId) {
         orderData = drawerOrder;
@@ -1084,7 +1087,13 @@ const OrdersPage = ({ navigate, mode }) => {
 
       if (!orderData) {
         if (navigator.onLine) {
-          orderData = await loadFullOrderDetails(orderId);
+          try {
+            orderData = await loadFullOrderDetails(orderId);
+          } catch (detailError) {
+            if (!clickedOrderFallback) throw detailError;
+            console.warn('Using loaded order row for return flow after detail lookup failed', detailError);
+            orderData = clickedOrderFallback;
+          }
         }
         if (!orderData) {
           setReturnError('Order details are not available in local cache yet.');
@@ -1094,7 +1103,13 @@ const OrdersPage = ({ navigate, mode }) => {
       const items = buildReturnItems(orderData);
       if (items.length === 0) {
         if (navigator.onLine) {
-          orderData = await loadFullOrderDetails(orderId);
+          try {
+            orderData = await loadFullOrderDetails(orderId);
+          } catch (detailError) {
+            if (!clickedOrderFallback) throw detailError;
+            console.warn('Using loaded order row for return flow after item detail retry failed', detailError);
+            orderData = clickedOrderFallback;
+          }
         }
         const retriedItems = buildReturnItems(orderData || {});
         if (retriedItems.length === 0) {
@@ -2417,7 +2432,7 @@ const OrdersPage = ({ navigate, mode }) => {
                         <button
                           className="btn btn-outline-warning btn-sm me-2"
                           type="button"
-                          onClick={(event) => openReturnModal(event, order.id)}
+                          onClick={(event) => openReturnModal(event, order.id, order)}
                         >
                           Return
                         </button>
@@ -2650,7 +2665,7 @@ const OrdersPage = ({ navigate, mode }) => {
                   {returnEnabled && isReturnEligible(drawerOrder) && (
                     <button
                       className="btn btn-outline-warning"
-                      onClick={(event) => openReturnModal(event, drawerOrder?.id)}
+                      onClick={(event) => openReturnModal(event, drawerOrder?.id, drawerOrder)}
                     >
                       Return Product
                     </button>
