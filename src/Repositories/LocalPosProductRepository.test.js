@@ -4,13 +4,13 @@ describe('LocalPosProductRepository barcode lookup', () => {
     jest.restoreAllMocks();
   });
 
-  const mockRepositoryDependencies = (localPosRequest) => {
+  const mockRepositoryDependencies = (localPosRequest, cacheOverrides = {}) => {
     jest.doMock('./ApiProductRepository', () => ({
       ApiProductRepository: class ApiProductRepository {
         constructor() {
           this.cache = {
-            getProductCacheByBarcode: jest.fn(async () => null),
-            getProductCacheById: jest.fn(async () => null),
+            getProductCacheByBarcode: jest.fn(async () => cacheOverrides.byBarcode ?? null),
+            getProductCacheById: jest.fn(async () => cacheOverrides.byId ?? null),
             updateProductsBulk: jest.fn(async () => {}),
           };
         }
@@ -172,5 +172,41 @@ describe('LocalPosProductRepository barcode lookup', () => {
     const repository = new LocalPosProductRepository();
 
     await expect(repository.getProductByBarcode('missing-code')).resolves.toBeNull();
+  });
+
+  test('does not let a stale browser barcode cache bypass the local POS catalog authority', async () => {
+    const notFound = new Error('product_not_found');
+    notFound.status = 404;
+    notFound.payload = { error: 'product_not_found' };
+    const localPosRequest = jest.fn(async () => {
+      throw notFound;
+    });
+    mockRepositoryDependencies(localPosRequest, {
+      byBarcode: { id: '18', barcode: '8901234567890', selling_price: 75000 },
+    });
+
+    const { LocalPosProductRepository } = require('./LocalPosProductRepository');
+    const repository = new LocalPosProductRepository();
+
+    await expect(repository.getProductCacheByBarcode('8901234567890')).resolves.toBeNull();
+    expect(localPosRequest).toHaveBeenCalledWith('/catalog/products/barcode/8901234567890');
+  });
+
+  test('does not let a stale browser id cache bypass the local POS catalog authority', async () => {
+    const notFound = new Error('product_not_found');
+    notFound.status = 404;
+    notFound.payload = { error: 'product_not_found' };
+    const localPosRequest = jest.fn(async () => {
+      throw notFound;
+    });
+    mockRepositoryDependencies(localPosRequest, {
+      byId: { id: '24', barcode: '8901234567896', selling_price: 40 },
+    });
+
+    const { LocalPosProductRepository } = require('./LocalPosProductRepository');
+    const repository = new LocalPosProductRepository();
+
+    await expect(repository.getProductCacheById('24')).resolves.toBeNull();
+    expect(localPosRequest).toHaveBeenCalledWith('/catalog/products/24');
   });
 });
