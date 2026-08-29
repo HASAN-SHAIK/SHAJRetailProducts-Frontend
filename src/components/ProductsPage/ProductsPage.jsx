@@ -21,6 +21,99 @@ import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 import { getSettings } from '../../services/settingsService';
 import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 
+const SAMPLE_BARCODE_PRODUCTS = [
+  {
+    name: 'SHAJ Premium Rice 5kg',
+    company: 'SHAJ Foods',
+    category: 'Grocery',
+    barcode: '8909001000011',
+    type: 'Piece',
+    stock_quantity: 25,
+    purchase_price: 410,
+    mrp: 499,
+    hsn_code: '1006',
+    gst_percentage: 5,
+    batch_number: 'RICE-A1',
+    expiry_date: '2027-08-31',
+    selling_price: 475,
+  },
+  {
+    name: 'SHAJ Sunflower Oil 1L',
+    company: 'SHAJ Foods',
+    category: 'Grocery',
+    barcode: '8909001000028',
+    type: 'Piece',
+    stock_quantity: 40,
+    purchase_price: 118,
+    mrp: 155,
+    hsn_code: '1512',
+    gst_percentage: 5,
+    batch_number: 'OIL-B2',
+    expiry_date: '2027-02-28',
+    selling_price: 145,
+  },
+  {
+    name: 'SHAJ Masala Tea 250g',
+    company: 'SHAJ Beverages',
+    category: 'Beverages',
+    barcode: '8909001000035',
+    type: 'Piece',
+    stock_quantity: 36,
+    purchase_price: 82,
+    mrp: 120,
+    hsn_code: '0902',
+    gst_percentage: 5,
+    batch_number: 'TEA-C3',
+    expiry_date: '2027-05-31',
+    selling_price: 110,
+  },
+  {
+    name: 'SHAJ Detergent Powder 1kg',
+    company: 'SHAJ Home Care',
+    category: 'Household',
+    barcode: '8909001000042',
+    type: 'Piece',
+    stock_quantity: 30,
+    purchase_price: 68,
+    mrp: 99,
+    hsn_code: '3402',
+    gst_percentage: 18,
+    batch_number: 'DET-D4',
+    expiry_date: '2028-01-31',
+    selling_price: 92,
+  },
+  {
+    name: 'SHAJ Coconut Hair Oil 200ml',
+    company: 'SHAJ Personal Care',
+    category: 'Personal Care',
+    barcode: '8909001000059',
+    type: 'Piece',
+    stock_quantity: 24,
+    purchase_price: 74,
+    mrp: 115,
+    hsn_code: '3305',
+    gst_percentage: 18,
+    batch_number: 'HAIR-E5',
+    expiry_date: '2028-03-31',
+    selling_price: 105,
+  },
+  {
+    name: 'SHAJ Milk Biscuits 120g',
+    company: 'SHAJ Snacks',
+    category: 'Snacks',
+    barcode: '8909001000066',
+    type: 'Piece',
+    stock_quantity: 80,
+    purchase_price: 18,
+    mrp: 30,
+    hsn_code: '1905',
+    gst_percentage: 18,
+    batch_number: 'BIS-F6',
+    expiry_date: '2027-01-31',
+    selling_price: 28,
+  },
+];
+
 const ProductsPage = ({ navigate }) => {
 //Modal data
  const [productUpdateFlag, setProductUpdateFlag] = useState(false);
@@ -266,6 +359,8 @@ const ProductsPage = ({ navigate }) => {
   const [importPreviewError, setImportPreviewError] = useState('');
   const [importParsing, setImportParsing] = useState(false);
   const [autoCategoryEnabled, setAutoCategoryEnabled] = useState(true);
+  const [scannerBarcode, setScannerBarcode] = useState('');
+  const [scannerMessage, setScannerMessage] = useState('');
 
   useEffect(() => {
     fetchCategories();
@@ -1189,6 +1284,8 @@ const ProductsPage = ({ navigate }) => {
     setImportError('');
     setImportPreviewRows([]);
     setImportPreviewError('');
+    setScannerBarcode('');
+    setScannerMessage('');
   };
   const normalizeImportHeader = (value) =>
     String(value || '')
@@ -1792,6 +1889,77 @@ const ProductsPage = ({ navigate }) => {
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Products');
     XLSX.writeFile(workbook, 'products-import-template.xlsx');
   };
+  const sampleProductByBarcode = useMemo(
+    () => SAMPLE_BARCODE_PRODUCTS.reduce((acc, item) => {
+      acc[String(item.barcode)] = item;
+      return acc;
+    }, {}),
+    []
+  );
+  const toImportPreviewRow = (item = {}) => ({
+    id: toNumber(item.id),
+    name: String(item.name || item.product_name || '').trim(),
+    company: String(item.company || '').trim(),
+    category: String(item.category || '').trim(),
+    barcode: String(item.barcode || '').trim(),
+    stock_quantity: item.stock_quantity ?? '',
+    purchase_price: item.purchase_price ?? '',
+    mrp: item.mrp ?? '',
+    hsn_code: String(item.hsn_code || '').trim(),
+    gst_percentage: item.gst_percentage ?? '',
+    batch_number: String(item.batch_number || '').trim(),
+    expiry_date: item.expiry_date || '',
+    selling_price: item.selling_price ?? '',
+    is_batch_enabled: toFlagValue(item.is_batch_enabled, item.batch_number ? '1' : '0'),
+    is_weight_based: toFlagValue(item.is_weight_based ?? item.type, '0'),
+  });
+  const appendImportRows = (rows = []) => {
+    const nextRows = rows.map(toImportPreviewRow).filter((row) => row.barcode || row.name);
+    if (!nextRows.length) return;
+    setImportPreviewRows((prev) => {
+      const seen = new Set(prev.map((row) => String(row.barcode || '').trim()).filter(Boolean));
+      const merged = [...prev];
+      nextRows.forEach((row) => {
+        if (row.barcode && seen.has(row.barcode)) return;
+        if (row.barcode) seen.add(row.barcode);
+        merged.push(row);
+      });
+      return merged;
+    });
+  };
+  const handleScannerBarcodeSubmit = () => {
+    const barcode = String(scannerBarcode || '').trim();
+    if (!barcode) return;
+    const sample = sampleProductByBarcode[barcode];
+    appendImportRows([
+      sample || {
+        name: '',
+        company: '',
+        category: '',
+        barcode,
+        stock_quantity: '',
+        purchase_price: '',
+        mrp: '',
+        hsn_code: '',
+        gst_percentage: '',
+        batch_number: '',
+        expiry_date: '',
+        selling_price: '',
+      },
+    ]);
+    setScannerBarcode('');
+    setScannerMessage(sample ? `${sample.name} added to preview.` : 'Barcode added. Fill product details in preview.');
+  };
+  const handleLoadSampleBarcodeProducts = () => {
+    appendImportRows(SAMPLE_BARCODE_PRODUCTS);
+    setScannerMessage('Sample barcode products loaded into preview.');
+  };
+  const handleDownloadSampleBarcodeTemplate = () => {
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(SAMPLE_BARCODE_PRODUCTS);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sample Barcodes');
+    XLSX.writeFile(workbook, 'sample-barcode-products.xlsx');
+  };
   const dirtyCount = Object.keys(editedMap).length;
   const importMissingDetails = importPreviewRows
     .map((row, index) => {
@@ -2386,6 +2554,48 @@ const ProductsPage = ({ navigate }) => {
                   <span className="import-info-dot" title="Uses the product name to fill empty category cells.">
                     i
                   </span>
+                </div>
+              </div>
+              <div className="import-upload-card scanner-import-card">
+                <div className="scanner-import-header">
+                  <div>
+                    <h5>Barcode Scanner Entry</h5>
+                    <p>Scan each barcode and press Enter. Known sample barcodes fill product details automatically.</p>
+                  </div>
+                  <span className="scanner-count">{SAMPLE_BARCODE_PRODUCTS.length} sample codes</span>
+                </div>
+                <div className="scanner-entry-row">
+                  <input
+                    className="form-control scanner-barcode-input"
+                    value={scannerBarcode}
+                    placeholder="Focus here and scan barcode"
+                    onChange={(event) => setScannerBarcode(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        handleScannerBarcodeSubmit();
+                      }
+                    }}
+                  />
+                  <button className="btn import-primary-action" type="button" onClick={handleScannerBarcodeSubmit}>
+                    <i className="bi bi-upc-scan" aria-hidden="true"></i>
+                    Add Scan
+                  </button>
+                  <button className="btn import-template-btn" type="button" onClick={handleLoadSampleBarcodeProducts}>
+                    <i className="bi bi-list-check" aria-hidden="true"></i>
+                    Load Samples
+                  </button>
+                </div>
+                <div className="scanner-actions-row">
+                  <button className="btn import-template-btn" type="button" onClick={handleDownloadSampleBarcodeTemplate}>
+                    <i className="bi bi-file-earmark-spreadsheet" aria-hidden="true"></i>
+                    Download Sample Excel
+                  </button>
+                  <a className="btn import-template-btn" href="/sample-barcodes.pdf" target="_blank" rel="noreferrer">
+                    <i className="bi bi-filetype-pdf" aria-hidden="true"></i>
+                    Open Printable Barcode PDF
+                  </a>
+                  {scannerMessage && <span className="scanner-message">{scannerMessage}</span>}
                 </div>
               </div>
               {importPreviewError && (

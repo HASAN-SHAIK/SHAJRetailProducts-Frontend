@@ -611,6 +611,61 @@ body.app-theme-light .products-page .products-refresh-btn:focus {
   margin-bottom: 12px;
 }
 
+.scanner-import-card {
+  margin-top: 16px;
+}
+
+.scanner-import-header,
+.scanner-entry-row,
+.scanner-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.scanner-import-header {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.scanner-import-header p {
+  margin: 6px 0 0;
+  color: #cbd5e1;
+}
+
+.scanner-count {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.22);
+  border: 1px solid rgba(125, 211, 252, 0.25);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.scanner-entry-row {
+  align-items: stretch;
+}
+
+.scanner-barcode-input {
+  min-height: 48px;
+  flex: 1 1 320px;
+  color: #f8fafc !important;
+  background: rgba(15, 23, 42, 0.72) !important;
+  border: 1px solid rgba(125, 211, 252, 0.38) !important;
+}
+
+.scanner-actions-row {
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.scanner-message {
+  color: #86efac;
+  font-weight: 700;
+}
+
 .import-file-drop {
   gap: 24px;
   padding: 12px;
@@ -925,6 +980,8 @@ body.app-theme-light .products-page .products-refresh-btn:focus {
 
   .import-modal-header,
   .import-file-drop,
+  .scanner-import-header,
+  .scanner-entry-row,
   .import-preview-header,
   .import-preview-footer {
     align-items: stretch;
@@ -966,6 +1023,8 @@ body.app-theme-light .products-page .products-refresh-btn:focus {
 
   .import-modal-actions .btn,
   .import-file-button,
+  .scanner-entry-row .btn,
+  .scanner-actions-row .btn,
   .import-clear-btn,
   .import-template-btn {
     width: 100%;
@@ -1076,6 +1135,7 @@ body.app-theme-light .import-stat.validation span {
 body.app-theme-light .import-modal-header p,
 body.app-theme-light .import-file-meta span,
 body.app-theme-light .import-auto-row label,
+body.app-theme-light .scanner-import-header p,
 body.app-theme-light .import-stat span,
 body.app-theme-light .import-stat small,
 body.app-theme-light .import-preview-footer {
@@ -1086,10 +1146,21 @@ body.app-theme-light .import-file-drop,
 body.app-theme-light .import-file-button,
 body.app-theme-light .import-close-action,
 body.app-theme-light .import-template-btn,
+body.app-theme-light .scanner-barcode-input,
 body.app-theme-light .import-preview-table .form-control {
   color: #0f172a !important;
   background: rgba(248, 250, 252, 0.96) !important;
   border-color: rgba(148, 163, 184, 0.4) !important;
+}
+
+body.app-theme-light .scanner-count {
+  color: #1e3a8a;
+  background: rgba(219, 234, 254, 0.92);
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+body.app-theme-light .scanner-message {
+  color: #15803d;
 }
 
 body.app-theme-light .import-preview-table .expenses-table th {

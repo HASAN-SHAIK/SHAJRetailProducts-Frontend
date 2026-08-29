@@ -45,7 +45,7 @@ export const normalizeApiProduct = (product) => {
     hsn_code: product.hsn_code ?? null,
     gst_percentage: product.gst_percentage ?? product.gst_percent ?? null,
     is_batch_enabled: product.is_batch_enabled ?? product.batch_enabled ?? null,
-    expiry_date: product.expiry_date ?? product.expiryDate ?? null,
+    expiry_date: product.expiry_date ?? product.expiryDate ?? product.nearest_expiry_date ?? product.nearestExpiryDate ?? null,
     stock_quantity:
       product.stock_quantity ??
       product.stockQuantity ??
