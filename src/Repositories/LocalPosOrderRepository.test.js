@@ -261,8 +261,10 @@ describe('LocalPosOrderRepository checkout write authority', () => {
     });
   });
 
-  test('applies checkout-level discount to local POS order lines', async () => {
+  test('applies checkout-level discount while letting POSService resolve unchanged catalog prices', async () => {
     const localPosRequest = jest.fn(async (path, options) => {
+      if (path === '/catalog/products/667') return { id: '667', price: { amount_minor: 25000 } };
+      if (path === '/catalog/products/671') return { id: '671', price: { amount_minor: 45000 } };
       if (path === '/orders' && options?.method === 'POST') {
         return {
           id: 'ord_discount_1',
@@ -326,5 +328,66 @@ describe('LocalPosOrderRepository checkout write authority', () => {
         ],
       }),
     }));
+    const createCall = localPosRequest.mock.calls.find(([path, options]) => path === '/orders' && options?.method === 'POST');
+    expect(createCall[1].body.items[0]).not.toHaveProperty('unit_price_minor');
+    expect(createCall[1].body.items[1]).not.toHaveProperty('unit_price_minor');
+  });
+
+  test('keeps a changed UI price explicit so POSService can enforce manual-price policy', async () => {
+    const localPosRequest = jest.fn(async (path, options) => {
+      if (path === '/catalog/products/18') return { id: '18', price: { amount_minor: 7000000 } };
+      if (path === '/orders' && options?.method === 'POST') {
+        return {
+          id: 'ord_override_1',
+          store_id: 'store-1',
+          status: 'confirmed',
+          currency: 'INR',
+          subtotal_minor: 7500000,
+          discount_minor: 0,
+          tax_minor: 0,
+          total_minor: 7500000,
+          items: [],
+        };
+      }
+      if (path === '/orders/ord_override_1/complete') {
+        return { order: { id: 'ord_override_1', store_id: 'store-1', status: 'paid', currency: 'INR', total_minor: 7500000, items: [] } };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    jest.doMock('./ApiOrderRepository', () => ({ ApiOrderRepository: class ApiOrderRepository {} }));
+    jest.doMock('./local/posLocalApiClient', () => ({ isLocalPosEnabled: () => true, localPosRequest }));
+
+    const { LocalPosOrderRepository } = require('./LocalPosOrderRepository');
+    await new LocalPosOrderRepository().createOrder({
+      products: [{ product_id: '18', barcode: '8901234567890', quantity: 1, price: 75000 }],
+      payments: [],
+    });
+
+    expect(localPosRequest).toHaveBeenCalledWith('/orders', expect.objectContaining({
+      body: expect.objectContaining({
+        items: [expect.objectContaining({ product_id: '18', unit_price_minor: 7500000 })],
+      }),
+    }));
+  });
+
+  test('surfaces a missing local catalog product before attempting order creation', async () => {
+    const notFound = new Error('product_not_found');
+    notFound.status = 404;
+    notFound.payload = { error: 'product_not_found' };
+    const localPosRequest = jest.fn(async (path) => {
+      if (path === '/catalog/products/24') throw notFound;
+      throw new Error(`unexpected path ${path}`);
+    });
+    jest.doMock('./ApiOrderRepository', () => ({ ApiOrderRepository: class ApiOrderRepository {} }));
+    jest.doMock('./local/posLocalApiClient', () => ({ isLocalPosEnabled: () => true, localPosRequest }));
+
+    const { LocalPosOrderRepository } = require('./LocalPosOrderRepository');
+    await expect(new LocalPosOrderRepository().createOrder({
+      products: [{ product_id: '24', barcode: '8901234567896', quantity: 1, price: 40 }],
+      payments: [],
+    })).rejects.toMatchObject({ payload: { error: 'product_not_found' } });
+
+    expect(localPosRequest).toHaveBeenCalledWith('/catalog/products/24');
+    expect(localPosRequest.mock.calls.some(([path]) => path === '/orders')).toBe(false);
   });
 });
