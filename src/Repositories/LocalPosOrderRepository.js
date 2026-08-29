@@ -88,6 +88,32 @@ const toLocalCreatePayload = (payload = {}) => ({
   items: toLocalItems(payload),
 });
 
+const applyLocalCatalogPriceAuthority = async (payload = {}) => {
+  const sourceItems = Array.isArray(payload.items) ? payload.items : [];
+  const items = await Promise.all(sourceItems.map(async (item) => {
+    const productId = String(item?.product_id || '').trim();
+    if (!productId) return item;
+
+    // The local SQLite projection is authoritative for sale-time price. The UI
+    // still sends the displayed price so an intentional manual change can be
+    // enforced by POSService, but an unchanged catalog price is omitted from
+    // the create request and resolved again inside the POS transaction.
+    const product = await localPosRequest(`/catalog/products/${encodeURIComponent(productId)}`);
+    const catalogPriceMinor = Number(product?.price?.amount_minor);
+    const requestedPriceMinor = Number(item?.unit_price_minor);
+    if (
+      Number.isFinite(catalogPriceMinor) &&
+      Number.isFinite(requestedPriceMinor) &&
+      Math.round(catalogPriceMinor) === Math.round(requestedPriceMinor)
+    ) {
+      const { unit_price_minor: _catalogEcho, ...catalogOwnedItem } = item;
+      return catalogOwnedItem;
+    }
+    return item;
+  }));
+  return { ...payload, items };
+};
+
 const dropMissingLocalCustomer = async (payload) => {
   const customerId = payload?.customer_id;
   if (!customerId) return payload;
@@ -254,7 +280,9 @@ export class LocalPosOrderRepository extends ApiOrderRepository {
   async createOrder(payload, options = {}) {
     if (!isLocalPosEnabled()) return super.createOrder(payload, options);
 
-    const createPayload = await dropMissingLocalCustomer(toLocalCreatePayload(payload));
+    const localCreatePayload = toLocalCreatePayload(payload);
+    const customerCheckedPayload = await dropMissingLocalCustomer(localCreatePayload);
+    const createPayload = await applyLocalCatalogPriceAuthority(customerCheckedPayload);
     if (process.env.NODE_ENV === 'development') {
       console.info('[POS order payload]', JSON.stringify({
         customer_id: createPayload.customer_id || null,
@@ -263,7 +291,7 @@ export class LocalPosOrderRepository extends ApiOrderRepository {
           product_id: item.product_id,
           barcode: item.barcode || null,
           quantity_milli: item.quantity_milli,
-          unit_price_minor: item.unit_price_minor,
+          unit_price_minor: item.unit_price_minor ?? null,
           discount_minor: item.discount_minor,
           tax_minor: item.tax_minor,
         })),

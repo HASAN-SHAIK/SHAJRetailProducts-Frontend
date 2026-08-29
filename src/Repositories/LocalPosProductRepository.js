@@ -62,6 +62,11 @@ const hydrateProductStock = async (product) => {
   }
 };
 
+const isProductNotFoundError = (error) =>
+  error?.status === 404 ||
+  error?.message === 'product_not_found' ||
+  error?.payload?.error === 'product_not_found';
+
 /** Sources sale-time catalog data from the local POSService/SQLite API. */
 export class LocalPosProductRepository extends ApiProductRepository {
   async updateBatchesBulk(batches) {
@@ -101,9 +106,7 @@ export class LocalPosProductRepository extends ApiProductRepository {
         await localPosRequest(`/catalog/products/barcode/${encodeURIComponent(normalizedBarcode)}`)
       );
     } catch (error) {
-      if (error?.status === 404 || error?.message === 'product_not_found' || error?.payload?.error === 'product_not_found') {
-        return null;
-      }
+      if (isProductNotFoundError(error)) return null;
       throw error;
     }
     if (product) await this.cache.updateProductsBulk([product]).catch(() => {});
@@ -111,17 +114,33 @@ export class LocalPosProductRepository extends ApiProductRepository {
   }
 
   async getProductCacheByBarcode(barcode) {
+    if (isLocalPosEnabled()) {
+      // In local POS mode SQLite is the sale-time catalog authority. A browser
+      // cache entry may be stale or may reference a Central product that has not
+      // reached this POS yet, so always verify the product with POSService.
+      return this.getProductByBarcode(barcode);
+    }
     const cached = await this.cache.getProductCacheByBarcode(barcode);
-    if (cached) return cached;
-    return this.getProductByBarcode(barcode);
+    return cached || this.getProductByBarcode(barcode);
   }
 
   async getProductCacheById(productId) {
-    const cached = await this.cache.getProductCacheById(productId);
-    if (cached || !isLocalPosEnabled()) return cached || super.getProductCacheById(productId);
-    const product = await hydrateProductStock(
-      await localPosRequest(`/catalog/products/${encodeURIComponent(String(productId || '').trim())}`)
-    );
+    if (!isLocalPosEnabled()) {
+      const cached = await this.cache.getProductCacheById(productId);
+      return cached || super.getProductCacheById(productId);
+    }
+
+    const normalizedId = String(productId || '').trim();
+    if (!normalizedId) return null;
+    let product = null;
+    try {
+      product = await hydrateProductStock(
+        await localPosRequest(`/catalog/products/${encodeURIComponent(normalizedId)}`)
+      );
+    } catch (error) {
+      if (isProductNotFoundError(error)) return null;
+      throw error;
+    }
     if (product) await this.cache.updateProductsBulk([product]).catch(() => {});
     return product;
   }
