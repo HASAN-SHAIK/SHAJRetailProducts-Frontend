@@ -4,6 +4,8 @@ import BarcodeInput from './BarcodeInput';
 
 jest.mock('./CameraBarcodeScannerModal', () => () => null);
 
+global.IS_REACT_ACT_ENVIRONMENT = true;
+
 describe('V1 physical barcode scanner keyboard-wedge input', () => {
   let container;
   let root;
