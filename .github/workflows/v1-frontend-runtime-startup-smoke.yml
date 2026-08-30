@@ -21,8 +21,12 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Smallest relevant automated startup-adjacent check
+        id: focused
+        continue-on-error: true
         run: npm test -- --watchAll=false --runTestsByPath src/components/Login/loginInteraction.v1.test.js
       - name: Start real React development server and probe HTTP output
+        id: runtime
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -47,8 +51,23 @@ jobs:
           echo '--- index evidence ---'
           grep -E '(<title>|<div id="root")' /tmp/index.html || true
       - name: Relevant repository suite
+        id: suite
+        if: always()
+        continue-on-error: true
         run: npm test -- --watchAll=false
       - name: Production build
+        id: build
+        if: always()
+        continue-on-error: true
         env:
           CI: 'false'
         run: npm run build
+      - name: Preserve automated gate result
+        if: always()
+        shell: bash
+        run: |
+          echo "focused=${{ steps.focused.outcome }} runtime=${{ steps.runtime.outcome }} suite=${{ steps.suite.outcome }} build=${{ steps.build.outcome }}"
+          test "${{ steps.focused.outcome }}" = success
+          test "${{ steps.runtime.outcome }}" = success
+          test "${{ steps.suite.outcome }}" = success
+          test "${{ steps.build.outcome }}" = success
