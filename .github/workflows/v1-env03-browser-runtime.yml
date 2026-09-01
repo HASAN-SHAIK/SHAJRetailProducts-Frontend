@@ -42,7 +42,7 @@ jobs:
       - name: Install browser runtime harness
         if: always()
         run: |
-          npm install --no-save --no-package-lock playwright@1.55.0
+          npm install --no-save --no-package-lock --legacy-peer-deps playwright@1.55.0
           npx playwright install --with-deps chromium
 
       - name: Real Chromium application startup verification
