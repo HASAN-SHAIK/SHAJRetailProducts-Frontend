@@ -1,0 +1,134 @@
+name: V1 ENV-03 Frontend browser runtime
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/v1-env03-browser-runtime.yml'
+  workflow_dispatch:
+
+jobs:
+  env03:
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      REACT_APP_POS_LOCAL_API_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Smallest relevant automated test
+        id: focused
+        continue-on-error: true
+        run: npm test -- --watchAll=false --runTestsByPath src/components/Login/loginInteraction.v1.test.js
+
+      - name: Relevant repository suite
+        id: suite
+        continue-on-error: true
+        run: npm test -- --watchAll=false
+
+      - name: Production build
+        id: build
+        continue-on-error: true
+        env:
+          CI: 'false'
+        run: npm run build
+
+      - name: Install isolated browser runtime harness
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/env03-playwright
+          mkdir -p /tmp/env03-playwright
+          cd /tmp/env03-playwright
+          npm init -y >/dev/null
+          npm install playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Real Chromium application startup verification
+        id: runtime
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT=3000 BROWSER=none CI=false REACT_APP_POS_LOCAL_API_ENABLED=false npm start > /tmp/env03-frontend.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3000/ >/tmp/env03-index.html; then
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo 'ENV03_SERVER_DIED=true'
+              cat /tmp/env03-frontend.log
+              exit 1
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:3000/ >/tmp/env03-index.html
+
+          node <<'NODE'
+          const { chromium } = require('/tmp/env03-playwright/node_modules/playwright');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            const pageErrors = [];
+            const consoleErrors = [];
+            page.on('pageerror', err => pageErrors.push(String(err)));
+            page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+
+            const response = await page.goto('http://127.0.0.1:3000/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForFunction(() => {
+              const root = document.querySelector('#root');
+              return Boolean(root && root.childElementCount > 0 && (root.innerText || '').trim().length > 0);
+            }, null, { timeout: 60000 });
+
+            const evidence = await page.evaluate(() => ({
+              title: document.title,
+              rootExists: Boolean(document.querySelector('#root')),
+              rootChildren: document.querySelector('#root')?.childElementCount || 0,
+              rootTextLength: (document.querySelector('#root')?.innerText || '').trim().length,
+              bodyText: (document.body?.innerText || '').trim().slice(0, 500),
+              href: location.href,
+            }));
+
+            console.log(`ENV03_HTTP_STATUS=${response?.status()}`);
+            console.log(`ENV03_TITLE=${evidence.title}`);
+            console.log(`ENV03_ROOT_EXISTS=${evidence.rootExists}`);
+            console.log(`ENV03_ROOT_CHILDREN=${evidence.rootChildren}`);
+            console.log(`ENV03_ROOT_TEXT_LENGTH=${evidence.rootTextLength}`);
+            console.log(`ENV03_FINAL_URL=${evidence.href}`);
+            console.log(`ENV03_BODY_SAMPLE=${JSON.stringify(evidence.bodyText)}`);
+            console.log(`ENV03_PAGE_ERRORS=${JSON.stringify(pageErrors)}`);
+            console.log(`ENV03_CONSOLE_ERRORS=${JSON.stringify(consoleErrors)}`);
+
+            if (!response || response.status() !== 200) throw new Error('frontend_http_not_200');
+            if (!evidence.rootExists || evidence.rootChildren < 1 || evidence.rootTextLength < 1) throw new Error('react_did_not_mount');
+            if (pageErrors.length) throw new Error(`browser_page_errors:${pageErrors.join(' | ')}`);
+            console.log('ENV03_BROWSER_RUNTIME_PASS=true');
+            await browser.close();
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
+
+          echo '--- frontend runtime log tail ---'
+          tail -n 120 /tmp/env03-frontend.log
+
+      - name: ENV-03 verdict
+        if: always()
+        shell: bash
+        run: |
+          echo "ENV03_FOCUSED=${{ steps.focused.outcome }}"
+          echo "ENV03_SUITE=${{ steps.suite.outcome }}"
+          echo "ENV03_BUILD=${{ steps.build.outcome }}"
+          echo "ENV03_RUNTIME=${{ steps.runtime.outcome }}"
+          test "${{ steps.focused.outcome }}" = success
+          test "${{ steps.suite.outcome }}" = success
+          test "${{ steps.build.outcome }}" = success
+          test "${{ steps.runtime.outcome }}" = success
