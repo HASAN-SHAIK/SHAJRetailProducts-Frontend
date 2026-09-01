@@ -1,0 +1,73 @@
+name: V1 Frontend runtime startup smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/v1-frontend-runtime-startup-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  runtime-startup:
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      REACT_APP_POS_LOCAL_API_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Smallest relevant automated startup-adjacent check
+        id: focused
+        continue-on-error: true
+        run: npm test -- --watchAll=false --runTestsByPath src/components/Login/loginInteraction.v1.test.js
+      - name: Start real React development server and probe HTTP output
+        id: runtime
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT=3000 BROWSER=none CI=false npm start > /tmp/shaj-frontend.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/ -o /tmp/index.html; then
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat /tmp/shaj-frontend.log
+              exit 1
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:3000/ -o /tmp/index.html
+          grep -q '<div id="root"></div>' /tmp/index.html
+          test -s /tmp/shaj-frontend.log
+          echo '--- runtime log ---'
+          cat /tmp/shaj-frontend.log
+          echo '--- index evidence ---'
+          grep -E '(<title>|<div id="root")' /tmp/index.html || true
+      - name: Relevant repository suite
+        id: suite
+        if: always()
+        continue-on-error: true
+        run: npm test -- --watchAll=false
+      - name: Production build
+        id: build
+        if: always()
+        continue-on-error: true
+        env:
+          CI: 'false'
+        run: npm run build
+      - name: Preserve automated gate result
+        if: always()
+        shell: bash
+        run: |
+          echo "focused=${{ steps.focused.outcome }} runtime=${{ steps.runtime.outcome }} suite=${{ steps.suite.outcome }} build=${{ steps.build.outcome }}"
+          test "${{ steps.focused.outcome }}" = success
+          test "${{ steps.runtime.outcome }}" = success
+          test "${{ steps.suite.outcome }}" = success
+          test "${{ steps.build.outcome }}" = success
