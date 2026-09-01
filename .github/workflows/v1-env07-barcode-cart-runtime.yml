@@ -25,18 +25,21 @@ jobs:
         id: suite
         continue-on-error: true
         run: CI=true npm test -- --watchAll=false
-      - name: Production build
+      - name: Production build gate
         id: build
-        run: npm run build
-      - name: Start production server
+        continue-on-error: true
+        run: CI=true npm run build
+      - name: Start runnable frontend independently
+        id: server
         run: |
-          npx --yes serve@14 -s build -l 4177 > /tmp/env07-serve.log 2>&1 &
-          echo $! > /tmp/env07-serve.pid
-          for i in {1..30}; do
+          CI=false BROWSER=none PORT=4177 npm start > /tmp/env07-server.log 2>&1 &
+          echo $! > /tmp/env07-server.pid
+          for i in {1..60}; do
             if curl -fsS http://127.0.0.1:4177/billing/retail >/tmp/env07.html; then break; fi
             sleep 1
           done
           curl -fsS http://127.0.0.1:4177/billing/retail >/tmp/env07.html
+          echo "ENV07_HTTP_STATUS=200"
       - name: Real browser virtual HID barcode to cart
         id: runtime
         continue-on-error: true
@@ -49,8 +52,9 @@ jobs:
           echo "ENV07_FOCUSED=${{ steps.focused.outcome }}"
           echo "ENV07_SUITE=${{ steps.suite.outcome }}"
           echo "ENV07_BUILD=${{ steps.build.outcome }}"
+          echo "ENV07_SERVER=${{ steps.server.outcome }}"
           echo "ENV07_RUNTIME=${{ steps.runtime.outcome }}"
           echo "ENV07_PHYSICAL_USB_SCANNER_ACCEPTANCE=NOT_YET_VERIFIED"
-          cat /tmp/env07-serve.log || true
+          cat /tmp/env07-server.log || true
           if [ "${{ steps.focused.outcome }}" != "success" ] || [ "${{ steps.runtime.outcome }}" != "success" ]; then exit 1; fi
-          if [ "${{ steps.suite.outcome }}" != "success" ]; then exit 2; fi
+          if [ "${{ steps.suite.outcome }}" != "success" ] || [ "${{ steps.build.outcome }}" != "success" ]; then exit 2; fi
