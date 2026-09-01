@@ -1,0 +1,56 @@
+name: V1 ENV-07 Barcode Cart Runtime
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  env07:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Focused HID acceptance
+        id: focused
+        continue-on-error: true
+        run: CI=true npm test -- --watchAll=false --runTestsByPath src/components/Billing/barcodeHidInput.v1.test.js src/pages/billing/retailBillingProductSearchAuthority.v1.test.js
+      - name: Relevant full frontend suite
+        id: suite
+        continue-on-error: true
+        run: CI=true npm test -- --watchAll=false
+      - name: Production build
+        id: build
+        run: npm run build
+      - name: Start production server
+        run: |
+          npx --yes serve@14 -s build -l 4177 > /tmp/env07-serve.log 2>&1 &
+          echo $! > /tmp/env07-serve.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4177/billing/retail >/tmp/env07.html; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4177/billing/retail >/tmp/env07.html
+      - name: Real browser virtual HID barcode to cart
+        id: runtime
+        continue-on-error: true
+        env:
+          CYPRESS_BASE_URL: http://127.0.0.1:4177
+        run: npx cypress run --browser electron --spec cypress/e2e/runtime/env07-barcode-cart.cy.js
+      - name: Evidence
+        if: always()
+        run: |
+          echo "ENV07_FOCUSED=${{ steps.focused.outcome }}"
+          echo "ENV07_SUITE=${{ steps.suite.outcome }}"
+          echo "ENV07_BUILD=${{ steps.build.outcome }}"
+          echo "ENV07_RUNTIME=${{ steps.runtime.outcome }}"
+          echo "ENV07_PHYSICAL_USB_SCANNER_ACCEPTANCE=NOT_YET_VERIFIED"
+          cat /tmp/env07-serve.log || true
+          if [ "${{ steps.focused.outcome }}" != "success" ] || [ "${{ steps.runtime.outcome }}" != "success" ]; then exit 1; fi
+          if [ "${{ steps.suite.outcome }}" != "success" ]; then exit 2; fi
