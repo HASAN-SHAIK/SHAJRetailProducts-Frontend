@@ -24,7 +24,18 @@ describe('ENV-07 barcode scanner to POS/cart runtime', () => {
 
   it('simulates a keyboard-wedge scanner and adds the looked-up product to the live cart', () => {
     cy.visit('/billing/retail');
-    cy.get('input[placeholder="Scan or type barcode"]', { timeout: 20000 }).should('be.visible').focus().type(`${barcode}{enter}`);
+    cy.get('input[placeholder="Scan or type barcode"]', { timeout: 20000 })
+      .should('be.visible')
+      .then(($input) => {
+        const input = $input[0];
+        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        input.focus();
+        nativeSetter.call(input, barcode);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', bubbles: true, cancelable: true,
+        }));
+      });
     cy.wait('@barcodeLookup');
     cy.contains('ENV07 Runtime Milk', { timeout: 10000 }).should('be.visible');
     cy.get('input[placeholder="Scan or type barcode"]').should('have.value', '').and('be.focused');
