@@ -39,10 +39,16 @@ jobs:
           CI: 'false'
         run: npm run build
 
-      - name: Install browser runtime harness
+      - name: Install isolated browser runtime harness
         if: always()
+        shell: bash
         run: |
-          npm install --no-save --no-package-lock --legacy-peer-deps playwright@1.55.0
+          set -euo pipefail
+          rm -rf /tmp/env03-playwright
+          mkdir -p /tmp/env03-playwright
+          cd /tmp/env03-playwright
+          npm init -y >/dev/null
+          npm install playwright@1.55.0
           npx playwright install --with-deps chromium
 
       - name: Real Chromium application startup verification
@@ -69,7 +75,7 @@ jobs:
           curl -fsS http://127.0.0.1:3000/ >/tmp/env03-index.html
 
           node <<'NODE'
-          const { chromium } = require('playwright');
+          const { chromium } = require('/tmp/env03-playwright/node_modules/playwright');
           (async () => {
             const browser = await chromium.launch({ headless: true });
             const page = await browser.newPage();
