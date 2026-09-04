@@ -24,6 +24,8 @@ jobs:
         continue-on-error: true
         run: CI=true npm test -- --watchAll=false
       - name: Production build gate
+        id: build
+        continue-on-error: true
         run: CI=true npm run build
       - name: Start runnable frontend
         run: |
@@ -44,9 +46,12 @@ jobs:
         if: always()
         run: |
           echo "V1_RETURN_SUITE=${{ steps.suite.outcome }}"
+          echo "V1_RETURN_BUILD=${{ steps.build.outcome }}"
           echo "V1_RETURN_RUNTIME=${{ steps.runtime.outcome }}"
           echo "V1_RETURN_CERTIFICATION_EXACT_HEAD=true"
           cat /tmp/v1-return-server.log || true
-      - name: Fail closed on relevant suite
+      - name: Fail closed on suite and build
         if: always()
-        run: test "${{ steps.suite.outcome }}" = "success"
+        run: |
+          test "${{ steps.suite.outcome }}" = "success"
+          test "${{ steps.build.outcome }}" = "success"
