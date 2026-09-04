@@ -18,22 +18,15 @@ jobs:
       - name: Install
         run: npm ci --no-audit --no-fund
       - name: Focused dashboard network acceptance
-        id: focused
-        continue-on-error: true
         run: CI=true npm test -- --watchAll=false --runTestsByPath src/pages/dashboardNetworkState.v1.test.js
       - name: Relevant frontend suite
-        id: suite
-        continue-on-error: true
         run: CI=true npm test -- --watchAll=false
       - name: Production build gate
-        id: build
-        continue-on-error: true
         env:
           REACT_APP_POS_LOCAL_API_ENABLED: 'true'
           REACT_APP_POS_LOCAL_API_URL: http://127.0.0.1:4782/api/v1
         run: CI=true npm run build
       - name: Start runnable frontend
-        id: server
         env:
           REACT_APP_POS_LOCAL_API_ENABLED: 'true'
           REACT_APP_POS_LOCAL_API_URL: http://127.0.0.1:4782/api/v1
@@ -47,20 +40,11 @@ jobs:
           curl -fsS http://127.0.0.1:4178/dashboard >/tmp/v1-network.html
           echo "V1_DASHBOARD_HTTP_STATUS=200"
       - name: Real browser virtual network-loss recovery
-        id: runtime
-        continue-on-error: true
         env:
           CYPRESS_BASE_URL: http://127.0.0.1:4178
         run: npx cypress run --browser electron --spec cypress/e2e/runtime/v1-dashboard-network-recovery.cy.js
-      - name: Evidence gate
+      - name: Evidence
         if: always()
         run: |
-          echo "V1_FOCUSED=${{ steps.focused.outcome }}"
-          echo "V1_SUITE=${{ steps.suite.outcome }}"
-          echo "V1_BUILD=${{ steps.build.outcome }}"
-          echo "V1_SERVER=${{ steps.server.outcome }}"
-          echo "V1_RUNTIME=${{ steps.runtime.outcome }}"
           echo "V1_PHYSICAL_NETWORK_LOSS_ACCEPTANCE=NOT_YET_VERIFIED"
           cat /tmp/v1-network-server.log || true
-          if [ "${{ steps.focused.outcome }}" != "success" ] || [ "${{ steps.runtime.outcome }}" != "success" ]; then exit 1; fi
-          if [ "${{ steps.suite.outcome }}" != "success" ] || [ "${{ steps.build.outcome }}" != "success" ] || [ "${{ steps.server.outcome }}" != "success" ]; then exit 2; fi
