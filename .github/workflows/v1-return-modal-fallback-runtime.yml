@@ -20,6 +20,8 @@ jobs:
       - name: Focused existing return fallback acceptance
         run: CI=true npm test -- --watchAll=false --runTestsByPath src/components/OrdersPage/OrdersPage.returnModalFallback.test.js
       - name: Relevant frontend suite
+        id: suite
+        continue-on-error: true
         run: CI=true npm test -- --watchAll=false
       - name: Production build gate
         run: CI=true npm run build
@@ -34,11 +36,17 @@ jobs:
           curl -fsS http://127.0.0.1:4182/orders >/tmp/v1-return.html
           echo "V1_RETURN_FRONTEND_HTTP_STATUS=200"
       - name: Real browser return-detail fallback
+        id: runtime
         env:
           CYPRESS_BASE_URL: http://127.0.0.1:4182
         run: npx cypress run --browser electron --spec cypress/e2e/runtime/v1-return-modal-fallback.cy.js
       - name: Evidence
         if: always()
         run: |
+          echo "V1_RETURN_SUITE=${{ steps.suite.outcome }}"
+          echo "V1_RETURN_RUNTIME=${{ steps.runtime.outcome }}"
           echo "V1_RETURN_CERTIFICATION_EXACT_HEAD=true"
           cat /tmp/v1-return-server.log || true
+      - name: Fail closed on relevant suite
+        if: always()
+        run: test "${{ steps.suite.outcome }}" = "success"
