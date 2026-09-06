@@ -9,8 +9,19 @@ jobs:
   return-modal-fallback:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - name: Assert exact tested head
+        run: |
+          ACTUAL_HEAD="$(git rev-parse HEAD)"
+          echo "V1_RETURN_EXPECTED_HEAD=${EXPECTED_HEAD}"
+          echo "V1_RETURN_ACTUAL_HEAD=${ACTUAL_HEAD}"
+          test "${ACTUAL_HEAD}" = "${EXPECTED_HEAD}"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -28,6 +39,8 @@ jobs:
         continue-on-error: true
         run: CI=true npm run build
       - name: Start runnable frontend
+        id: startup
+        continue-on-error: true
         run: |
           CI=false BROWSER=none PORT=4182 npm start > /tmp/v1-return-server.log 2>&1 &
           echo $! > /tmp/v1-return-server.pid
@@ -39,19 +52,41 @@ jobs:
           echo "V1_RETURN_FRONTEND_HTTP_STATUS=200"
       - name: Real browser return-detail fallback
         id: runtime
+        if: steps.startup.outcome == 'success'
+        continue-on-error: true
         env:
           CYPRESS_BASE_URL: http://127.0.0.1:4182
         run: npx cypress run --browser electron --spec cypress/e2e/runtime/v1-return-modal-fallback.cy.js
+      - name: Post-runtime process and HTTP health
+        id: health
+        if: always()
+        continue-on-error: true
+        run: |
+          test -f /tmp/v1-return-server.pid
+          PID="$(cat /tmp/v1-return-server.pid)"
+          kill -0 "$PID"
+          STATUS="$(curl -sS -o /tmp/v1-return-post.html -w '%{http_code}' http://127.0.0.1:4182/orders)"
+          echo "V1_RETURN_PROCESS_ALIVE=true"
+          echo "V1_RETURN_POST_RUNTIME_HTTP=${STATUS}"
+          test "$STATUS" = "200"
       - name: Evidence
         if: always()
         run: |
+          echo "V1_RETURN_EXPECTED_HEAD=${EXPECTED_HEAD}"
+          echo "V1_RETURN_ACTUAL_HEAD=$(git rev-parse HEAD)"
           echo "V1_RETURN_SUITE=${{ steps.suite.outcome }}"
           echo "V1_RETURN_BUILD=${{ steps.build.outcome }}"
+          echo "V1_RETURN_STARTUP=${{ steps.startup.outcome }}"
           echo "V1_RETURN_RUNTIME=${{ steps.runtime.outcome }}"
-          echo "V1_RETURN_CERTIFICATION_EXACT_HEAD=true"
+          echo "V1_RETURN_HEALTH=${{ steps.health.outcome }}"
           cat /tmp/v1-return-server.log || true
-      - name: Fail closed on suite and build
+      - name: Fail closed certification
         if: always()
         run: |
+          test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
           test "${{ steps.suite.outcome }}" = "success"
           test "${{ steps.build.outcome }}" = "success"
+          test "${{ steps.startup.outcome }}" = "success"
+          test "${{ steps.runtime.outcome }}" = "success"
+          test "${{ steps.health.outcome }}" = "success"
+          echo "V1_RETURN_CERTIFICATION=PASS"
