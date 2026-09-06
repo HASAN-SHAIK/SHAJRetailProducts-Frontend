@@ -97,6 +97,16 @@ jobs:
           tail -n 80 /tmp/v1-return-build.log || true
           echo '--- server log ---'
           cat /tmp/v1-return-server.log || true
+      - name: Retain certification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycle-c-return-modal-fallback-evidence
+          path: |
+            /tmp/v1-return-suite.log
+            /tmp/v1-return-build.log
+            /tmp/v1-return-server.log
+          if-no-files-found: warn
       - name: Assert suite gate
         if: always()
         run: test "${{ steps.suite.outputs.exit_code }}" = "0"
