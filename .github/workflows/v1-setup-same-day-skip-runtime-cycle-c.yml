@@ -1,0 +1,182 @@
+name: V1 Setup Same-Day Skip Runtime Cycle C
+
+on:
+  pull_request:
+    paths:
+      - 'src/pages/SetupScreen.jsx'
+      - 'src/pages/setupScreenSameDaySkip.v1.test.js'
+      - '.github/workflows/v1-setup-same-day-skip-runtime-cycle-c.yml'
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact head
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ github.event.pull_request.head.sha || github.sha }}"
+          ACTUAL="$(git rev-parse HEAD)"
+          echo "SETUP_SAME_DAY_EXPECTED_HEAD=$EXPECTED"
+          echo "SETUP_SAME_DAY_ACTUAL_HEAD=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Smallest relevant automated test
+        env:
+          CI: true
+        run: npm test -- --watchAll=false --runTestsByPath src/pages/setupScreenSameDaySkip.v1.test.js
+
+      - name: Complete frontend suite
+        id: suite
+        continue-on-error: true
+        env:
+          CI: true
+        run: npm test -- --watchAll=false
+
+      - name: Production build
+        run: npm run build
+        env:
+          CI: false
+
+      - name: Install isolated Playwright Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/setup-same-day-pw
+          npm install --prefix /tmp/setup-same-day-pw --no-save --no-audit --no-fund playwright@1.55.0
+          /tmp/setup-same-day-pw/node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Start real frontend runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT=3003 BROWSER=none CI=false npm start > /tmp/setup-same-day-frontend.log 2>&1 &
+          echo $! > /tmp/setup-same-day-frontend.pid
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3003/ >/dev/null; then
+              echo 'SETUP_SAME_DAY_APP_HTTP=200'
+              exit 0
+            fi
+            if ! kill -0 "$(cat /tmp/setup-same-day-frontend.pid)" 2>/dev/null; then
+              cat /tmp/setup-same-day-frontend.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat /tmp/setup-same-day-frontend.log
+          exit 1
+
+      - name: Real browser same-day skip verification
+        id: runtime
+        shell: bash
+        env:
+          NODE_PATH: /tmp/setup-same-day-pw/node_modules
+        run: |
+          set -euo pipefail
+          cat > /tmp/setup-same-day-runtime.cjs <<'EOF'
+          const { chromium } = require('playwright');
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            const pageErrors = [];
+            let authChecks = 0;
+            let mediaRequests = 0;
+            page.on('pageerror', error => pageErrors.push(String(error)));
+
+            await page.addInitScript(() => {
+              const now = new Date();
+              const yyyy = now.getFullYear();
+              const mm = String(now.getMonth() + 1).padStart(2, '0');
+              const dd = String(now.getDate()).padStart(2, '0');
+              localStorage.setItem('setup_video_last_played_date_v1', `${yyyy}-${mm}-${dd}`);
+            });
+
+            await page.route('**/auth/getLogin*', async route => {
+              authChecks += 1;
+              await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+            });
+            await page.route('**/videoes/SettingUp%20Video.mp4*', async route => {
+              mediaRequests += 1;
+              await route.continue();
+            });
+
+            const response = await page.goto('http://127.0.0.1:3003/setup', { waitUntil: 'domcontentloaded' });
+            if (!response || response.status() !== 200) throw new Error(`setup route HTTP ${response && response.status()}`);
+
+            await page.locator('.setup-overlay--done').waitFor({ state: 'attached', timeout: 15000 });
+            await page.locator('.setup-status--done').waitFor({ state: 'attached', timeout: 15000 });
+
+            const videoCount = await page.locator('[aria-label="Business setup progress video"]').count();
+            const statusText = (await page.getByRole('status').innerText()).trim();
+            const finalUrl = page.url();
+            const marker = await page.evaluate(() => localStorage.getItem('setup_video_last_played_date_v1'));
+            const appHttp = await fetch('http://127.0.0.1:3003/').then(r => r.status).catch(() => 0);
+
+            console.log(`SETUP_SAME_DAY_AUTH_CHECKS=${authChecks}`);
+            console.log(`SETUP_SAME_DAY_MEDIA_REQUESTS=${mediaRequests}`);
+            console.log(`SETUP_SAME_DAY_VIDEO_COUNT=${videoCount}`);
+            console.log(`SETUP_SAME_DAY_STATUS_TEXT=${JSON.stringify(statusText)}`);
+            console.log(`SETUP_SAME_DAY_FINAL_URL=${finalUrl}`);
+            console.log(`SETUP_SAME_DAY_MARKER=${marker}`);
+            console.log(`SETUP_SAME_DAY_PAGE_ERRORS=${pageErrors.length}`);
+            console.log(`SETUP_SAME_DAY_POST_RUNTIME_HTTP=${appHttp}`);
+
+            if (authChecks < 1) throw new Error('Protected /setup route did not exercise auth check');
+            if (mediaRequests !== 0) throw new Error(`Setup media was requested on same-day revisit: ${mediaRequests}`);
+            if (videoCount !== 0) throw new Error(`Setup video remained rendered on same-day revisit: ${videoCount}`);
+            if (!finalUrl.endsWith('/setup')) throw new Error(`Unexpected navigation away from setup: ${finalUrl}`);
+            if (!marker) throw new Error('Same-day setup marker missing after page load');
+            if (pageErrors.length) throw new Error(`Browser page errors: ${pageErrors.join(' | ')}`);
+            if (appHttp !== 200) throw new Error(`Frontend unhealthy after same-day skip: ${appHttp}`);
+
+            console.log('SETUP_SAME_DAY_RUNTIME_PASS=true');
+            await browser.close();
+          })().catch(error => {
+            console.error(error);
+            process.exit(1);
+          });
+          EOF
+          node /tmp/setup-same-day-runtime.cjs
+
+      - name: Runtime logs and process health
+        if: always()
+        shell: bash
+        run: |
+          echo '--- frontend log tail ---'
+          tail -n 120 /tmp/setup-same-day-frontend.log 2>/dev/null || true
+          if [ -f /tmp/setup-same-day-frontend.pid ] && kill -0 "$(cat /tmp/setup-same-day-frontend.pid)" 2>/dev/null; then
+            echo 'SETUP_SAME_DAY_PROCESS_ALIVE=true'
+            curl -fsS -o /dev/null -w 'SETUP_SAME_DAY_HEALTH_HTTP=%{http_code}\n' http://127.0.0.1:3003/
+          else
+            echo 'SETUP_SAME_DAY_PROCESS_ALIVE=false'
+          fi
+
+      - name: Final certification
+        if: always()
+        shell: bash
+        run: |
+          echo 'SUITE_OUTCOME=${{ steps.suite.outcome }}'
+          echo 'RUNTIME_OUTCOME=${{ steps.runtime.outcome }}'
+          if [ '${{ steps.suite.outcome }}' = 'success' ] && [ '${{ steps.runtime.outcome }}' = 'success' ]; then
+            echo 'SETUP_SAME_DAY_CERTIFICATION=PASS'
+            exit 0
+          fi
+          echo 'SETUP_SAME_DAY_CERTIFICATION=PARTIALLY_VERIFIED'
+          exit 1
