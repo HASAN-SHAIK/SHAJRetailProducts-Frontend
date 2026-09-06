@@ -97,6 +97,21 @@ jobs:
           tail -n 80 /tmp/v1-return-build.log || true
           echo '--- server log ---'
           cat /tmp/v1-return-server.log || true
+      - name: Assert suite gate
+        if: always()
+        run: test "${{ steps.suite.outputs.exit_code }}" = "0"
+      - name: Assert build gate
+        if: always()
+        run: test "${{ steps.build.outputs.exit_code }}" = "0"
+      - name: Assert startup gate
+        if: always()
+        run: test "${{ steps.startup.outcome }}" = "success"
+      - name: Assert runtime gate
+        if: always()
+        run: test "${{ steps.runtime.outcome }}" = "success"
+      - name: Assert health gate
+        if: always()
+        run: test "${{ steps.health.outcome }}" = "success"
       - name: Fail closed certification
         if: always()
         run: |
