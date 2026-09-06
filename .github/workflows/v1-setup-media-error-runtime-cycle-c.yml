@@ -1,0 +1,159 @@
+name: V1 Setup Media Error Runtime Cycle C
+
+on:
+  pull_request:
+    paths:
+      - 'src/pages/SetupScreen.jsx'
+      - 'src/pages/setupScreenResilience.v1.test.js'
+      - '.github/workflows/v1-setup-media-error-runtime-cycle-c.yml'
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact head
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ github.event.pull_request.head.sha || github.sha }}"
+          ACTUAL="$(git rev-parse HEAD)"
+          echo "SETUP_MEDIA_ERROR_EXPECTED_HEAD=$EXPECTED"
+          echo "SETUP_MEDIA_ERROR_ACTUAL_HEAD=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Smallest relevant automated test
+        env:
+          CI: true
+        run: npm test -- --watchAll=false --runTestsByPath src/pages/setupScreenResilience.v1.test.js
+
+      - name: Relevant frontend suite
+        env:
+          CI: true
+        run: npm test -- --watchAll=false
+
+      - name: Production build
+        env:
+          CI: false
+        run: npm run build
+
+      - name: Install isolated Playwright Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/setup-media-pw
+          npm install --prefix /tmp/setup-media-pw --no-save --no-audit --no-fund playwright@1.55.0
+          /tmp/setup-media-pw/node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Start real frontend runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT=3002 BROWSER=none CI=false npm start > /tmp/setup-media-frontend.log 2>&1 &
+          echo $! > /tmp/setup-media-frontend.pid
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3002/ >/dev/null; then
+              echo 'SETUP_MEDIA_ERROR_APP_HTTP=200'
+              exit 0
+            fi
+            if ! kill -0 "$(cat /tmp/setup-media-frontend.pid)" 2>/dev/null; then
+              cat /tmp/setup-media-frontend.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat /tmp/setup-media-frontend.log
+          exit 1
+
+      - name: Real browser media-failure verification
+        shell: bash
+        env:
+          NODE_PATH: /tmp/setup-media-pw/node_modules
+        run: |
+          set -euo pipefail
+          cat > /tmp/setup-media-runtime.cjs <<'EOF'
+          const { chromium } = require('playwright');
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            const pageErrors = [];
+            let authChecks = 0;
+            let mediaFailures = 0;
+            page.on('pageerror', error => pageErrors.push(String(error)));
+
+            await page.route('**/auth/getLogin*', async route => {
+              authChecks += 1;
+              await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+            });
+            await page.route('**/videoes/SettingUp%20Video.mp4*', async route => {
+              mediaFailures += 1;
+              await route.abort('failed');
+            });
+
+            const response = await page.goto('http://127.0.0.1:3002/setup', { waitUntil: 'domcontentloaded' });
+            if (!response || response.status() !== 200) throw new Error(`setup route HTTP ${response && response.status()}`);
+
+            await page.locator('[aria-label="Business setup progress video"]').waitFor({ state: 'attached', timeout: 15000 });
+            await page.locator('.setup-overlay--done').waitFor({ state: 'attached', timeout: 15000 });
+            await page.locator('.setup-status--done').waitFor({ state: 'attached', timeout: 15000 });
+
+            const statusText = (await page.getByRole('status').innerText()).trim();
+            const finalUrl = page.url();
+            const overlayDone = await page.locator('.setup-overlay--done').count() === 1;
+            const statusDone = await page.locator('.setup-status--done').count() === 1;
+            const processHealthy = await fetch('http://127.0.0.1:3002/').then(r => r.status).catch(() => 0);
+
+            console.log(`SETUP_MEDIA_ERROR_AUTH_CHECKS=${authChecks}`);
+            console.log(`SETUP_MEDIA_ERROR_MEDIA_ABORTS=${mediaFailures}`);
+            console.log(`SETUP_MEDIA_ERROR_OVERLAY_DONE=${overlayDone}`);
+            console.log(`SETUP_MEDIA_ERROR_STATUS_DONE=${statusDone}`);
+            console.log(`SETUP_MEDIA_ERROR_STATUS_TEXT=${JSON.stringify(statusText)}`);
+            console.log(`SETUP_MEDIA_ERROR_FINAL_URL=${finalUrl}`);
+            console.log(`SETUP_MEDIA_ERROR_PAGE_ERRORS=${pageErrors.length}`);
+            console.log(`SETUP_MEDIA_ERROR_POST_RUNTIME_HTTP=${processHealthy}`);
+
+            if (authChecks < 1) throw new Error('Protected /setup route did not exercise auth check');
+            if (mediaFailures < 1) throw new Error('Setup media failure was not exercised');
+            if (!overlayDone || !statusDone) throw new Error('Setup presentation remained in pre-completion state after media failure');
+            if (!finalUrl.endsWith('/setup')) throw new Error(`Unexpected navigation away from setup: ${finalUrl}`);
+            if (pageErrors.length) throw new Error(`Browser page errors: ${pageErrors.join(' | ')}`);
+            if (processHealthy !== 200) throw new Error(`Frontend unhealthy after media failure: ${processHealthy}`);
+
+            console.log('SETUP_MEDIA_ERROR_RUNTIME_PASS=true');
+            await browser.close();
+          })().catch(error => {
+            console.error(error);
+            process.exit(1);
+          });
+          EOF
+          node /tmp/setup-media-runtime.cjs
+
+      - name: Runtime logs and process health
+        if: always()
+        shell: bash
+        run: |
+          echo '--- frontend log tail ---'
+          tail -n 120 /tmp/setup-media-frontend.log 2>/dev/null || true
+          if [ -f /tmp/setup-media-frontend.pid ] && kill -0 "$(cat /tmp/setup-media-frontend.pid)" 2>/dev/null; then
+            echo 'SETUP_MEDIA_ERROR_PROCESS_ALIVE=true'
+            curl -fsS -o /dev/null -w 'SETUP_MEDIA_ERROR_HEALTH_HTTP=%{http_code}\n' http://127.0.0.1:3002/
+          else
+            echo 'SETUP_MEDIA_ERROR_PROCESS_ALIVE=false'
+            exit 1
+          fi
