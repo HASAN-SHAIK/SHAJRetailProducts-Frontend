@@ -30,7 +30,7 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Existing focused auth acceptance
         run: CI=true npm test -- --watchAll=false --runTestsByPath src/components/common/authFrontend.v1Acceptance.test.js
-      - name: Production build gate
+      - name: CI production build gate
         id: build
         run: |
           set +e
@@ -40,11 +40,22 @@ jobs:
           echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
           echo "CYCLE_C_LOGOUT_BUILD_EXIT_CODE=${RC}"
           exit 0
-      - name: Start runnable frontend
-        id: startup
+      - name: Build runnable production bundle
+        id: runtime_build
         run: |
           set +e
-          CI=false BROWSER=none PORT=4184 npm start > /tmp/cycle-c-logout-server.log 2>&1 &
+          set -o pipefail
+          CI=false npm run build 2>&1 | tee /tmp/cycle-c-logout-runtime-build.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          echo "CYCLE_C_LOGOUT_RUNTIME_BUILD_EXIT_CODE=${RC}"
+          exit 0
+      - name: Start runnable production frontend
+        id: startup
+        if: steps.runtime_build.outputs.exit_code == '0'
+        run: |
+          set +e
+          npx --yes serve@14 -s build -l 4184 > /tmp/cycle-c-logout-server.log 2>&1 &
           echo $! > /tmp/cycle-c-logout-server.pid
           RC=1
           for i in {1..60}; do
@@ -103,14 +114,17 @@ jobs:
         run: |
           echo "CYCLE_C_EXACT_HEAD=$(git rev-parse HEAD)"
           echo "CYCLE_C_LOGOUT_BUILD_EXIT_CODE=${{ steps.build.outputs.exit_code }}"
+          echo "CYCLE_C_LOGOUT_RUNTIME_BUILD_EXIT_CODE=${{ steps.runtime_build.outputs.exit_code }}"
           echo "CYCLE_C_LOGOUT_STARTUP_EXIT_CODE=${{ steps.startup.outputs.exit_code }}"
           echo "CYCLE_C_LOGOUT_RUNTIME_EXIT_CODE=${{ steps.runtime.outputs.exit_code }}"
           echo "CYCLE_C_LOGOUT_HEALTH_EXIT_CODE=${{ steps.health.outputs.exit_code }}"
           echo "CYCLE_C_LOGOUT_SUITE_EXIT_CODE=${{ steps.suite.outputs.exit_code }}"
           echo '--- runtime ---'
           cat /tmp/cycle-c-logout-runtime.log || true
-          echo '--- build tail ---'
+          echo '--- CI build tail ---'
           tail -n 100 /tmp/cycle-c-logout-build.log || true
+          echo '--- runtime build tail ---'
+          tail -n 60 /tmp/cycle-c-logout-runtime-build.log || true
           echo '--- suite tail ---'
           tail -n 120 /tmp/cycle-c-logout-suite.log || true
           echo '--- server log ---'
@@ -123,11 +137,15 @@ jobs:
           path: |
             /tmp/cycle-c-logout-runtime.log
             /tmp/cycle-c-logout-build.log
+            /tmp/cycle-c-logout-runtime-build.log
             /tmp/cycle-c-logout-suite.log
             /tmp/cycle-c-logout-server.log
             /tmp/cycle-c-logout.html
             /tmp/cycle-c-logout-post.html
           if-no-files-found: warn
+      - name: Assert runtime build gate
+        if: always()
+        run: test "${{ steps.runtime_build.outputs.exit_code }}" = "0"
       - name: Assert runtime gate
         if: always()
         run: test "${{ steps.runtime.outputs.exit_code }}" = "0"
@@ -137,6 +155,6 @@ jobs:
       - name: Assert suite gate
         if: always()
         run: test "${{ steps.suite.outputs.exit_code }}" = "0"
-      - name: Assert build gate
+      - name: Assert CI build gate
         if: always()
         run: test "${{ steps.build.outputs.exit_code }}" = "0"
