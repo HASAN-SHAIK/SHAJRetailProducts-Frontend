@@ -92,13 +92,6 @@ jobs:
           cat > /tmp/setup-prior-day-runtime.cjs <<'EOF'
           const { chromium } = require('playwright');
 
-          const dateKey = (date) => {
-            const yyyy = date.getFullYear();
-            const mm = String(date.getMonth() + 1).padStart(2, '0');
-            const dd = String(date.getDate()).padStart(2, '0');
-            return `${yyyy}-${mm}-${dd}`;
-          };
-
           (async () => {
             const browser = await chromium.launch({ headless: true });
             const page = await browser.newPage();
@@ -130,14 +123,18 @@ jobs:
 
             const video = page.locator('[aria-label="Business setup progress video"]');
             await video.waitFor({ state: 'attached', timeout: 15000 });
-            await page.waitForFunction(() => {
-              const now = new Date();
-              const yyyy = now.getFullYear();
-              const mm = String(now.getMonth() + 1).padStart(2, '0');
-              const dd = String(now.getDate()).padStart(2, '0');
-              return localStorage.getItem('setup_video_last_played_date_v1') === `${yyyy}-${mm}-${dd}`;
-            }, null, { timeout: 15000 });
 
+            const beforeMarker = await page.evaluate(() => localStorage.getItem('setup_video_last_played_date_v1'));
+            const playResult = await video.evaluate(async el => {
+              try {
+                await el.play();
+                return { ok: true, paused: el.paused, readyState: el.readyState, networkState: el.networkState, mediaError: el.error ? `${el.error.code}:${el.error.message || ''}` : '' };
+              } catch (error) {
+                return { ok: false, paused: el.paused, readyState: el.readyState, networkState: el.networkState, mediaError: el.error ? `${el.error.code}:${el.error.message || ''}` : '', playError: String(error) };
+              }
+            });
+
+            await page.waitForTimeout(1200);
             const marker = await page.evaluate(() => localStorage.getItem('setup_video_last_played_date_v1'));
             const today = await page.evaluate(() => {
               const now = new Date();
@@ -146,6 +143,7 @@ jobs:
               const dd = String(now.getDate()).padStart(2, '0');
               return `${yyyy}-${mm}-${dd}`;
             });
+            const mediaState = await video.evaluate(el => ({ paused: el.paused, readyState: el.readyState, networkState: el.networkState, currentTime: el.currentTime, mediaError: el.error ? `${el.error.code}:${el.error.message || ''}` : '' }));
             const videoCount = await video.count();
             const finalUrl = page.url();
             const appHttp = await fetch('http://127.0.0.1:3004/').then(r => r.status).catch(() => 0);
@@ -153,8 +151,11 @@ jobs:
             console.log(`SETUP_PRIOR_DAY_AUTH_CHECKS=${authChecks}`);
             console.log(`SETUP_PRIOR_DAY_MEDIA_REQUESTS=${mediaRequests}`);
             console.log(`SETUP_PRIOR_DAY_VIDEO_COUNT=${videoCount}`);
+            console.log(`SETUP_PRIOR_DAY_BEFORE_MARKER=${beforeMarker}`);
             console.log(`SETUP_PRIOR_DAY_MARKER=${marker}`);
             console.log(`SETUP_PRIOR_DAY_TODAY=${today}`);
+            console.log(`SETUP_PRIOR_DAY_PLAY_RESULT=${JSON.stringify(playResult)}`);
+            console.log(`SETUP_PRIOR_DAY_MEDIA_STATE=${JSON.stringify(mediaState)}`);
             console.log(`SETUP_PRIOR_DAY_FINAL_URL=${finalUrl}`);
             console.log(`SETUP_PRIOR_DAY_PAGE_ERRORS=${pageErrors.length}`);
             console.log(`SETUP_PRIOR_DAY_POST_RUNTIME_HTTP=${appHttp}`);
@@ -162,6 +163,7 @@ jobs:
             if (authChecks < 1) throw new Error('Protected /setup route did not exercise auth check');
             if (mediaRequests < 1) throw new Error('Setup media was not requested for prior-day revisit');
             if (videoCount !== 1) throw new Error(`Expected one setup video, found ${videoCount}`);
+            if (!playResult.ok) throw new Error(`Real setup media playback did not start: ${JSON.stringify(playResult)}`);
             if (marker !== today) throw new Error(`Playback did not advance marker to today: ${marker} vs ${today}`);
             if (!finalUrl.endsWith('/setup')) throw new Error(`Unexpected navigation away from setup: ${finalUrl}`);
             if (pageErrors.length) throw new Error(`Browser page errors: ${pageErrors.join(' | ')}`);
