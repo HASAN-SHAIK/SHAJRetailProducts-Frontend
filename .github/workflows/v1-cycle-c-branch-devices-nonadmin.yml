@@ -19,15 +19,9 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Existing focused BranchDevices acceptance
         id: focused
-        continue-on-error: true
         run: CI=true npm test -- --watchAll=false --runTestsByPath src/pages/BranchDevices.v1Acceptance.test.js
-      - name: Relevant full frontend suite
-        id: suite
-        continue-on-error: true
-        run: CI=true npm test -- --watchAll=false
       - name: Production build gate
         id: build
-        continue-on-error: true
         run: CI=true npm run build
       - name: Start runnable frontend
         id: server
@@ -42,38 +36,30 @@ jobs:
           echo "CYCLE_C_BRANCH_DEVICES_APP_HTTP=200"
       - name: Real browser non-admin authority path
         id: runtime
-        continue-on-error: true
+        run: npx cypress run --browser electron --spec cypress/e2e/runtime/branch-devices-nonadmin.cy.js
         env:
           CYPRESS_BASE_URL: http://127.0.0.1:4182
-        run: npx cypress run --browser electron --spec cypress/e2e/runtime/branch-devices-nonadmin.cy.js
       - name: Post-runtime process health
         id: health
         if: always()
-        continue-on-error: true
         run: |
           curl -fsS http://127.0.0.1:4182/branch-devices >/dev/null
           test -s /tmp/cycle-c-branch-devices-server.pid
           kill -0 "$(cat /tmp/cycle-c-branch-devices-server.pid)"
           echo "CYCLE_C_BRANCH_DEVICES_POST_RUNTIME_HTTP=200"
           echo "CYCLE_C_BRANCH_DEVICES_PROCESS_ALIVE=true"
-      - name: Certification evidence
+      - name: Relevant full frontend suite
+        id: suite
         if: always()
-        env:
-          FOCUSED_OUTCOME: ${{ steps.focused.outcome }}
-          SUITE_OUTCOME: ${{ steps.suite.outcome }}
-          BUILD_OUTCOME: ${{ steps.build.outcome }}
-          SERVER_OUTCOME: ${{ steps.server.outcome }}
-          RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}
-          HEALTH_OUTCOME: ${{ steps.health.outcome }}
+        run: CI=true npm test -- --watchAll=false
+      - name: Evidence summary
+        if: always()
         run: |
-          env | grep '_OUTCOME=' | sort
+          echo "CYCLE_C_EXACT_HEAD=${GITHUB_SHA}"
+          echo "FOCUSED_CONCLUSION=${{ steps.focused.conclusion }}"
+          echo "BUILD_CONCLUSION=${{ steps.build.conclusion }}"
+          echo "SERVER_CONCLUSION=${{ steps.server.conclusion }}"
+          echo "RUNTIME_CONCLUSION=${{ steps.runtime.conclusion }}"
+          echo "HEALTH_CONCLUSION=${{ steps.health.conclusion }}"
+          echo "SUITE_CONCLUSION=${{ steps.suite.conclusion }}"
           cat /tmp/cycle-c-branch-devices-server.log || true
-          python - <<'PY'
-          import os, sys
-          keys = ['FOCUSED_OUTCOME','SUITE_OUTCOME','BUILD_OUTCOME','SERVER_OUTCOME','RUNTIME_OUTCOME','HEALTH_OUTCOME']
-          bad = {k: os.environ.get(k) for k in keys if os.environ.get(k) != 'success'}
-          print('CYCLE_C_BRANCH_DEVICES_CERTIFICATION=' + ('PASS' if not bad else 'FAIL'))
-          if bad:
-              print('CYCLE_C_BRANCH_DEVICES_FAILED_GATES=' + repr(bad))
-              sys.exit(1)
-          PY
