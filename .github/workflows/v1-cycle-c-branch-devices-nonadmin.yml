@@ -58,13 +58,22 @@ jobs:
           echo "CYCLE_C_BRANCH_DEVICES_PROCESS_ALIVE=true"
       - name: Certification evidence
         if: always()
+        env:
+          FOCUSED_OUTCOME: ${{ steps.focused.outcome }}
+          SUITE_OUTCOME: ${{ steps.suite.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          SERVER_OUTCOME: ${{ steps.server.outcome }}
+          RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}
+          HEALTH_OUTCOME: ${{ steps.health.outcome }}
         run: |
-          echo "FOCUSED_OUTCOME=${{ steps.focused.outcome }}"
-          echo "SUITE_OUTCOME=${{ steps.suite.outcome }}"
-          echo "BUILD_OUTCOME=${{ steps.build.outcome }}"
-          echo "SERVER_OUTCOME=${{ steps.server.outcome }}"
-          echo "RUNTIME_OUTCOME=${{ steps.runtime.outcome }}"
-          echo "HEALTH_OUTCOME=${{ steps.health.outcome }}"
+          env | grep '_OUTCOME=' | sort
           cat /tmp/cycle-c-branch-devices-server.log || true
-          if [ "${{ steps.focused.outcome }}" != "success" ] || [ "${{ steps.runtime.outcome }}" != "success" ]; then exit 1; fi
-          if [ "${{ steps.suite.outcome }}" != "success" ] || [ "${{ steps.build.outcome }}" != "success" ] || [ "${{ steps.server.outcome }}" != "success" ] || [ "${{ steps.health.outcome }}" != "success" ]; then exit 2; fi
+          python - <<'PY'
+          import os, sys
+          keys = ['FOCUSED_OUTCOME','SUITE_OUTCOME','BUILD_OUTCOME','SERVER_OUTCOME','RUNTIME_OUTCOME','HEALTH_OUTCOME']
+          bad = {k: os.environ.get(k) for k in keys if os.environ.get(k) != 'success'}
+          print('CYCLE_C_BRANCH_DEVICES_CERTIFICATION=' + ('PASS' if not bad else 'FAIL'))
+          if bad:
+              print('CYCLE_C_BRANCH_DEVICES_FAILED_GATES=' + repr(bad))
+              sys.exit(1)
+          PY
