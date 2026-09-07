@@ -1,0 +1,205 @@
+name: V1 Setup Prior-Day Replay Runtime Cycle C
+
+on:
+  pull_request:
+    paths:
+      - 'src/pages/SetupScreen.jsx'
+      - 'src/pages/setupScreenPriorDayReplay.v1.test.js'
+      - '.github/workflows/v1-setup-prior-day-replay-runtime-cycle-c.yml'
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact head
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ github.event.pull_request.head.sha || github.sha }}"
+          ACTUAL="$(git rev-parse HEAD)"
+          echo "SETUP_PRIOR_DAY_EXPECTED_HEAD=$EXPECTED"
+          echo "SETUP_PRIOR_DAY_ACTUAL_HEAD=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Locked install
+        run: npm ci --no-audit --no-fund
+
+      - name: Smallest relevant automated test
+        env:
+          CI: true
+        run: npm test -- --watchAll=false --runTestsByPath src/pages/setupScreenPriorDayReplay.v1.test.js src/pages/setupScreenResilience.v1.test.js
+
+      - name: Complete frontend suite
+        id: suite
+        continue-on-error: true
+        env:
+          CI: true
+        run: npm test -- --watchAll=false
+
+      - name: Production build
+        run: npm run build
+        env:
+          CI: false
+
+      - name: Install isolated Playwright Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/setup-prior-day-pw
+          npm install --prefix /tmp/setup-prior-day-pw --no-save --no-audit --no-fund playwright@1.55.0
+          /tmp/setup-prior-day-pw/node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Start real frontend runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT=3004 BROWSER=none CI=false npm start > /tmp/setup-prior-day-frontend.log 2>&1 &
+          echo $! > /tmp/setup-prior-day-frontend.pid
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3004/ >/dev/null; then
+              echo 'SETUP_PRIOR_DAY_APP_HTTP=200'
+              exit 0
+            fi
+            if ! kill -0 "$(cat /tmp/setup-prior-day-frontend.pid)" 2>/dev/null; then
+              cat /tmp/setup-prior-day-frontend.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat /tmp/setup-prior-day-frontend.log
+          exit 1
+
+      - name: Real browser prior-day replay verification
+        id: runtime
+        shell: bash
+        env:
+          NODE_PATH: /tmp/setup-prior-day-pw/node_modules
+        run: |
+          set -euo pipefail
+          cat > /tmp/setup-prior-day-runtime.cjs <<'EOF'
+          const { chromium } = require('playwright');
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            const pageErrors = [];
+            let authChecks = 0;
+            let mediaRequests = 0;
+            page.on('pageerror', error => pageErrors.push(String(error)));
+
+            await page.addInitScript(() => {
+              const yesterday = new Date();
+              yesterday.setDate(yesterday.getDate() - 1);
+              const yyyy = yesterday.getFullYear();
+              const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+              const dd = String(yesterday.getDate()).padStart(2, '0');
+              localStorage.setItem('setup_video_last_played_date_v1', `${yyyy}-${mm}-${dd}`);
+            });
+
+            await page.route('**/auth/getLogin*', async route => {
+              authChecks += 1;
+              await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+            });
+            await page.route('**/videoes/SettingUp%20Video.mp4*', async route => {
+              mediaRequests += 1;
+              await route.continue();
+            });
+
+            const response = await page.goto('http://127.0.0.1:3004/setup', { waitUntil: 'domcontentloaded' });
+            if (!response || response.status() !== 200) throw new Error(`setup route HTTP ${response && response.status()}`);
+
+            const video = page.locator('[aria-label="Business setup progress video"]');
+            await video.waitFor({ state: 'attached', timeout: 15000 });
+
+            const beforeMarker = await page.evaluate(() => localStorage.getItem('setup_video_last_played_date_v1'));
+            const playResult = await video.evaluate(async el => {
+              try {
+                await el.play();
+                return { ok: true, paused: el.paused, readyState: el.readyState, networkState: el.networkState, mediaError: el.error ? `${el.error.code}:${el.error.message || ''}` : '' };
+              } catch (error) {
+                return { ok: false, paused: el.paused, readyState: el.readyState, networkState: el.networkState, mediaError: el.error ? `${el.error.code}:${el.error.message || ''}` : '', playError: String(error) };
+              }
+            });
+
+            await page.waitForTimeout(1200);
+            const marker = await page.evaluate(() => localStorage.getItem('setup_video_last_played_date_v1'));
+            const today = await page.evaluate(() => {
+              const now = new Date();
+              const yyyy = now.getFullYear();
+              const mm = String(now.getMonth() + 1).padStart(2, '0');
+              const dd = String(now.getDate()).padStart(2, '0');
+              return `${yyyy}-${mm}-${dd}`;
+            });
+            const mediaState = await video.evaluate(el => ({ paused: el.paused, readyState: el.readyState, networkState: el.networkState, currentTime: el.currentTime, mediaError: el.error ? `${el.error.code}:${el.error.message || ''}` : '' }));
+            const videoCount = await video.count();
+            const finalUrl = page.url();
+            const appHttp = await fetch('http://127.0.0.1:3004/').then(r => r.status).catch(() => 0);
+
+            console.log(`SETUP_PRIOR_DAY_AUTH_CHECKS=${authChecks}`);
+            console.log(`SETUP_PRIOR_DAY_MEDIA_REQUESTS=${mediaRequests}`);
+            console.log(`SETUP_PRIOR_DAY_VIDEO_COUNT=${videoCount}`);
+            console.log(`SETUP_PRIOR_DAY_BEFORE_MARKER=${beforeMarker}`);
+            console.log(`SETUP_PRIOR_DAY_MARKER=${marker}`);
+            console.log(`SETUP_PRIOR_DAY_TODAY=${today}`);
+            console.log(`SETUP_PRIOR_DAY_PLAY_RESULT=${JSON.stringify(playResult)}`);
+            console.log(`SETUP_PRIOR_DAY_MEDIA_STATE=${JSON.stringify(mediaState)}`);
+            console.log(`SETUP_PRIOR_DAY_FINAL_URL=${finalUrl}`);
+            console.log(`SETUP_PRIOR_DAY_PAGE_ERRORS=${pageErrors.length}`);
+            console.log(`SETUP_PRIOR_DAY_POST_RUNTIME_HTTP=${appHttp}`);
+
+            if (authChecks < 1) throw new Error('Protected /setup route did not exercise auth check');
+            if (mediaRequests < 1) throw new Error('Setup media was not requested for prior-day revisit');
+            if (videoCount !== 1) throw new Error(`Expected one setup video, found ${videoCount}`);
+            if (!playResult.ok) throw new Error(`Real setup media playback did not start: ${JSON.stringify(playResult)}`);
+            if (marker !== today) throw new Error(`Playback did not advance marker to today: ${marker} vs ${today}`);
+            if (!finalUrl.endsWith('/setup')) throw new Error(`Unexpected navigation away from setup: ${finalUrl}`);
+            if (pageErrors.length) throw new Error(`Browser page errors: ${pageErrors.join(' | ')}`);
+            if (appHttp !== 200) throw new Error(`Frontend unhealthy after prior-day replay: ${appHttp}`);
+
+            console.log('SETUP_PRIOR_DAY_RUNTIME_PASS=true');
+            await browser.close();
+          })().catch(error => {
+            console.error(error);
+            process.exit(1);
+          });
+          EOF
+          node /tmp/setup-prior-day-runtime.cjs
+
+      - name: Runtime logs and process health
+        if: always()
+        shell: bash
+        run: |
+          echo '--- frontend log tail ---'
+          tail -n 120 /tmp/setup-prior-day-frontend.log 2>/dev/null || true
+          if [ -f /tmp/setup-prior-day-frontend.pid ] && kill -0 "$(cat /tmp/setup-prior-day-frontend.pid)" 2>/dev/null; then
+            echo 'SETUP_PRIOR_DAY_PROCESS_ALIVE=true'
+            curl -fsS -o /dev/null -w 'SETUP_PRIOR_DAY_HEALTH_HTTP=%{http_code}\n' http://127.0.0.1:3004/
+          else
+            echo 'SETUP_PRIOR_DAY_PROCESS_ALIVE=false'
+          fi
+
+      - name: Final certification
+        if: always()
+        shell: bash
+        run: |
+          echo 'SUITE_OUTCOME=${{ steps.suite.outcome }}'
+          echo 'RUNTIME_OUTCOME=${{ steps.runtime.outcome }}'
+          if [ '${{ steps.suite.outcome }}' = 'success' ] && [ '${{ steps.runtime.outcome }}' = 'success' ]; then
+            echo 'SETUP_PRIOR_DAY_CERTIFICATION=PASS'
+            exit 0
+          fi
+          echo 'SETUP_PRIOR_DAY_CERTIFICATION=PARTIALLY_VERIFIED'
+          exit 1
