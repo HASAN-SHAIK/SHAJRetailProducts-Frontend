@@ -1,0 +1,160 @@
+name: V1 Cycle C Logout Dual Failure Runtime
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      REACT_APP_CENTRAL_API_URL: http://127.0.0.1:43191/api
+      REACT_APP_POS_LOCAL_API_ENABLED: 'true'
+      REACT_APP_POS_LOCAL_API_URL: http://127.0.0.1:43190/api/v1
+      REACT_APP_POS_LOCAL_API_TOKEN: cycle-c-machine-token
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - name: Assert exact tested head
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Existing focused auth acceptance
+        run: CI=true npm test -- --watchAll=false --runTestsByPath src/components/common/authFrontend.v1Acceptance.test.js
+      - name: CI production build gate
+        id: build
+        run: |
+          set +e
+          set -o pipefail
+          CI=true npm run build 2>&1 | tee /tmp/cycle-c-logout-build.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          echo "CYCLE_C_LOGOUT_BUILD_EXIT_CODE=${RC}"
+          exit 0
+      - name: Build runnable production bundle
+        id: runtime_build
+        run: |
+          set +e
+          set -o pipefail
+          CI=false npm run build 2>&1 | tee /tmp/cycle-c-logout-runtime-build.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          echo "CYCLE_C_LOGOUT_RUNTIME_BUILD_EXIT_CODE=${RC}"
+          exit 0
+      - name: Start runnable production frontend
+        id: startup
+        if: steps.runtime_build.outputs.exit_code == '0'
+        run: |
+          set +e
+          npx --yes serve@14 -s build -l 4184 > /tmp/cycle-c-logout-server.log 2>&1 &
+          echo $! > /tmp/cycle-c-logout-server.pid
+          RC=1
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:4184/logout >/tmp/cycle-c-logout.html; then RC=0; break; fi
+            sleep 1
+          done
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          echo "CYCLE_C_LOGOUT_STARTUP_EXIT_CODE=${RC}"
+          exit 0
+      - name: Real browser dual-failure logout path
+        id: runtime
+        if: steps.startup.outputs.exit_code == '0'
+        env:
+          CYPRESS_BASE_URL: http://127.0.0.1:4184
+        run: |
+          set +e
+          set -o pipefail
+          npx cypress run --browser electron --spec cypress/e2e/runtime/logout-dual-failure-runtime.cy.js 2>&1 | tee /tmp/cycle-c-logout-runtime.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          echo "CYCLE_C_LOGOUT_RUNTIME_EXIT_CODE=${RC}"
+          exit 0
+      - name: Post-runtime process health
+        id: health
+        if: always()
+        run: |
+          set +e
+          RC=0
+          test -f /tmp/cycle-c-logout-server.pid || RC=1
+          if [ "$RC" = 0 ]; then
+            PID="$(cat /tmp/cycle-c-logout-server.pid)"
+            kill -0 "$PID" || RC=1
+          fi
+          STATUS="000"
+          if [ "$RC" = 0 ]; then
+            STATUS="$(curl -sS -o /tmp/cycle-c-logout-post.html -w '%{http_code}' http://127.0.0.1:4184/)" || RC=1
+            test "$STATUS" = "200" || RC=1
+          fi
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          echo "CYCLE_C_LOGOUT_PROCESS_ALIVE=$([ "$RC" = 0 ] && echo true || echo false)"
+          echo "CYCLE_C_LOGOUT_POST_RUNTIME_HTTP=${STATUS}"
+          exit 0
+      - name: Relevant full frontend suite
+        id: suite
+        if: always()
+        run: |
+          set +e
+          set -o pipefail
+          CI=true npm test -- --watchAll=false 2>&1 | tee /tmp/cycle-c-logout-suite.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          echo "CYCLE_C_LOGOUT_SUITE_EXIT_CODE=${RC}"
+          exit 0
+      - name: Evidence summary
+        if: always()
+        run: |
+          echo "CYCLE_C_EXACT_HEAD=$(git rev-parse HEAD)"
+          echo "CYCLE_C_LOGOUT_BUILD_EXIT_CODE=${{ steps.build.outputs.exit_code }}"
+          echo "CYCLE_C_LOGOUT_RUNTIME_BUILD_EXIT_CODE=${{ steps.runtime_build.outputs.exit_code }}"
+          echo "CYCLE_C_LOGOUT_STARTUP_EXIT_CODE=${{ steps.startup.outputs.exit_code }}"
+          echo "CYCLE_C_LOGOUT_RUNTIME_EXIT_CODE=${{ steps.runtime.outputs.exit_code }}"
+          echo "CYCLE_C_LOGOUT_HEALTH_EXIT_CODE=${{ steps.health.outputs.exit_code }}"
+          echo "CYCLE_C_LOGOUT_SUITE_EXIT_CODE=${{ steps.suite.outputs.exit_code }}"
+          echo '--- runtime ---'
+          cat /tmp/cycle-c-logout-runtime.log || true
+          echo '--- CI build tail ---'
+          tail -n 100 /tmp/cycle-c-logout-build.log || true
+          echo '--- runtime build tail ---'
+          tail -n 60 /tmp/cycle-c-logout-runtime-build.log || true
+          echo '--- suite tail ---'
+          tail -n 120 /tmp/cycle-c-logout-suite.log || true
+          echo '--- server log ---'
+          cat /tmp/cycle-c-logout-server.log || true
+      - name: Upload retained evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycle-c-logout-dual-failure-evidence
+          path: |
+            /tmp/cycle-c-logout-runtime.log
+            /tmp/cycle-c-logout-build.log
+            /tmp/cycle-c-logout-runtime-build.log
+            /tmp/cycle-c-logout-suite.log
+            /tmp/cycle-c-logout-server.log
+            /tmp/cycle-c-logout.html
+            /tmp/cycle-c-logout-post.html
+          if-no-files-found: warn
+      - name: Assert runtime build gate
+        if: always()
+        run: test "${{ steps.runtime_build.outputs.exit_code }}" = "0"
+      - name: Assert runtime gate
+        if: always()
+        run: test "${{ steps.runtime.outputs.exit_code }}" = "0"
+      - name: Assert health gate
+        if: always()
+        run: test "${{ steps.health.outputs.exit_code }}" = "0"
+      - name: Assert suite gate
+        if: always()
+        run: test "${{ steps.suite.outputs.exit_code }}" = "0"
+      - name: Assert CI build gate
+        if: always()
+        run: test "${{ steps.build.outputs.exit_code }}" = "0"
