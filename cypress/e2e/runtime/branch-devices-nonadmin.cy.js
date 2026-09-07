@@ -25,7 +25,13 @@ describe('Cycle C branch-devices non-admin authority runtime', () => {
   });
 
   it('renders the admin-only boundary without requesting Central device inventory', () => {
-    cy.visit('/branch-devices');
+    cy.visit('/branch-devices', {
+      onBeforeLoad(win) {
+        win.localStorage.setItem('selected_branch_id', 'branch-1');
+        win.localStorage.setItem('selected_branch_confirmed', '1');
+        win.localStorage.setItem('selected_branch_name', 'Cycle C Branch');
+      },
+    });
     cy.wait('@auth');
     cy.contains('Admin access only.', { timeout: 15000 }).should('be.visible');
     cy.contains('SECRET-DEVICE').should('not.exist');
