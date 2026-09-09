@@ -1,0 +1,157 @@
+name: V1 Cycle C Login Double Submit Runtime
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      REACT_APP_CENTRAL_API_URL: http://127.0.0.1:43194/api
+      REACT_APP_POS_LOCAL_API_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - name: Assert exact tested head
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Focused duplicate-login acceptance
+        id: focused
+        run: |
+          set +e
+          set -o pipefail
+          CI=true npm test -- --watchAll=false --runTestsByPath src/components/Login/loginInteraction.v1.test.js -t 'prevents duplicate online and offline authentication attempts' 2>&1 | tee /tmp/cycle-c-login-singleflight-focused.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: CI production build gate
+        id: build
+        run: |
+          set +e
+          set -o pipefail
+          CI=true npm run build 2>&1 | tee /tmp/cycle-c-login-singleflight-build.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Build runnable production bundle
+        id: runtime_build
+        run: |
+          set +e
+          set -o pipefail
+          CI=false npm run build 2>&1 | tee /tmp/cycle-c-login-singleflight-runtime-build.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Start runnable production frontend
+        id: startup
+        if: steps.runtime_build.outputs.exit_code == '0'
+        run: |
+          set +e
+          npx --yes serve@14 -s build -l 4188 > /tmp/cycle-c-login-singleflight-server.log 2>&1 &
+          echo $! > /tmp/cycle-c-login-singleflight-server.pid
+          RC=1
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:4188/ >/tmp/cycle-c-login-singleflight.html; then RC=0; break; fi
+            sleep 1
+          done
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Real browser delayed-login double-submit path
+        id: runtime
+        if: steps.startup.outputs.exit_code == '0'
+        env:
+          CYPRESS_BASE_URL: http://127.0.0.1:4188
+        run: |
+          set +e
+          set -o pipefail
+          npx cypress run --browser electron --spec cypress/e2e/runtime/login-double-submit-runtime.cy.js 2>&1 | tee /tmp/cycle-c-login-singleflight-runtime.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Post-runtime process health
+        id: health
+        if: always()
+        run: |
+          set +e
+          RC=0
+          test -f /tmp/cycle-c-login-singleflight-server.pid || RC=1
+          if [ "$RC" = 0 ]; then
+            PID="$(cat /tmp/cycle-c-login-singleflight-server.pid)"
+            kill -0 "$PID" || RC=1
+          fi
+          STATUS="000"
+          if [ "$RC" = 0 ]; then
+            STATUS="$(curl -sS -o /tmp/cycle-c-login-singleflight-post.html -w '%{http_code}' http://127.0.0.1:4188/)" || RC=1
+            test "$STATUS" = "200" || RC=1
+          fi
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          echo "CYCLE_C_LOGIN_SINGLEFLIGHT_PROCESS_ALIVE=$([ "$RC" = 0 ] && echo true || echo false)"
+          echo "CYCLE_C_LOGIN_SINGLEFLIGHT_POST_RUNTIME_HTTP=${STATUS}"
+          exit 0
+      - name: Complete Frontend suite
+        id: suite
+        if: always()
+        run: |
+          set +e
+          set -o pipefail
+          CI=true npm test -- --watchAll=false 2>&1 | tee /tmp/cycle-c-login-singleflight-suite.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=${RC}" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Evidence summary
+        if: always()
+        run: |
+          echo "CYCLE_C_EXACT_HEAD=$(git rev-parse HEAD)"
+          echo "CYCLE_C_LOGIN_SINGLEFLIGHT_FOCUSED_EXIT_CODE=${{ steps.focused.outputs.exit_code }}"
+          echo "CYCLE_C_LOGIN_SINGLEFLIGHT_BUILD_EXIT_CODE=${{ steps.build.outputs.exit_code }}"
+          echo "CYCLE_C_LOGIN_SINGLEFLIGHT_RUNTIME_BUILD_EXIT_CODE=${{ steps.runtime_build.outputs.exit_code }}"
+          echo "CYCLE_C_LOGIN_SINGLEFLIGHT_STARTUP_EXIT_CODE=${{ steps.startup.outputs.exit_code }}"
+          echo "CYCLE_C_LOGIN_SINGLEFLIGHT_RUNTIME_EXIT_CODE=${{ steps.runtime.outputs.exit_code }}"
+          echo "CYCLE_C_LOGIN_SINGLEFLIGHT_HEALTH_EXIT_CODE=${{ steps.health.outputs.exit_code }}"
+          echo "CYCLE_C_LOGIN_SINGLEFLIGHT_SUITE_EXIT_CODE=${{ steps.suite.outputs.exit_code }}"
+          cat /tmp/cycle-c-login-singleflight-focused.log || true
+          cat /tmp/cycle-c-login-singleflight-runtime.log || true
+      - name: Upload retained evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycle-c-login-double-submit-evidence
+          path: |
+            /tmp/cycle-c-login-singleflight-focused.log
+            /tmp/cycle-c-login-singleflight-runtime.log
+            /tmp/cycle-c-login-singleflight-build.log
+            /tmp/cycle-c-login-singleflight-runtime-build.log
+            /tmp/cycle-c-login-singleflight-suite.log
+            /tmp/cycle-c-login-singleflight-server.log
+            /tmp/cycle-c-login-singleflight.html
+            /tmp/cycle-c-login-singleflight-post.html
+          if-no-files-found: warn
+      - name: Assert focused gate
+        if: always()
+        run: test "${{ steps.focused.outputs.exit_code }}" = "0"
+      - name: Assert runtime build gate
+        if: always()
+        run: test "${{ steps.runtime_build.outputs.exit_code }}" = "0"
+      - name: Assert runtime gate
+        if: always()
+        run: test "${{ steps.runtime.outputs.exit_code }}" = "0"
+      - name: Assert health gate
+        if: always()
+        run: test "${{ steps.health.outputs.exit_code }}" = "0"
+      - name: Assert suite gate
+        if: always()
+        run: test "${{ steps.suite.outputs.exit_code }}" = "0"
+      - name: Assert CI build gate
+        if: always()
+        run: test "${{ steps.build.outputs.exit_code }}" = "0"
