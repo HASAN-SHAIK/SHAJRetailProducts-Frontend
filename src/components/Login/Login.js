@@ -126,10 +126,13 @@ const Login = () => {
       if (posEnabled) {
         localDevice = await getLocalPosDevice();
         setRegistrationDevice(localDevice || null);
-        if (!getDeviceId() || !isRegisteredPos(localDevice)) {
+        if (!getDeviceId() || !localDevice?.device_id || !isRegisteredPos(localDevice)) {
           setError('POS registration is required before sign in. Enter Store Number, POS No and Touchpoint ID below.');
           return;
         }
+        // A browser may retain another terminal's ID after switching local POS services.
+        // Keep request headers and the login body bound to the current registered POS.
+        setDeviceId(localDevice.device_id);
       }
 
       const deviceId = getDeviceId();
@@ -291,7 +294,7 @@ const Login = () => {
           <section className="registration-panel" aria-busy={registrationBusy}>
             <div className="section-heading">
               <h2>POS Registration</h2>
-              <span className="badge rounded-pill text-bg-info">{registrationStatus || 'NEW'}</span>
+              <span className="badge rounded-pill text-bg-info" role="status" aria-live="polite">{registrationStatus || 'NEW'}</span>
             </div>
             <p className="device-note">
               {registrationDeviceError || (browserDeviceMissing ? 'This browser is not linked to a POS device.' : `Device: ${registrationDevice?.device_id || 'waiting for local POS service...'}`)}

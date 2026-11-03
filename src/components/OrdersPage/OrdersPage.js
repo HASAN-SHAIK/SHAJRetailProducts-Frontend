@@ -2009,6 +2009,125 @@ const OrdersPage = ({ navigate, mode }) => {
     }
   };
 
+  const handleOrderDetailsDownload = () => {
+    if (!drawerOrder?.id) return;
+
+    try {
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const left = 14;
+      const right = pageWidth - left;
+      const orderShop = drawerOrder.shop_details || drawerOrder.shop || drawerOrder.store || {};
+      const shopName = shopDetails?.shop_name || shopDetails?.name || shopDetails?.business_name || tenantConfig?.shop_name || tenantConfig?.name || orderShop.shop_name || orderShop.name || orderShop.business_name || 'Your Shop';
+      const shopGST = shopDetails?.gst_number || shopDetails?.gstin || shopDetails?.gstin_number || tenantConfig?.gst_number || tenantConfig?.gstin || tenantConfig?.gstin_number || orderShop.gst_number || orderShop.gstin || orderShop.gstin_number || '';
+      const orderCustomer = drawerOrder.customer || {};
+      const customerName = orderCustomer.name || orderCustomer.full_name || drawerOrder.customer_name || '-';
+      const customerPhone = orderCustomer.phone || orderCustomer.mobile || drawerOrder.customer_phone || drawerOrder.customer_mobile || '-';
+      const customerEmail = orderCustomer.email || drawerOrder.customer_email || '';
+      const customerAddress = orderCustomer.address || drawerOrder.customer_address || '';
+      const formatPdfMoney = (value) => `INR ${Number(value || 0).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+
+      doc.setTextColor(30, 41, 59);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.text(shopName, pageWidth / 2, 17, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      if (shopGST) doc.text(`GSTIN: ${shopGST}`, pageWidth / 2, 23, { align: 'center' });
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text('Order Details', left, 32);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(`Order: ${drawerOrder.id}`, left, 39);
+      doc.text(`Date: ${formatDate(drawerOrder.created_at)}`, left, 45);
+      doc.text(`Status: ${String(drawerOrder.status || summaryStatus || '-').toUpperCase()}`, right, 39, { align: 'right' });
+      doc.text(`Payment: ${String(summaryStatus || '-').toUpperCase()}`, right, 45, { align: 'right' });
+
+      let y = 52;
+      doc.setDrawColor(203, 213, 225);
+      doc.line(left, y, right, y);
+      y += 8;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Customer Details', left, y);
+      y += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      const customerLines = [
+        `Name: ${customerName}`,
+        `Phone: ${customerPhone}`,
+        ...(customerEmail ? [`Email: ${customerEmail}`] : []),
+        ...(customerAddress ? doc.splitTextToSize(`Address: ${customerAddress}`, pageWidth - 2 * left) : []),
+      ];
+      customerLines.forEach((line) => {
+        doc.text(line, left, y);
+        y += 5;
+      });
+      y += 4;
+
+      const itemRows = drawerItems.map((item, index) => {
+        const quantity = Number(item.quantity ?? item.qty ?? (Number(item.quantity_milli || 0) / 1000)) || 0;
+        const rate = Number(item.price ?? item.selling_price ?? (Number(item.unit_price_minor || 0) / 100)) || 0;
+        const discount = Number(item.discount ?? item.discount_amount ?? (Number(item.discount_minor || 0) / 100)) || 0;
+        const amount = Number(item.total ?? item.line_total ?? (Number(item.line_total_minor || 0) / 100)) || quantity * rate - discount;
+        return [index + 1, item.name || item.product_name || '-', quantity, formatPdfMoney(rate), formatPdfMoney(discount), formatPdfMoney(amount)];
+      });
+
+      autoTable(doc, {
+        startY: y,
+        head: [['#', 'Item', 'Qty', 'Rate', 'Discount', 'Amount']],
+        body: itemRows,
+        theme: 'grid',
+        styles: { fontSize: 9, cellPadding: 2.5 },
+        headStyles: { fillColor: [30, 64, 96], textColor: 255, fontStyle: 'bold' },
+        columnStyles: {
+          0: { cellWidth: 9 },
+          2: { cellWidth: 18, halign: 'right' },
+          3: { cellWidth: 30, halign: 'right' },
+          4: { cellWidth: 30, halign: 'right' },
+          5: { cellWidth: 32, halign: 'right' },
+        },
+        margin: { left, right: left },
+      });
+
+      y = (doc.lastAutoTable?.finalY || y) + 9;
+      if (y + 38 > pageHeight - 14) {
+        doc.addPage();
+        y = 20;
+      }
+      const subtotal = Number(drawerOrder.subtotal_amount ?? drawerOrder.subtotal ?? (Number(drawerOrder.subtotal_minor || 0) / 100));
+      const discountTotal = Number(drawerOrder.discount ?? drawerOrder.discount_amount ?? (Number(drawerOrder.discount_minor || 0) / 100));
+      const totals = [
+        ['Subtotal', formatPdfMoney(subtotal)],
+        ['Discount', formatPdfMoney(discountTotal)],
+        ['Total', formatPdfMoney(summaryTotalAmount)],
+        ['Paid', formatPdfMoney(summaryTotalPaid)],
+        ['Returned', formatPdfMoney(summaryReturnedAmount)],
+        ['Balance', formatPdfMoney(balance)],
+      ];
+      autoTable(doc, {
+        startY: y,
+        body: totals,
+        theme: 'plain',
+        styles: { fontSize: 10, cellPadding: 2 },
+        columnStyles: { 0: { cellWidth: 35, fontStyle: 'bold' }, 1: { halign: 'right' } },
+        tableWidth: 75,
+        margin: { left: right - 75, right: left },
+      });
+
+      const safeOrderId = String(drawerOrder.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+      doc.save(`order-details-${safeOrderId}.pdf`);
+      showPopup('Order details PDF downloaded.', 'Success');
+    } catch (err) {
+      showPopup('Failed to download order details PDF.', 'Error');
+    }
+  };
+
   const openDeleteModal = (event, order) => {
     event.stopPropagation();
     setDeleteTarget(order);
@@ -2738,6 +2857,14 @@ const OrdersPage = ({ navigate, mode }) => {
                       {!gstInvoiceEnabled && <span className="lock-tag">PRO</span>}
                     </button>
                   )}
+                  <button
+                    className="btn btn-outline-info"
+                    type="button"
+                    onClick={handleOrderDetailsDownload}
+                    disabled={drawerLoading || !drawerOrder}
+                  >
+                    Download Order Details PDF
+                  </button>
                   <button
                     className="btn btn-outline-danger"
                     onClick={(event) => openDeleteModal(event, drawerOrder)}
