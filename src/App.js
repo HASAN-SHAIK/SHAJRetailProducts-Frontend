@@ -251,13 +251,15 @@ function App() {
           }
         }
 
-        if (navigator.onLine) {
+        if (navigator.onLine && canReadSettings(userDetails)) {
           try {
-            const payload = await getSettings();
+            const payload = await getSettings(userDetails);
             setWhatsappEnabled(hasFeature(payload, 'whatsapp_bill_enabled'));
           } catch {
             setWhatsappEnabled(false);
           }
+        } else {
+          setWhatsappEnabled(false);
         }
 
         let branchIdForSync = selectedBranchId;
@@ -468,7 +470,7 @@ useEffect(() => {
       return;
     }
     try {
-      const payload = await getSettings();
+      const payload = await getSettings(userDetails);
       setWhatsappEnabled(hasFeature(payload, 'whatsapp_bill_enabled'));
       setIsOpeningCompleted(payload?.is_opening_completed === true);
     } catch (err) {

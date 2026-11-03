@@ -1,15 +1,44 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 
-const ProductSearch = ({ value, suggestions, loading, error, onChange, onSelect, onRetry }) => (
-  <div className="billing-search" aria-busy={loading}>
+const ProductSearch = ({ value, suggestions, loading, error, onChange, onSelect, onRetry }) => {
+  const [companyFilter, setCompanyFilter] = useState('');
+  const searchInputRef = React.useRef(null);
+  React.useEffect(() => {
+    const frame = requestAnimationFrame(() => searchInputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const companyOptions = useMemo(() => Array.from(new Set(
+    (suggestions || [])
+      .map((item) => String(item?.company || item?.company_name || '').trim())
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b)), [suggestions]);
+  const visibleSuggestions = companyFilter
+    ? (suggestions || []).filter((item) =>
+        String(item?.company || item?.company_name || '').trim().toLowerCase() === companyFilter.toLowerCase()
+      )
+    : suggestions;
+
+  return <div className="billing-search" aria-busy={loading}>
     <label className="billing-label">
       Search Product
       <input
         className="form-control billing-input"
+        ref={searchInputRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder="Search by name, company, or barcode"
       />
+    </label>
+    <label className="billing-label">
+      Filter by Company
+      <select
+        className="form-select billing-input"
+        value={companyFilter}
+        onChange={(event) => setCompanyFilter(event.target.value)}
+      >
+        <option value="">All companies</option>
+        {companyOptions.map((company) => <option key={company} value={company}>{company}</option>)}
+      </select>
     </label>
     {loading && (
       <div className="billing-search-status" role="status" aria-live="polite">
@@ -26,9 +55,9 @@ const ProductSearch = ({ value, suggestions, loading, error, onChange, onSelect,
         )}
       </div>
     )}
-    {suggestions.length > 0 && (
+    {visibleSuggestions.length > 0 && (
       <div className="billing-search-list">
-        {suggestions.map((item, idx) => (
+        {visibleSuggestions.map((item, idx) => (
           <button
             key={`${item.key || item.id || item.product_id || item.barcode || item.name}-${item.batch_id || 'no-batch'}-${idx}`}
             type="button"
@@ -55,7 +84,7 @@ const ProductSearch = ({ value, suggestions, loading, error, onChange, onSelect,
         ))}
       </div>
     )}
-  </div>
-);
+  </div>;
+};
 
 export default ProductSearch;

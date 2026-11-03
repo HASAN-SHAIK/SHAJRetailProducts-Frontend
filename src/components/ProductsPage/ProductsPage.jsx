@@ -322,6 +322,7 @@ const ProductsPage = ({ navigate }) => {
   total_pages: 1,
   total_records: 0,
  });
+ const loadMoreSentinelRef = useRef(null);
  const [searchInput, setSearchInput] = useState('');
  const [searchQuery, setSearchQuery] = useState('');
  const [selectedCategory, setSelectedCategory] = useState('');
@@ -468,6 +469,23 @@ const ProductsPage = ({ navigate }) => {
       total_records: totalRecords,
     }));
   }, [pagination.page, pagination.limit]);
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel || isLoading || pagination.page >= pagination.total_pages) return undefined;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setPagination((prev) => {
+          if (prev.page >= prev.total_pages) return prev;
+          return { ...prev, page: prev.page + 1 };
+        });
+      }
+    }, { rootMargin: '160px 0px' });
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [isLoading, pagination.page, pagination.total_pages]);
 
   useEffect(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
@@ -691,8 +709,7 @@ const ProductsPage = ({ navigate }) => {
     const totalRecords = items.length;
     const totalPages = Math.max(1, Math.ceil(totalRecords / pagination.limit));
     const page = Math.min(Math.max(1, pagination.page), totalPages);
-    const start = (page - 1) * pagination.limit;
-    const paged = items.slice(start, start + pagination.limit);
+    const paged = items.slice(0, page * pagination.limit);
     return { paged, totalRecords, totalPages, page };
   };
 
@@ -2351,31 +2368,14 @@ const ProductsPage = ({ navigate }) => {
           </div>
 
           <div className="products-pagination">
-            <button
-              className="page-btn"
-              disabled={pagination.page <= 1}
-              onClick={() => setPagination((prev) => ({ ...prev, page: prev.page - 1 }))}
-            >
-              Prev
-            </button>
-            <div className="page-list">
-              {Array.from({ length: pagination.total_pages || 1 }, (_, idx) => idx + 1).map((page) => (
-                <button
-                  key={`page-${page}`}
-                  className={`page-btn ${page === pagination.page ? 'active' : ''}`}
-                  onClick={() => setPagination((prev) => ({ ...prev, page }))}
-                >
-                  {page}
-                </button>
-              ))}
-            </div>
-            <button
-              className="page-btn"
-              disabled={pagination.page >= pagination.total_pages}
-              onClick={() => setPagination((prev) => ({ ...prev, page: prev.page + 1 }))}
-            >
-              Next
-            </button>
+            <span className="products-pagination-count">
+              Showing {products.length} of {pagination.total_records} products
+            </span>
+            {pagination.page < pagination.total_pages && (
+              <span ref={loadMoreSentinelRef} className="products-scroll-sentinel" role="status" aria-live="polite">
+                Scroll down to load more products
+              </span>
+            )}
           </div>
         </div>
 

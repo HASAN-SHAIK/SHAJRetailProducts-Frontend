@@ -400,6 +400,12 @@ body.app-theme-light .products-page .products-refresh-btn:focus {
   flex-wrap: wrap;
 }
 
+.products-scroll-sentinel {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  min-height: 24px;
+}
+
 .page-list {
   display: flex;
   gap: 6px;

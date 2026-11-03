@@ -1857,20 +1857,23 @@ const RetailBilling = () => {
         showPopup('Amount paid must be >= 0.', 'Validation');
         return;
       }
-      const creditUsed = Math.max(totalDue - amountPaid, 0);
-      const requiresServerCredit = String(paymentMethod || '').toLowerCase() === 'credit' || creditUsed > 0;
+      const totalDueMinor = Math.max(0, Math.round((Number(totalDue) || 0) * 100));
+      const amountPaidMinor = Math.max(0, Math.round(amountPaid * 100));
+      const creditUsedMinor = Math.max(totalDueMinor - amountPaidMinor, 0);
+      const creditUsed = creditUsedMinor / 100;
+      const requiresServerCredit = String(paymentMethod || '').toLowerCase() === 'credit' || creditUsedMinor > 0;
       if (creditUsed > 0 && !linkedCustomerId) {
         showPopup('Select a saved customer for partial/credit billing.', 'Validation');
         return;
       }
       if (creditUsed > 0 && linkedCustomerId) {
-        const creditLimit = Number(customerDetails.credit_limit || 0);
-        const currentBalance = Number(customerDetails.current_balance || 0);
-        if (creditLimit <= 0) {
+        const creditLimitMinor = Math.max(0, Math.round(Number(customerDetails.credit_limit || 0) * 100));
+        const currentBalanceMinor = Math.max(0, Math.round(Number(customerDetails.current_balance || 0) * 100));
+        if (creditLimitMinor <= 0) {
           showPopup('Credit not allowed for this customer.', 'Validation');
           return;
         }
-        if (currentBalance + creditUsed > creditLimit) {
+        if (currentBalanceMinor + creditUsedMinor > creditLimitMinor) {
           showPopup('Customer credit limit exceeded.', 'Validation');
           return;
         }

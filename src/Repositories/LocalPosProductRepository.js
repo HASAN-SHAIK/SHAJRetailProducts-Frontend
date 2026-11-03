@@ -78,12 +78,13 @@ export class LocalPosProductRepository extends ApiProductRepository {
     return super.updateBatchesBulk(batches);
   }
 
-  async searchLocalCatalog(search = '', limit = 50) {
+  async searchLocalCatalog(search = '', limit = 50, offset = 0) {
     if (!isLocalPosEnabled()) return [];
     const query = String(search || '').trim();
     const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const safeOffset = Math.max(0, Number(offset) || 0);
     const payload = await localPosRequest(
-      `/catalog/products?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(safeLimit))}`
+      `/catalog/products?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(safeLimit))}${safeOffset ? `&offset=${encodeURIComponent(String(safeOffset))}` : ''}`
     );
     const catalogProducts = Array.isArray(payload?.items) ? payload.items : [];
     const products = await Promise.all(catalogProducts.map(hydrateProductStock));
@@ -93,7 +94,14 @@ export class LocalPosProductRepository extends ApiProductRepository {
 
   async getAllProducts() {
     if (!isLocalPosEnabled()) return super.getAllProducts();
-    return this.searchLocalCatalog('', 200);
+    const products = [];
+    const pageSize = 200;
+    for (let offset = 0; offset < 100000; offset += pageSize) {
+      const page = await this.searchLocalCatalog('', pageSize, offset);
+      products.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return products;
   }
 
   async getProductByBarcode(barcode, branchId = null) {
