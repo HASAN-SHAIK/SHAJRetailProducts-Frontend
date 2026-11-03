@@ -4,15 +4,22 @@ const path = require('path');
 const read = (relativePath) => fs.readFileSync(path.join(__dirname, relativePath), 'utf8');
 
 describe('RetailHub POS management navigation retirement', () => {
-  test('POS navbar does not advertise migrated management domains', () => {
+  test('POS navbar does not advertise domains that remain with RetailHub', () => {
     const navbar = read('components/common/Navbar/Navbar.js');
 
-    expect(navbar).not.toContain("navigateTo('/customers')");
     expect(navbar).not.toContain("navigateTo('/staff-expenses/staff/list')");
     expect(navbar).not.toContain("navigateTo('/accounts/receipt')");
     expect(navbar).not.toContain('Staff & Expenses');
-    expect(navbar).not.toContain('>Customers<');
     expect(navbar).not.toContain('>Accounts<');
+  });
+
+  // Phase 2 / Stage 1 restored store-level customer management in POS.
+  test('POS navbar links to the restored Customers screen, gated by customers:read', () => {
+    const navbar = read('components/common/Navbar/Navbar.js');
+
+    expect(navbar).toContain("navigateTo('/customers')");
+    expect(navbar).toContain('>Customers<');
+    expect(navbar).toContain("canAccessModule(userDetails, 'customers')");
   });
 
   test('POS navbar preserves execution and edge navigation', () => {

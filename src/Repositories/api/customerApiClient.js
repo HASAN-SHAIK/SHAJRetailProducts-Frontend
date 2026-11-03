@@ -1,6 +1,8 @@
 import api from '../../utils/axios';
 import {
   buildCustomerPayload,
+  buildCustomerUpdatePayload,
+  isDuplicateCustomerError,
   normalizeApiCustomer,
   normalizeCustomerList,
 } from './customerNormalizer';
@@ -71,7 +73,9 @@ export const createCustomerRemote = async (payload) => {
   try {
     const response = await api.post('/v1/customers', body);
     return normalizeApiCustomer(extractCustomerRecord(response));
-  } catch {
+  } catch (error) {
+    // A duplicate is a real answer, not a reason to retry on the legacy route.
+    if (isDuplicateCustomerError(error)) throw error;
     const response = await api.post('/customers', body);
     return normalizeApiCustomer(extractCustomerRecord(response));
   }
@@ -79,11 +83,13 @@ export const createCustomerRemote = async (payload) => {
 
 export const updateCustomerRemote = async (customerId, payload) => {
   const id = encodeURIComponent(String(customerId || '').trim());
-  const body = buildCustomerPayload(payload);
+  // Updates never send credit_limit / current_balance (financial authority is Central).
+  const body = buildCustomerUpdatePayload(payload);
   try {
     const response = await api.put(`/v1/customers/${id}`, body);
     return normalizeApiCustomer(extractCustomerRecord(response));
-  } catch {
+  } catch (error) {
+    if (isDuplicateCustomerError(error)) throw error;
     const response = await api.put(`/customers/${id}`, body);
     return normalizeApiCustomer(extractCustomerRecord(response));
   }

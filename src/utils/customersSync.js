@@ -4,6 +4,7 @@ import {
   updateSyncQueueItem,
 } from '../services/local/syncLocalService';
 import { createCustomerRemote, updateCustomerRemote } from '../Repositories/api/customerApiClient';
+import { getDuplicateCustomerFromError, isDuplicateCustomerError } from '../Repositories/api/customerNormalizer';
 
 let workerTimer = null;
 
@@ -57,6 +58,22 @@ export const syncAllCustomers = async () => {
       await updateSyncQueueItem({ ...entry, status: 'done' });
       processed += 1;
     } catch (err) {
+      // The server refused to create a second customer for this mobile number.
+      // Never overwrite the existing record: point local references (orders,
+      // cache) at it and close the queue item.
+      if (isDuplicateCustomerError(err)) {
+        const existing = getDuplicateCustomerFromError(err);
+        if (existing?.id && entry.entityId && String(entry.entityId).startsWith('temp:')) {
+          try {
+            await replaceCustomerIdReferences(entry.entityId, existing.id);
+          } catch {
+            // references are re-resolved on the next sync pass
+          }
+        }
+        await updateSyncQueueItem({ ...entry, status: 'done', duplicateOf: existing?.id || null });
+        processed += 1;
+        continue;
+      }
       await updateSyncQueueItem({
         ...entry,
         status: 'error',

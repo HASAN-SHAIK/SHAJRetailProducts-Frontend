@@ -16,6 +16,7 @@ import { searchLocalProducts } from '../../utils/localProductSearch';
 import { enqueueOfflineOrder, processOfflineQueue } from '../../utils/offlineOrders';
 import { enqueueReceipt } from '../../utils/accountingOffline';
 import { syncAllCustomers } from '../../utils/customersSync';
+import { findCustomerByPhone } from '../customers/customerHelpers';
 import { createOrder } from '../../services/orderService';
 import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 import api from '../../utils/axios';
@@ -90,6 +91,12 @@ const WholesaleBilling = () => {
     const payload = buildCustomerPayload(details);
     if (!payload) return null;
     const existingId = details?.id || null;
+    if (!existingId) {
+      // Quick-create must never turn into a write against someone else's record:
+      // if this mobile number is already known (cache or queued), use that customer.
+      const known = findCustomerByPhone(await getAllCustomers().catch(() => []), payload.phone || payload.mobile);
+      if (known?.id) return known.id;
+    }
     const tempId = existingId || `temp:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const localCustomer = {
       id: tempId,

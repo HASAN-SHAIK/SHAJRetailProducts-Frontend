@@ -7,7 +7,7 @@ import { useBranchStore } from '../../../store/branchStore';
 import { ThemeContext } from '../../../ThemeContext';
 import { findBranchById, getBranchDisplayName, getBranchId, normalizeBranchLabel } from '../../../utils/branchLabels';
 import { isLocalPosEnabled } from '../../../Repositories/local/posLocalApiClient';
-import { isPosRestrictedRole } from '../../../utils/permissions';
+import { canAccessModule, getStoredSessionUser, isPosRestrictedRole } from '../../../utils/permissions';
 
 
 const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) => {
@@ -55,6 +55,9 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
   const canSelectAllBranches =
     String(userRole || '').toLowerCase() === 'admin' || userDetails?.all_branch_access !== false;
   const isStaffUser = isPosRestrictedRole(userDetails || userRole);
+  // Customer management needs customers:read (cashier, manager, staff, admin all have it).
+  const canViewCustomers =
+    canAccessModule(userDetails, 'customers') || canAccessModule(getStoredSessionUser(), 'customers');
 
   useEffect(() => {
     if (!branchOpen) return;
@@ -301,6 +304,14 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
                   <span className="nav-pill-label">Inventory</span>
                 </span>
               </button>
+              {canViewCustomers && (
+              <button className={`btn btn-outline-primary nav-pill${isActive('/customers') ? ' active' : ''}`} onClick={() => navigateTo('/customers')}>
+                <span className="nav-pill-content">
+                  <i className="bi bi-people fs-6" aria-hidden="true" />
+                  <span className="nav-pill-label">Customers</span>
+                </span>
+              </button>
+              )}
             </div>
             {(!showMore || isProbingExpand) && (
               <div className={`nav-secondary-links${isProbingExpand ? ' nav-probe-hidden' : ''}`}>
