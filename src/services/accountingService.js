@@ -152,10 +152,10 @@ const queryParams = (filters = {}) => {
 export const fetchCashBook = async (filters = {}) => {
   if (!navigator.onLine) {
     const cached = await getAccountingTransactions({ paymentModes: ['cash'], startDate: filters.start_date, endDate: filters.end_date });
-    return { entries: cached, page: 1, limit: cached.length, total: cached.length };
+    return { opening_balance: 0, entries: cached || [], page: 1, limit: (cached && cached.length) || 0, total: (cached && cached.length) || 0, offline: true };
   }
   const res = await api.get('/accounts/cashbook', { params: queryParams(filters) });
-  const payload = res?.data?.data || {};
+  const payload = res?.data?.data ?? res?.data ?? {};
   if (Array.isArray(payload.entries)) {
     saveTransactionsBulk(payload.entries).catch(() => {});
   }
@@ -191,10 +191,10 @@ export const fetchLedger = async (filters = {}) => {
 
 export const fetchOutstanding = async (filters = {}) => {
   if (!navigator.onLine) {
-    return { rows: [] };
+    return { rows: [], offline: true };
   }
   const res = await api.get('/accounts/outstanding', { params: queryParams(filters) });
-  return res?.data?.data || {};
+  return res?.data?.data ?? res?.data ?? { rows: [] };
 };
 
 export const fetchReceiptEntries = async (filters = {}) => {
