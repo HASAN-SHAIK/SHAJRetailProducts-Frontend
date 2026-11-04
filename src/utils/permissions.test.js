@@ -4,6 +4,8 @@ import {
   canPerformPosAction,
   canReadSettings,
   isPosRestrictedRole,
+  canAccessReceiptEntry,
+  canAccessPaymentEntry,
 } from './permissions';
 
 describe('POS capability helpers', () => {
@@ -36,5 +38,22 @@ describe('POS capability helpers', () => {
     const user = { role: 'cashier', permissions: [POS_PERMISSIONS.SALE, 'orders:read'] };
     expect(isPosRestrictedRole(user)).toBe(true);
     expect(canReadSettings(user)).toBe(false);
+  });
+
+  test('receipt and payment entry permission access matrices', () => {
+    const cashier = { role: 'cashier' };
+    const staff = { role: 'staff' };
+    const manager = { role: 'manager' };
+    const admin = { role: 'admin' };
+
+    expect(canAccessReceiptEntry(cashier)).toBe(true);
+    expect(canAccessReceiptEntry(manager)).toBe(true);
+    expect(canAccessReceiptEntry(admin)).toBe(true);
+    expect(canAccessReceiptEntry(staff)).toBe(false);
+
+    expect(canAccessPaymentEntry(cashier)).toBe(false);
+    expect(canAccessPaymentEntry(staff)).toBe(false);
+    expect(canAccessPaymentEntry(manager)).toBe(true);
+    expect(canAccessPaymentEntry(admin)).toBe(true);
   });
 });

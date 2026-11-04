@@ -1,7 +1,15 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useSelector } from 'react-redux';
+import { canAccessReceiptEntry, canAccessPaymentEntry, getStoredSessionUser } from '../../utils/permissions';
 
 const AccountsSidebar = ({ collapsed, onToggle }) => {
+  const storeUser = useSelector((state) => state?.user?.userDetails);
+  const user = storeUser || getStoredSessionUser();
+
+  const showReceipt = canAccessReceiptEntry(user);
+  const showPayment = canAccessPaymentEntry(user);
+
   return (
     <aside className={`context-sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="context-sidebar__header">
@@ -19,12 +27,16 @@ const AccountsSidebar = ({ collapsed, onToggle }) => {
         </button>
       </div>
       <nav className="context-sidebar__nav">
-        <NavLink className="context-sidebar__link" to="/accounts/receipt">
-          <span className="context-sidebar__link-text">Receipt Entry</span>
-        </NavLink>
-        <NavLink className="context-sidebar__link" to="/accounts/payment">
-          <span className="context-sidebar__link-text">Payment Entry</span>
-        </NavLink>
+        {showReceipt && (
+          <NavLink className="context-sidebar__link" to="/accounts/receipt">
+            <span className="context-sidebar__link-text">Receipt Entry</span>
+          </NavLink>
+        )}
+        {showPayment && (
+          <NavLink className="context-sidebar__link" to="/accounts/payment">
+            <span className="context-sidebar__link-text">Payment Entry</span>
+          </NavLink>
+        )}
         <NavLink className="context-sidebar__link" to="/accounts/cashbook">
           <span className="context-sidebar__link-text">Cash Book</span>
         </NavLink>

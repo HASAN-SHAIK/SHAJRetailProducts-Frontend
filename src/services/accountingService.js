@@ -6,11 +6,25 @@ import {
   upsertAccountingTransaction,
 } from './local/transactionLocalService';
 
-const generateClientTxnId = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+export const generateClientTxnId = () => {
+  const globalCrypto =
+    (typeof crypto !== 'undefined' && crypto) ||
+    (typeof window !== 'undefined' && window.crypto) ||
+    null;
+
+  if (globalCrypto && typeof globalCrypto.randomUUID === 'function') {
+    return globalCrypto.randomUUID();
   }
-  return `ctxn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  if (globalCrypto && typeof globalCrypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    globalCrypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // RFC 4122 v4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  throw new Error('Cryptographically secure random number generator is required for RFC 4122 UUID generation.');
 };
 
 const normalizePaymentMode = (value) => {
@@ -55,30 +69,52 @@ const buildLocalTxn = (payload, overrides = {}) => {
   };
 };
 
-export const createReceipt = async (payload) => {
-  const res = await api.post('/accounts/receipt', payload);
+export const createReceipt = async (payload = {}) => {
+  const clientTxnId = payload.client_txn_id || payload.clientTxnId || generateClientTxnId();
+  const requestPayload = {
+    ...payload,
+    client_txn_id: clientTxnId,
+    customer_id: Number(payload.customer_id ?? payload.customerId),
+    amount: Number(payload.amount),
+    payment_mode: normalizePaymentMode(payload.payment_mode ?? payload.paymentMode ?? 'cash'),
+    order_id: payload.order_id !== undefined && payload.order_id !== null && payload.order_id !== ''
+      ? Number(payload.order_id)
+      : null,
+    notes: payload.notes || null,
+  };
+  const res = await api.post('/accounts/receipt', requestPayload);
   const serverId = res?.data?.data?.id ?? res?.data?.id ?? null;
   await upsertAccountingTransaction(
-    buildLocalTxn(payload, {
+    buildLocalTxn(requestPayload, {
       id: serverId || `receipt_${Date.now()}`,
       txn_type: 'receipt',
       direction: 'in',
       party_type: 'customer',
-      party_id: payload.customer_id,
-      order_id: payload.order_id ?? null,
-      reference_type: payload.reference_type ?? 'order',
-      reference_id: payload.reference_id ?? payload.order_id ?? null,
+      party_id: requestPayload.customer_id,
+      order_id: requestPayload.order_id,
+      reference_type: requestPayload.order_id ? 'order' : 'customer',
+      reference_id: requestPayload.order_id || requestPayload.customer_id,
       sync_status: 'synced',
     })
-  );
+  ).catch(() => {});
   return res?.data?.data || res?.data;
 };
 
-export const createPayment = async (payload) => {
+export const createPayment = async (payload = {}) => {
+  const clientTxnId = payload.client_txn_id || payload.clientTxnId || generateClientTxnId();
+  const type = String(payload.type || 'supplier').trim().toLowerCase();
   const requestPayload = {
-    type: payload?.type || 'supplier',
-    client_txn_id: payload?.client_txn_id || payload?.clientTxnId || generateClientTxnId(),
     ...payload,
+    type,
+    client_txn_id: clientTxnId,
+    amount: Number(payload.amount),
+    payment_mode: String(payload.payment_mode || payload.paymentMode || 'cash').trim().toLowerCase(),
+    supplier_id: type === 'supplier' ? Number(payload.supplier_id ?? payload.supplierId) : null,
+    order_id: type === 'supplier' && payload.order_id !== undefined && payload.order_id !== null && payload.order_id !== ''
+      ? Number(payload.order_id)
+      : null,
+    notes: payload.notes || null,
+    expense_category: type === 'expense' ? (payload.expense_category || payload.expenseCategory || null) : null,
   };
   const res = await api.post('/accounts/payment', requestPayload);
   const serverId = res?.data?.data?.id ?? res?.data?.id ?? null;
@@ -87,11 +123,14 @@ export const createPayment = async (payload) => {
       id: serverId || `payment_${Date.now()}`,
       txn_type: 'payment',
       direction: 'out',
-      party_type: 'supplier',
+      party_type: type === 'supplier' ? 'supplier' : 'expense',
       party_id: requestPayload.supplier_id,
+      order_id: requestPayload.order_id,
+      reference_type: requestPayload.order_id ? 'purchase' : type,
+      reference_id: requestPayload.order_id || requestPayload.supplier_id,
       sync_status: 'synced',
     })
-  );
+  ).catch(() => {});
   return res?.data?.data || res?.data;
 };
 

@@ -76,7 +76,7 @@ import { hasFeature, isFeatureEnabled } from './utils/entitlements';
 import { runAppSyncCycle } from './utils/appSyncOrchestrator';
 import { findBranchById, getBranchDisplayName, getBranchId } from './utils/branchLabels';
 import { getDevelopmentPosProfile, getLocalPosDevice, isLocalPosEnabled } from './Repositories/local/posLocalApiClient';
-import { canReadSettings, isPosRestrictedRole } from './utils/permissions';
+import { canReadSettings, isPosRestrictedRole, canAccessReceiptEntry, canAccessPaymentEntry } from './utils/permissions';
 
 const AUTH_PAGES = ['/', '/register', '/logout'];
 
@@ -877,7 +877,7 @@ const tenantBannerColor = (() => {
             />
             <Route
               path="/accounts"
-              element={<Navigate to={isStaffUser ? '/billing/retail' : '/accounts/receipt'} replace />}
+              element={<Navigate to={canAccessReceiptEntry(userDetails) ? '/accounts/receipt' : '/billing/retail'} replace />}
             />
             <Route
               path="/inventory/catalog"
@@ -907,8 +907,8 @@ const tenantBannerColor = (() => {
             <Route path="/inventory/suppliers/new" element={<OpeningRequired><SupplierForm /></OpeningRequired>} />
             <Route path="/inventory/suppliers/:id" element={<OpeningRequired><SupplierDetail /></OpeningRequired>} />
             <Route path="/inventory/suppliers/:id/edit" element={<OpeningRequired><SupplierForm /></OpeningRequired>} />
-            <Route path="/accounts/receipt" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <ReceiptEntry />} />
-            <Route path="/accounts/payment" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <PaymentEntry />} />
+            <Route path="/accounts/receipt" element={canAccessReceiptEntry(userDetails) ? <ReceiptEntry /> : <Navigate to="/billing/retail" replace />} />
+            <Route path="/accounts/payment" element={canAccessPaymentEntry(userDetails) ? <PaymentEntry /> : <Navigate to="/billing/retail" replace />} />
             <Route path="/accounts/cashbook" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <CashBook />} />
             <Route path="/accounts/bankbook" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <BankBook />} />
             <Route path="/accounts/ledger" element={isStaffUser ? <Navigate to="/billing/retail" replace /> : <Ledger />} />

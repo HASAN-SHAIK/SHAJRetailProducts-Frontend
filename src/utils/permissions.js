@@ -83,6 +83,20 @@ export const canManageApplicationSettings = (user = null) => {
 export const isPosRestrictedRole = (userOrRole) =>
   ['cashier', 'staff'].includes(normalizeRole(userOrRole));
 
+export const canAccessReceiptEntry = (userOrRole) => {
+  const role = normalizeRole(userOrRole);
+  if (role === 'admin' || role === 'manager' || role === 'cashier') return true;
+  if (role === 'staff') return false;
+  return hasPermission(userOrRole, 'accounting:receipt:create') || hasPermission(userOrRole, 'accounting:receipt:read');
+};
+
+export const canAccessPaymentEntry = (userOrRole) => {
+  const role = normalizeRole(userOrRole);
+  if (role === 'admin' || role === 'manager') return true;
+  if (role === 'cashier' || role === 'staff') return false;
+  return hasPermission(userOrRole, 'accounting:payment:create') || hasPermission(userOrRole, 'accounting:payment:read');
+};
+
 export const enrichUserPermissions = (user, permissions = [], storePermissions = null) => {
   if (!user) return user;
   return {
