@@ -66,6 +66,52 @@ export const buildCustomerPayload = (customer) => {
   };
 };
 
+// POS customer edits must never carry financial fields. The central API merges
+// updates with COALESCE, so a missing key leaves the stored value untouched
+// while a present key (even 0) overwrites it. Omit the keys entirely.
+//
+// The payload is also presence-based: only keys the caller actually supplied
+// are sent, so a billing sync that knows just name/phone cannot wipe a stored
+// email, GSTIN or notes. An explicit empty string is sent as-is and clears the
+// field on the server; null/undefined mean "leave unchanged".
+const UPDATABLE_FIELDS = [
+  'name',
+  'phone',
+  'mobile',
+  'email',
+  'type',
+  'shop_name',
+  'gst_number',
+  'notes',
+  'address',
+  'location',
+  'is_active',
+];
+
+export const buildCustomerUpdatePayload = (customer) => {
+  if (!customer) return customer;
+  const payload = {};
+  UPDATABLE_FIELDS.forEach((key) => {
+    if (customer[key] !== undefined && customer[key] !== null) payload[key] = customer[key];
+  });
+  if (payload.name === undefined && customer.customer_name) payload.name = customer.customer_name;
+  if (payload.phone === undefined && payload.mobile !== undefined) payload.phone = payload.mobile;
+  if (payload.mobile === undefined && payload.phone !== undefined) payload.mobile = payload.phone;
+  return payload;
+};
+
+/** Reads the existing customer out of a 409 DUPLICATE_CUSTOMER error (v1 or legacy shape). */
+export const getDuplicateCustomerFromError = (error) => {
+  const response = error?.response;
+  if (!response || response.status !== 409) return null;
+  const data = response.data || {};
+  const details = data.error?.details || data.details || null;
+  const existing = details?.existing_customer || null;
+  return existing ? normalizeApiCustomer(existing) || existing : null;
+};
+
+export const isDuplicateCustomerError = (error) => error?.response?.status === 409;
+
 export const filterCustomersByTerm = (customers, term) => {
   const needle = String(term || '').trim().toLowerCase();
   if (!needle) return customers;

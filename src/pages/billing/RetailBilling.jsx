@@ -30,6 +30,7 @@ import { enqueueOfflineOrder, processOfflineQueue } from '../../utils/offlineOrd
 import { runDeltaSync } from '../../utils/deltaSync';
 import { getSettingGroup, updateSettingGroup } from '../../services/local/applicationSettingsLocalService';
 import { syncAllCustomers } from '../../utils/customersSync';
+import { findCustomerByPhone } from '../customers/customerHelpers';
 import { createOfflineProduct } from '../../utils/offlineProducts';
 import CartList from '../../components/Billing/CartList';
 import BarcodeInput from '../../components/Billing/BarcodeInput';
@@ -404,6 +405,12 @@ const RetailBilling = () => {
     const payload = buildCustomerPayload(details, fallbackName, fallbackMobile);
     if (!payload) return null;
     const existingId = details?.id || null;
+    if (!existingId) {
+      // Quick-create must never turn into a write against someone else's record:
+      // if this mobile number is already known (cache or queued), use that customer.
+      const known = findCustomerByPhone(await getAllCustomers().catch(() => []), payload.phone || payload.mobile);
+      if (known?.id) return known.id;
+    }
     const tempId = existingId || `temp:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const localCustomer = {
       id: tempId,
