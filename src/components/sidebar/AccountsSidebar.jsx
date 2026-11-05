@@ -1,7 +1,14 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import { canAccessReceiptEntry, canAccessPaymentEntry, canAccessCashBook, canAccessOutstanding, getStoredSessionUser } from '../../utils/permissions';
+import {
+  canAccessReceiptEntry,
+  canAccessPaymentEntry,
+  canAccessExpenseEntry,
+  canAccessCashBook,
+  canAccessOutstanding,
+  getStoredSessionUser,
+} from '../../utils/permissions';
 
 const AccountsSidebar = ({ collapsed, onToggle }) => {
   const storeUser = useSelector((state) => state?.user?.userDetails);
@@ -9,6 +16,7 @@ const AccountsSidebar = ({ collapsed, onToggle }) => {
 
   const showReceipt = canAccessReceiptEntry(user);
   const showPayment = canAccessPaymentEntry(user);
+  const showExpense = canAccessExpenseEntry(user);
   const showCashBook = canAccessCashBook(user);
   const showOutstanding = canAccessOutstanding(user);
 
@@ -37,6 +45,11 @@ const AccountsSidebar = ({ collapsed, onToggle }) => {
         {showPayment && (
           <NavLink className="context-sidebar__link" to="/accounts/payment">
             <span className="context-sidebar__link-text">Payment Entry</span>
+          </NavLink>
+        )}
+        {showExpense && (
+          <NavLink className="context-sidebar__link" to="/accounts/expense">
+            <span className="context-sidebar__link-text">Expense Entry</span>
           </NavLink>
         )}
         {showCashBook && (

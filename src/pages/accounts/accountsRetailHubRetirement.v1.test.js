@@ -32,6 +32,14 @@ describe('V1 POS accounts management retirement and active accounting routes', (
     expect(source).toContain('Navigate to="/billing/retail"');
   });
 
+  test('ExpenseEntry.jsx is an active POS operational expense component with role and online guards', () => {
+    const source = read('ExpenseEntry.jsx');
+    expect(source).toContain('canAccessExpenseEntry');
+    expect(source).toContain('createExpense');
+    expect(source).toContain('Offline Mode');
+    expect(source).toContain('Navigate to="/billing/retail"');
+  });
+
   test('CashBook.jsx is an active POS operational cashbook component with role and branch custody guards', () => {
     const source = read('CashBook.jsx');
     expect(source).toContain('canAccessCashBook');

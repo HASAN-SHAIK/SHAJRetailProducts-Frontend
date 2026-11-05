@@ -6,6 +6,7 @@ import {
   isPosRestrictedRole,
   canAccessReceiptEntry,
   canAccessPaymentEntry,
+  canAccessExpenseEntry,
   canAccessCashBook,
   canAccessOutstanding,
   canAccessSupplierOutstanding,
@@ -43,7 +44,7 @@ describe('POS capability helpers', () => {
     expect(canReadSettings(user)).toBe(false);
   });
 
-  test('receipt and payment entry permission access matrices', () => {
+  test('receipt, payment and expense entry permission access matrices', () => {
     const cashier = { role: 'cashier' };
     const staff = { role: 'staff' };
     const manager = { role: 'manager' };
@@ -58,6 +59,19 @@ describe('POS capability helpers', () => {
     expect(canAccessPaymentEntry(staff)).toBe(false);
     expect(canAccessPaymentEntry(manager)).toBe(true);
     expect(canAccessPaymentEntry(admin)).toBe(true);
+
+    expect(canAccessExpenseEntry(cashier)).toBe(false);
+    expect(canAccessExpenseEntry(staff)).toBe(false);
+    expect(canAccessExpenseEntry(manager)).toBe(true);
+    expect(canAccessExpenseEntry(admin)).toBe(true);
+
+    // Custom permissions
+    const customWriteUser = { role: 'custom', permissions: ['accounting:payment:create'] };
+    expect(canAccessExpenseEntry(customWriteUser)).toBe(true);
+
+    // Negative test: custom user with only accounting:payment:read must be denied
+    const customReadOnlyUser = { role: 'custom', permissions: ['accounting:payment:read'] };
+    expect(canAccessExpenseEntry(customReadOnlyUser)).toBe(false);
   });
 
   test('cashbook and outstanding permission access matrices', () => {
