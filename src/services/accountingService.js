@@ -134,6 +134,10 @@ export const createPayment = async (payload = {}) => {
   return res?.data?.data || res?.data;
 };
 
+export const createExpense = async (payload = {}) => {
+  return createPayment({ ...payload, type: 'expense' });
+};
+
 const queryParams = (filters = {}) => {
   const params = {};
   if (filters.range) params.range = filters.range;

@@ -97,6 +97,13 @@ export const canAccessPaymentEntry = (userOrRole) => {
   return hasPermission(userOrRole, 'accounting:payment:create') || hasPermission(userOrRole, 'accounting:payment:read');
 };
 
+export const canAccessExpenseEntry = (userOrRole) => {
+  const role = normalizeRole(userOrRole);
+  if (role === 'admin' || role === 'manager') return true;
+  if (role === 'cashier' || role === 'staff') return false;
+  return hasPermission(userOrRole, 'accounting:payment:create') || hasPermission(userOrRole, 'accounting:payment:read');
+};
+
 export const canAccessCashBook = (userOrRole) => {
   const role = normalizeRole(userOrRole);
   if (role === 'admin' || role === 'manager' || role === 'cashier') return true;
