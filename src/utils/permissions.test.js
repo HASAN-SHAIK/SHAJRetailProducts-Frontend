@@ -6,6 +6,9 @@ import {
   isPosRestrictedRole,
   canAccessReceiptEntry,
   canAccessPaymentEntry,
+  canAccessCashBook,
+  canAccessOutstanding,
+  canAccessSupplierOutstanding,
 } from './permissions';
 
 describe('POS capability helpers', () => {
@@ -55,5 +58,30 @@ describe('POS capability helpers', () => {
     expect(canAccessPaymentEntry(staff)).toBe(false);
     expect(canAccessPaymentEntry(manager)).toBe(true);
     expect(canAccessPaymentEntry(admin)).toBe(true);
+  });
+
+  test('cashbook and outstanding permission access matrices', () => {
+    const cashier = { role: 'cashier' };
+    const staff = { role: 'staff' };
+    const manager = { role: 'manager' };
+    const admin = { role: 'admin' };
+
+    // CashBook: cashier, manager, admin allowed; staff blocked
+    expect(canAccessCashBook(cashier)).toBe(true);
+    expect(canAccessCashBook(manager)).toBe(true);
+    expect(canAccessCashBook(admin)).toBe(true);
+    expect(canAccessCashBook(staff)).toBe(false);
+
+    // Customer Outstanding: cashier, manager, admin allowed; staff blocked
+    expect(canAccessOutstanding(cashier)).toBe(true);
+    expect(canAccessOutstanding(manager)).toBe(true);
+    expect(canAccessOutstanding(admin)).toBe(true);
+    expect(canAccessOutstanding(staff)).toBe(false);
+
+    // Supplier Outstanding: manager, admin allowed; cashier and staff blocked
+    expect(canAccessSupplierOutstanding(cashier)).toBe(false);
+    expect(canAccessSupplierOutstanding(staff)).toBe(false);
+    expect(canAccessSupplierOutstanding(manager)).toBe(true);
+    expect(canAccessSupplierOutstanding(admin)).toBe(true);
   });
 });

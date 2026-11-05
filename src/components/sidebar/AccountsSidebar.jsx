@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import { canAccessReceiptEntry, canAccessPaymentEntry, getStoredSessionUser } from '../../utils/permissions';
+import { canAccessReceiptEntry, canAccessPaymentEntry, canAccessCashBook, canAccessOutstanding, getStoredSessionUser } from '../../utils/permissions';
 
 const AccountsSidebar = ({ collapsed, onToggle }) => {
   const storeUser = useSelector((state) => state?.user?.userDetails);
@@ -9,6 +9,8 @@ const AccountsSidebar = ({ collapsed, onToggle }) => {
 
   const showReceipt = canAccessReceiptEntry(user);
   const showPayment = canAccessPaymentEntry(user);
+  const showCashBook = canAccessCashBook(user);
+  const showOutstanding = canAccessOutstanding(user);
 
   return (
     <aside className={`context-sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -37,18 +39,22 @@ const AccountsSidebar = ({ collapsed, onToggle }) => {
             <span className="context-sidebar__link-text">Payment Entry</span>
           </NavLink>
         )}
-        <NavLink className="context-sidebar__link" to="/accounts/cashbook">
-          <span className="context-sidebar__link-text">Cash Book</span>
-        </NavLink>
+        {showCashBook && (
+          <NavLink className="context-sidebar__link" to="/accounts/cashbook">
+            <span className="context-sidebar__link-text">Cash Book</span>
+          </NavLink>
+        )}
         <NavLink className="context-sidebar__link" to="/accounts/bankbook">
           <span className="context-sidebar__link-text">Bank Book</span>
         </NavLink>
         <NavLink className="context-sidebar__link" to="/accounts/ledger">
           <span className="context-sidebar__link-text">Ledger</span>
         </NavLink>
-        <NavLink className="context-sidebar__link" to="/accounts/outstanding">
-          <span className="context-sidebar__link-text">Outstanding</span>
-        </NavLink>
+        {showOutstanding && (
+          <NavLink className="context-sidebar__link" to="/accounts/outstanding">
+            <span className="context-sidebar__link-text">Outstanding</span>
+          </NavLink>
+        )}
       </nav>
     </aside>
   );

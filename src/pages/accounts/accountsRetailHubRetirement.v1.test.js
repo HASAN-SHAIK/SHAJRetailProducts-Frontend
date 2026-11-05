@@ -4,8 +4,8 @@ const path = require('path');
 const read = (name) => fs.readFileSync(path.join(__dirname, name), 'utf8');
 
 describe('V1 POS accounts management retirement and active accounting routes', () => {
-  // CashBook, BankBook, Ledger, and Outstanding remain retired from POS to RetailHub
-  test.each(['CashBook.jsx', 'BankBook.jsx', 'Ledger.jsx', 'Outstanding.jsx'])(
+  // BankBook and Ledger remain retired from POS to RetailHub
+  test.each(['BankBook.jsx', 'Ledger.jsx'])(
     '%s redirects accounting management out of POS',
     (name) => {
       const source = read(name);
@@ -28,6 +28,22 @@ describe('V1 POS accounts management retirement and active accounting routes', (
     const source = read('PaymentEntry.jsx');
     expect(source).toContain('canAccessPaymentEntry');
     expect(source).toContain('createPayment');
+    expect(source).toContain('Offline Mode');
+    expect(source).toContain('Navigate to="/billing/retail"');
+  });
+
+  test('CashBook.jsx is an active POS operational cashbook component with role and branch custody guards', () => {
+    const source = read('CashBook.jsx');
+    expect(source).toContain('canAccessCashBook');
+    expect(source).toContain('fetchCashBook');
+    expect(source).toContain('Offline Mode');
+    expect(source).toContain('Navigate to="/billing/retail"');
+  });
+
+  test('Outstanding.jsx is an active POS operational outstanding component with role and receivables guards', () => {
+    const source = read('Outstanding.jsx');
+    expect(source).toContain('canAccessOutstanding');
+    expect(source).toContain('fetchOutstanding');
     expect(source).toContain('Offline Mode');
     expect(source).toContain('Navigate to="/billing/retail"');
   });

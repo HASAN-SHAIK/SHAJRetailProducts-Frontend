@@ -97,6 +97,27 @@ export const canAccessPaymentEntry = (userOrRole) => {
   return hasPermission(userOrRole, 'accounting:payment:create') || hasPermission(userOrRole, 'accounting:payment:read');
 };
 
+export const canAccessCashBook = (userOrRole) => {
+  const role = normalizeRole(userOrRole);
+  if (role === 'admin' || role === 'manager' || role === 'cashier') return true;
+  if (role === 'staff') return false;
+  return hasPermission(userOrRole, 'reports:read') || hasPermission(userOrRole, 'accounting:cashbook:read');
+};
+
+export const canAccessOutstanding = (userOrRole) => {
+  const role = normalizeRole(userOrRole);
+  if (role === 'admin' || role === 'manager' || role === 'cashier') return true;
+  if (role === 'staff') return false;
+  return hasPermission(userOrRole, 'reports:read') || hasPermission(userOrRole, 'customers:read');
+};
+
+export const canAccessSupplierOutstanding = (userOrRole) => {
+  const role = normalizeRole(userOrRole);
+  if (role === 'admin' || role === 'manager') return true;
+  if (role === 'cashier' || role === 'staff') return false;
+  return hasPermission(userOrRole, 'reports:read') || hasPermission(userOrRole, 'suppliers:read');
+};
+
 export const enrichUserPermissions = (user, permissions = [], storePermissions = null) => {
   if (!user) return user;
   return {
