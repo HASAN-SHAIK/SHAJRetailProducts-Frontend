@@ -101,7 +101,7 @@ export const canAccessExpenseEntry = (userOrRole) => {
   const role = normalizeRole(userOrRole);
   if (role === 'admin' || role === 'manager') return true;
   if (role === 'cashier' || role === 'staff') return false;
-  return hasPermission(userOrRole, 'accounting:payment:create') || hasPermission(userOrRole, 'accounting:payment:read');
+  return hasPermission(userOrRole, 'accounting:payment:create');
 };
 
 export const canAccessCashBook = (userOrRole) => {

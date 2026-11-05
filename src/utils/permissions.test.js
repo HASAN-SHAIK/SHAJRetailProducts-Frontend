@@ -65,9 +65,13 @@ describe('POS capability helpers', () => {
     expect(canAccessExpenseEntry(manager)).toBe(true);
     expect(canAccessExpenseEntry(admin)).toBe(true);
 
-    // Custom permissions fallback
-    const customUser = { role: 'custom', permissions: ['accounting:payment:create'] };
-    expect(canAccessExpenseEntry(customUser)).toBe(true);
+    // Custom permissions
+    const customWriteUser = { role: 'custom', permissions: ['accounting:payment:create'] };
+    expect(canAccessExpenseEntry(customWriteUser)).toBe(true);
+
+    // Negative test: custom user with only accounting:payment:read must be denied
+    const customReadOnlyUser = { role: 'custom', permissions: ['accounting:payment:read'] };
+    expect(canAccessExpenseEntry(customReadOnlyUser)).toBe(false);
   });
 
   test('cashbook and outstanding permission access matrices', () => {
