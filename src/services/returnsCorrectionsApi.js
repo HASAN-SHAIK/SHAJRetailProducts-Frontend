@@ -67,7 +67,13 @@ export const fetchGstReports = async ({ from, to } = {}) => {
   return Array.isArray(res?.data?.reports) ? res.data.reports : [];
 };
 
-export const fetchGstFilingData = async () => {
-  const res = await api.get('/gst/filing');
-  return res?.data?.data || { b2b: [], b2c: [], credit_notes: [], raw: [] };
+export const fetchGstFilingData = async ({ from, to, format } = {}) => {
+  const res = await api.get('/gst/filing', {
+    params: {
+      from: from || undefined,
+      to: to || undefined,
+      format: format || undefined,
+    },
+  });
+  return res?.data?.data || { b2b: [], b2c: [], b2c_small: [], b2c_large: [], credit_notes: [], raw: [] };
 };
