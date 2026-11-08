@@ -5,6 +5,7 @@ import { canAccessCashBook, getStoredSessionUser } from '../../utils/permissions
 import { fetchCashBook } from '../../services/accountingService';
 import { formatInr, toNumber } from '../customers/customerHelpers';
 import { getBranchDisplayName } from '../../utils/branchLabels';
+import ShiftDeclarationModal from '../../components/accounts/ShiftDeclarationModal';
 import './Accounts.css';
 
 const getTodayDateString = () => new Date().toISOString().slice(0, 10);
@@ -28,6 +29,7 @@ export default function CashBook() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isOfflineData, setIsOfflineData] = useState(false);
+  const [showShiftModal, setShowShiftModal] = useState(false);
 
   const branchId = user?.branch_id || user?.store_id || null;
   const branchName = getBranchDisplayName(user, 'Primary Drawer');
@@ -100,7 +102,16 @@ export default function CashBook() {
             {branchName}
           </span>
         </div>
-        <div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            className="accounts-date-btn accounts-date-btn--primary"
+            style={{ backgroundColor: '#0284c7', color: '#fff', border: 'none' }}
+            onClick={() => setShowShiftModal(true)}
+          >
+            <i className="bi bi-box-arrow-right me-1" />
+            Shift Handover & Declare Cash
+          </button>
           <button
             type="button"
             className="accounts-date-btn"
@@ -239,53 +250,43 @@ export default function CashBook() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="7" className="accounts-empty-state">
-                  Loading Cash Book transactions...
+                <td colSpan="7" style={{ textAlign: 'center', padding: '32px' }}>
+                  Loading CashBook transactions...
                 </td>
               </tr>
             ) : entries.length === 0 ? (
               <tr>
-                <td colSpan="7" className="accounts-empty-state">
-                  No cash transactions recorded for this period.
+                <td colSpan="7" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
+                  No cash transactions found for the selected period.
                 </td>
               </tr>
             ) : (
-              entries.map((entry, idx) => {
-                const dateStr = entry.date || entry.created_at || '';
-                const formattedDate = dateStr
-                  ? new Date(dateStr).toLocaleString(undefined, {
-                      year: 'numeric',
+              entries.map((item, idx) => {
+                const inflow = toNumber(item.debit);
+                const outflow = toNumber(item.credit);
+                const running = item.balance != null ? toNumber(item.balance) : null;
+                const formattedDate = item.date
+                  ? new Date(item.date).toLocaleDateString('en-IN', {
+                      day: '2-digit',
                       month: 'short',
-                      day: 'numeric',
+                      year: 'numeric',
                       hour: '2-digit',
                       minute: '2-digit',
                     })
                   : '-';
-                const inflow = toNumber(entry.debit);
-                const outflow = toNumber(entry.credit);
-                const running = entry.running_balance != null ? toNumber(entry.running_balance) : null;
-                const refId = entry.reference_id || entry.transaction_id || entry.id || '-';
-                const refType = entry.reference_type || entry.txn_type || 'transaction';
 
                 return (
-                  <tr key={entry.id || idx}>
-                    <td style={{ whiteSpace: 'nowrap' }}>{formattedDate}</td>
-                    <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{refId}</td>
+                  <tr key={item.id || idx}>
+                    <td>{formattedDate}</td>
                     <td>
-                      <span
-                        style={{
-                          textTransform: 'uppercase',
-                          fontSize: '0.75rem',
-                          padding: '2px 6px',
-                          background: '#f1f5f9',
-                          borderRadius: '4px',
-                          fontWeight: 600,
-                        }}
-                      >
-                        {refType}
+                      <span className="accounts-ref-badge">{item.ref_no || item.reference || '-'}</span>
+                    </td>
+                    <td>
+                      <span className={`accounts-type-tag accounts-type-tag--${String(item.type || '').toLowerCase()}`}>
+                        {item.type || 'TXN'}
                       </span>
                     </td>
-                    <td>{entry.description || '-'}</td>
+                    <td>{item.description || item.particulars || '-'}</td>
                     <td style={{ textAlign: 'right' }}>
                       {inflow > 0 ? (
                         <span className="accounts-inflow-val">+{formatInr(inflow)}</span>
@@ -310,6 +311,15 @@ export default function CashBook() {
           </tbody>
         </table>
       </div>
+
+      <ShiftDeclarationModal
+        isOpen={showShiftModal}
+        onClose={() => setShowShiftModal(false)}
+        onDeclared={() => loadCashBook()}
+        expectedCash={closingBalance}
+        branchName={branchName}
+        cashierName={user?.name || user?.username || 'Cashier'}
+      />
     </div>
   );
 }
