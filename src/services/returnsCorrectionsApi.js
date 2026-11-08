@@ -77,3 +77,9 @@ export const fetchGstFilingData = async ({ from, to, format } = {}) => {
   });
   return res?.data?.data || { b2b: [], b2c: [], b2c_small: [], b2c_large: [], credit_notes: [], raw: [] };
 };
+
+
+export const createUnreferencedReturn = async (payload) => {
+  const res = await api.post('/returns/unreferenced', payload);
+  return res?.data || null;
+};

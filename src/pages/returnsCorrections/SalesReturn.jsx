@@ -10,6 +10,7 @@ import { getOrderRepository } from '../../RepositoryFactory';
 import { isEligibleForLocalFullRefund } from './salesReturnPolicy';
 import { buildLocalPartialReturnLines } from './salesReturnPartialPolicy';
 import { getReturnLineLabel, getReturnLineState } from './salesReturnVisibilityPolicy';
+import UnreferencedReturnTab from './UnreferencedReturnTab';
 import './ReturnsCorrections.css';
 
 const SalesReturn = () => {
@@ -23,6 +24,7 @@ const SalesReturn = () => {
   const [submitting, setSubmitting] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [itemsError, setItemsError] = useState('');
+  const [activeTab, setActiveTab] = useState('referenced');
   const [autoAdjustBill, setAutoAdjustBill] = useState(true);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const localPosMode = isLocalPosEnabled();
@@ -405,6 +407,34 @@ const SalesReturn = () => {
   return (
     <div className="returns-page">
       <ReturnsHeader title="Sales Return" />
+      <div className="d-flex gap-2 mb-3">
+        <button
+          type="button"
+          className={`btn btn-sm ${activeTab === 'referenced' ? 'btn-primary' : 'btn-outline-primary'}`}
+          onClick={() => setActiveTab('referenced')}
+          data-testid="tab-referenced"
+        >
+          🧾 Bill-Referenced Return
+        </button>
+        <button
+          type="button"
+          className={`btn btn-sm ${activeTab === 'unreferenced' ? 'btn-primary' : 'btn-outline-primary'}`}
+          onClick={() => setActiveTab('unreferenced')}
+          data-testid="tab-unreferenced"
+        >
+          🚶 Walk-In / Unreferenced Return (FEAT-RET-005)
+        </button>
+      </div>
+
+      {activeTab === 'unreferenced' ? (
+        <UnreferencedReturnTab
+          onReturnCompleted={() => {
+            loadOrders();
+            setHistoryRefreshKey((k) => k + 1);
+          }}
+        />
+      ) : (
+        <>
       <div className="returns-card">
         {ordersError && (
           <div className="alert alert-danger d-flex align-items-center justify-content-between gap-2" role="alert">
@@ -540,6 +570,8 @@ const SalesReturn = () => {
           </button>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };
