@@ -20,6 +20,7 @@ import { createOfflineProduct, deleteOfflineProduct, updateOfflineProduct } from
 import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
 import { getSettings } from '../../services/settingsService';
 import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
+import StockAuditModal from '../inventory/StockAuditModal';
 
 const SAMPLE_BARCODE_PRODUCTS = [
   {
@@ -2066,6 +2067,9 @@ const ProductsPage = ({ navigate }) => {
             >
               Refresh from Server
             </button>
+            <button className="btn btn-outline-warning" onClick={() => setStockAuditModalOpen(true)} type="button">
+              🔍 Stocktake Barcode Audit
+            </button>
             {userDetails.role === 'admin' && (
               <button className="btn btn-outline-info" onClick={() => setImportModalOpen(true)}>
                 Import Products
@@ -2411,6 +2415,14 @@ const ProductsPage = ({ navigate }) => {
             </div>
           </div>
         )}
+        <StockAuditModal
+          isOpen={stockAuditModalOpen}
+          onClose={() => setStockAuditModalOpen(false)}
+          onAuditApplied={() => {
+            setForceApiFetch(true);
+            setProductUpdateFlag((prev) => !prev);
+          }}
+        />
         {stockModalOpen && (
           <div className="delete-modal-overlay" onClick={closeStockModal}>
             <div className="delete-modal stock-modal" onClick={(event) => event.stopPropagation()}>
