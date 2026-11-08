@@ -8,6 +8,7 @@ import {
   getAvailableCredit,
   isOverCreditLimit,
 } from './customerHelpers';
+import PaymentReminderModal from '../../components/customers/PaymentReminderModal';
 import './Customers.css';
 
 const CustomerDetail = () => {
@@ -17,6 +18,7 @@ const CustomerDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('orders');
+  const [reminderModalOpen, setReminderModalOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -93,6 +95,16 @@ const CustomerDetail = () => {
           >
             Edit
           </button>
+          {customer.current_balance > 0 && (
+            <button
+              type="button"
+              className="btn btn-outline-success"
+              onClick={() => setReminderModalOpen(true)}
+              title="Send automated SMS / WhatsApp payment reminder"
+            >
+              📱 Send Reminder
+            </button>
+          )}
           <button type="button" className="btn btn-outline-light" onClick={() => navigate('/customers')}>
             Back
           </button>
@@ -216,6 +228,12 @@ const CustomerDetail = () => {
           </table>
         )}
       </div>
+
+      <PaymentReminderModal
+        isOpen={reminderModalOpen}
+        customer={customer}
+        onClose={() => setReminderModalOpen(false)}
+      />
     </div>
   );
 };

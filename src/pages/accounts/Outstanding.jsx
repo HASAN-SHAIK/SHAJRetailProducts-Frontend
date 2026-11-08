@@ -8,6 +8,7 @@ import {
 } from '../../utils/permissions';
 import { fetchOutstanding } from '../../services/accountingService';
 import { formatInr, toNumber } from '../customers/customerHelpers';
+import PaymentReminderModal from '../../components/customers/PaymentReminderModal';
 import './Accounts.css';
 
 export default function Outstanding() {
@@ -29,6 +30,7 @@ export default function Outstanding() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isOfflineData, setIsOfflineData] = useState(false);
+  const [reminderCustomer, setReminderCustomer] = useState(null);
 
   const branchId = user?.branch_id || user?.store_id || null;
 
@@ -267,14 +269,26 @@ export default function Outstanding() {
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       {activeTab === 'customer' ? (
-                        <button
-                          type="button"
-                          className="accounts-action-btn"
-                          onClick={() => handleCollectReceipt(row)}
-                          title="Collect payment in Receipt Entry"
-                        >
-                          Collect Payment
-                        </button>
+                        <div className="d-flex justify-content-center gap-1">
+                          <button
+                            type="button"
+                            className="accounts-action-btn"
+                            onClick={() => handleCollectReceipt(row)}
+                            title="Collect payment in Receipt Entry"
+                          >
+                            Collect Payment
+                          </button>
+                          {outstanding > 0 && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-primary py-0 px-2"
+                              onClick={() => setReminderCustomer(row)}
+                              title="Send SMS / UPI Payment Reminder"
+                            >
+                              📱 Reminder
+                            </button>
+                          )}
+                        </div>
                       ) : (
                         <button
                           type="button"
@@ -293,6 +307,13 @@ export default function Outstanding() {
           </tbody>
         </table>
       </div>
+
+      <PaymentReminderModal
+        isOpen={Boolean(reminderCustomer)}
+        customer={reminderCustomer}
+        onClose={() => setReminderCustomer(null)}
+        onReminderSent={() => {}}
+      />
     </div>
   );
 }
