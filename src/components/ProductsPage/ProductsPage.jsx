@@ -339,6 +339,7 @@ const ProductsPage = ({ navigate }) => {
  const [editedMap, setEditedMap] = useState({});
  const [savingBulk, setSavingBulk] = useState(false);
  const [stockModalOpen, setStockModalOpen] = useState(false);
+ const [stockAuditModalOpen, setStockAuditModalOpen] = useState(false);
  const [stockLoading, setStockLoading] = useState(false);
  const [stockError, setStockError] = useState('');
  const [stockRows, setStockRows] = useState([]);
