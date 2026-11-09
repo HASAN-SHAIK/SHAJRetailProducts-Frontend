@@ -27,3 +27,10 @@ frontend-dev.log*
 # Optional: OS generated files
 Thumbs.db
 frontend-dev.log
+
+# Credentials
+TEST_CREDENTIALS.md
+CREDENTIALS.md
+credentials.*
+*.credentials
+
