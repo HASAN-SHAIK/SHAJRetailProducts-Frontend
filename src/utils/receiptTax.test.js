@@ -1,6 +1,12 @@
 import fs from 'fs';
 import path from 'path';
-import { buildReceiptTaxFields, resolveGstin, splitGst } from './receiptTax';
+import {
+  buildReceiptTaxFields,
+  extractGstinStateCode,
+  isInterStateSale,
+  resolveGstin,
+  splitGst,
+} from './receiptTax';
 
 describe('splitGst', () => {
   test('even paise split exactly in half', () => {
@@ -36,6 +42,68 @@ describe('resolveGstin', () => {
   });
 });
 
+describe('extractGstinStateCode', () => {
+  test('extracts 2-digit numeric state code', () => {
+    expect(extractGstinStateCode('36ABCDE1234F1Z5')).toBe('36');
+    expect(extractGstinStateCode(' 27AABCT1332L1ZV ')).toBe('27');
+    expect(extractGstinStateCode('07AAAAA0000A1Z5')).toBe('07');
+  });
+
+  test('returns empty string for missing, invalid or non-numeric codes', () => {
+    expect(extractGstinStateCode('')).toBe('');
+    expect(extractGstinStateCode(null)).toBe('');
+    expect(extractGstinStateCode('ABCDE1234F')).toBe('');
+    expect(extractGstinStateCode('3')).toBe('');
+  });
+});
+
+describe('isInterStateSale', () => {
+  test('returns true when shop and customer state codes differ', () => {
+    expect(
+      isInterStateSale({
+        shopGstin: '36ABCDE1234F1Z5',
+        customerGstin: '27AABCT1332L1ZV',
+      })
+    ).toBe(true);
+  });
+
+  test('returns false when shop and customer are in the same state', () => {
+    expect(
+      isInterStateSale({
+        shopGstin: '36ABCDE1234F1Z5',
+        customerGstin: '36XYZWE9999P1Z1',
+      })
+    ).toBe(false);
+  });
+
+  test('returns false when customer has no GSTIN (retail intra-state sale)', () => {
+    expect(isInterStateSale({ shopGstin: '36ABCDE1234F1Z5' })).toBe(false);
+    expect(isInterStateSale({ shopGstin: '36ABCDE1234F1Z5', customerGstin: '' })).toBe(false);
+  });
+
+  test('respects explicit boolean override', () => {
+    expect(isInterStateSale({ isInterState: true })).toBe(true);
+    expect(
+      isInterStateSale({
+        isInterState: false,
+        shopGstin: '36ABCDE1234F1Z5',
+        customerGstin: '27AABCT1332L1ZV',
+      })
+    ).toBe(false);
+  });
+
+  test('detects inter-state from order properties', () => {
+    expect(isInterStateSale({ order: { is_inter_state: true } })).toBe(true);
+    expect(isInterStateSale({ order: { igst: 18 } })).toBe(true);
+    expect(
+      isInterStateSale({
+        shopGstin: '36ABCDE1234F1Z5',
+        order: { customer_gstin: '33AABCT1332L1ZV' },
+      })
+    ).toBe(true);
+  });
+});
+
 describe('buildReceiptTaxFields', () => {
   test('splits gst half/half and includes gstin when present', () => {
     expect(buildReceiptTaxFields({ gst: 36.01, gstin: '36abcde1234f1z5' })).toEqual({
@@ -59,6 +127,46 @@ describe('buildReceiptTaxFields', () => {
   test('real igst on the order sends igst only (inter-state)', () => {
     const order = { igst: 18, cgst: 0, sgst: 0 };
     expect(buildReceiptTaxFields({ gst: 18, order, gstin: 'X' })).toEqual({ gstin: 'X', igst: 18 });
+  });
+
+  test('inter-state sale via customer GSTIN sends 100% IGST instead of CGST/SGST split', () => {
+    expect(
+      buildReceiptTaxFields({
+        gst: 18,
+        gstin: '36ABCDE1234F1Z5',
+        customerGstin: '27AABCT1332L1ZV',
+      })
+    ).toEqual({
+      gstin: '36ABCDE1234F1Z5',
+      igst: 18,
+    });
+  });
+
+  test('explicit isInterState sends 100% IGST', () => {
+    expect(
+      buildReceiptTaxFields({
+        gst: 24.5,
+        gstin: '36ABCDE1234F1Z5',
+        isInterState: true,
+      })
+    ).toEqual({
+      gstin: '36ABCDE1234F1Z5',
+      igst: 24.5,
+    });
+  });
+
+  test('same-state customer GSTIN splits 50/50 to CGST and SGST', () => {
+    expect(
+      buildReceiptTaxFields({
+        gst: 18,
+        gstin: '36ABCDE1234F1Z5',
+        customerGstin: '36XYZWE9999P1Z1',
+      })
+    ).toEqual({
+      gstin: '36ABCDE1234F1Z5',
+      cgst: 9,
+      sgst: 9,
+    });
   });
 
   test('order without tax fields falls back to the split', () => {

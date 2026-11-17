@@ -1777,6 +1777,12 @@ const OrdersPage = ({ navigate, mode }) => {
               shopDetails?.gst_number, shopDetails?.gstin, shopDetails?.gstin_number,
               tenantConfig?.gst_number, tenantConfig?.gstin, tenantConfig?.gstin_number,
             ),
+            customerGstin: resolveGstin(
+              receiptOrder?.customer_gstin,
+              receiptOrder?.customer_gst_number,
+              receiptOrder?.customer?.gst_number,
+              receiptOrder?.customer?.gstin,
+            ),
           }),
           printConfig: {
             paperWidth: 80,

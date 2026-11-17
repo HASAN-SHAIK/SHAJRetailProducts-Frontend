@@ -367,6 +367,7 @@ const RetailBilling = () => {
     mobile: '',
     location: '',
     address: '',
+    gst_number: '',
     type: 'retail',
     credit_limit: 0,
     current_balance: 0,
@@ -398,6 +399,7 @@ const RetailBilling = () => {
       phone: normalizedPhone || mobile,
       address: details?.address?.trim() || details?.address || null,
       location: details?.location?.trim() || details?.location || null,
+      gst_number: details?.gst_number?.trim()?.toUpperCase() || null,
       type: details?.type || 'retail',
       is_active: true,
     };
@@ -633,6 +635,7 @@ const RetailBilling = () => {
         mobile: customer.phone || customer.mobile || '',
         location: customer.location || '',
         address: customer.address || '',
+        gst_number: customer.gst_number || customer.gstin || '',
         type: customer.type || 'retail',
         credit_limit: Number(customer.credit_limit ?? prev.credit_limit ?? 0),
         current_balance: Number(customer.current_balance ?? prev.current_balance ?? 0),
@@ -1574,6 +1577,7 @@ const RetailBilling = () => {
       mobile: customer?.phone || customer?.mobile || customer?.customer_phone || '',
       location: customer?.location || '',
       address: customer?.address || '',
+      gst_number: customer?.gst_number || customer?.gstin || customer?.tax_id || '',
       type: customer?.type || customer?.customer_type || 'retail',
       credit_limit: Number(customer?.credit_limit ?? customer?.creditLimit ?? 0),
       current_balance: Number(customer?.current_balance ?? customer?.currentBalance ?? 0),
@@ -1752,6 +1756,7 @@ const RetailBilling = () => {
       time: `${pad2(now.getHours())}:${pad2(now.getMinutes())}`,
       shopName: tenantConfig?.shop_name || tenantConfig?.name || 'Siddhu Industries',
       gstin: resolveGstin(shopGstNumber, tenantConfig?.gst_number, tenantConfig?.gstin),
+      customerGstin: resolveGstin(customerDetails.gst_number),
     };
 
     const printReceipt = async (orderId) => {
@@ -1780,7 +1785,7 @@ const RetailBilling = () => {
             discount: snapshot.discount,
             total: snapshot.total,
             shopName: snapshot.shopName,
-            ...buildReceiptTaxFields({ gst: snapshot.gstAmount, gstin: snapshot.gstin }),
+            ...buildReceiptTaxFields({ gst: snapshot.gstAmount, gstin: snapshot.gstin, customerGstin: snapshot.customerGstin }),
             printConfig: {
               paperWidth,
               fontStyle: 'A',
@@ -1811,6 +1816,7 @@ const RetailBilling = () => {
         mobile: '',
         location: '',
         address: '',
+        gst_number: '',
         type: 'retail',
         credit_limit: 0,
         current_balance: 0,
@@ -1924,8 +1930,9 @@ const RetailBilling = () => {
         branch_id: effectiveBranchId,
         customer_name: name,
         customer_phone: normalizedPhone.length === 10 ? normalizedPhone : mobile,
-          customer_location: customerDetails.location?.trim() || undefined,
+        customer_location: customerDetails.location?.trim() || undefined,
         customer_address: customerDetails.address?.trim() || undefined,
+        customer_gstin: customerDetails.gst_number?.trim()?.toUpperCase() || undefined,
         total_amount: totalDue,
         payments,
         products: items.map((item) => ({
@@ -2830,6 +2837,17 @@ const RetailBilling = () => {
                 value={customerDetails.address}
                 onChange={(event) => setCustomerDetails((prev) => ({ ...prev, address: event.target.value }))}
                 placeholder="Full address"
+              />
+              <label className="form-label mt-3">GSTIN (optional for B2B)</label>
+              <input
+                className="form-control"
+                value={customerDetails.gst_number || ''}
+                onChange={(event) => {
+                  const val = event.target.value.toUpperCase();
+                  setCustomerDetails((prev) => ({ ...prev, gst_number: val }));
+                }}
+                placeholder="15-char GSTIN (e.g. 36AAAAA0000A1Z5)"
+                maxLength={15}
               />
             </div>
             <div className="billing-modal-actions">
