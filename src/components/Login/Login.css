@@ -40,10 +40,10 @@ body.app-theme-light .login-container {
   height: 76px;
   object-fit: contain;
   flex: 0 0 auto;
-  padding: 8px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.18);
+  padding: 2px;
+  border-radius: 18px;
+  background: transparent;
+  box-shadow: 0 12px 28px rgba(56, 189, 248, 0.28);
 }
 
 .login-container .tenant-name {
