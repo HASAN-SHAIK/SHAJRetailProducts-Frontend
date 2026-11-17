@@ -46,6 +46,7 @@ import { createReceipt, fetchPaymentEntries, fetchReceiptEntries } from '../../s
 import { enqueueReceipt } from '../../utils/accountingOffline';
 import { isLocalPosEnabled } from '../../Repositories/local/posLocalApiClient';
 import TransactionSyncStatus from './TransactionSyncStatus';
+import { buildReceiptTaxFields, resolveGstin } from '../../utils/receiptTax';
 
 const OrdersPage = ({ navigate, mode }) => {
   const { showPopup } = usePopup();
@@ -1769,6 +1770,14 @@ const OrdersPage = ({ navigate, mode }) => {
           discount,
           total,
           shopName: shopDetails?.shop_name || shopDetails?.name || shopDetails?.business_name || 'Your Shop',
+          ...buildReceiptTaxFields({
+            gst,
+            order: receiptOrder,
+            gstin: resolveGstin(
+              shopDetails?.gst_number, shopDetails?.gstin, shopDetails?.gstin_number,
+              tenantConfig?.gst_number, tenantConfig?.gstin, tenantConfig?.gstin_number,
+            ),
+          }),
           printConfig: {
             paperWidth: 80,
             fontStyle: 'A',

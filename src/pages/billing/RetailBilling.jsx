@@ -44,6 +44,7 @@ import { createReceipt } from '../../services/accountingService';
 import { enqueueReceipt } from '../../utils/accountingOffline';
 import { GST_MODES, resolveGstModeFromConfig } from '../../services/gstService';
 import { getTenantFeatures, hasFeature } from '../../utils/entitlements';
+import { buildReceiptTaxFields, resolveGstin } from '../../utils/receiptTax';
 import '../BillingPage.css';
 
 const DRAFT_STORAGE_KEY = 'billing_drafts_v1';
@@ -376,6 +377,7 @@ const RetailBilling = () => {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [shopUpiId, setShopUpiId] = useState('');
   const [shopPayeeName, setShopPayeeName] = useState('');
+  const [shopGstNumber, setShopGstNumber] = useState('');
   const [isSavingShopUpi, setIsSavingShopUpi] = useState(false);
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappSending, setWhatsappSending] = useState(false);
@@ -517,6 +519,7 @@ const RetailBilling = () => {
         const details = response?.data?.shop_details || response?.data?.data || {};
         if (cancelled) return;
         setShopUpiId(String(details?.upi_id || '').trim());
+        setShopGstNumber(String(details?.gst_number || details?.gstin || '').trim());
         setShopPayeeName(String(details?.shop_name || tenantConfig?.shop_name || '').trim());
       } catch {
         if (cancelled) return;
@@ -1748,6 +1751,7 @@ const RetailBilling = () => {
       date: `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`,
       time: `${pad2(now.getHours())}:${pad2(now.getMinutes())}`,
       shopName: tenantConfig?.shop_name || tenantConfig?.name || 'Siddhu Industries',
+      gstin: resolveGstin(shopGstNumber, tenantConfig?.gst_number, tenantConfig?.gstin),
     };
 
     const printReceipt = async (orderId) => {
@@ -1776,6 +1780,7 @@ const RetailBilling = () => {
             discount: snapshot.discount,
             total: snapshot.total,
             shopName: snapshot.shopName,
+            ...buildReceiptTaxFields({ gst: snapshot.gstAmount, gstin: snapshot.gstin }),
             printConfig: {
               paperWidth,
               fontStyle: 'A',
