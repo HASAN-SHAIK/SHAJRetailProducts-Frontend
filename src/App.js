@@ -317,25 +317,11 @@ function App() {
             setTenantBanner(null);
           }
         }
-
-        if (navigator.onLine) {
-          try {
-            await runAppSyncCycle({
-              tenantId: userDetails?.tenant_id,
-              userId: userDetails?.id,
-              branchId: branchIdForSync,
-              forceFull: false,
-            });
-            initialSyncDoneRef.current = true;
-          } catch (err) {
-            console.log('Offline order sync failed', err);
-          }
-        }
       } finally {
         setSetupInProgress(false);
-        setSetupReady(true);
         setupInProgressRef.current = false;
-        navigate(isMobileDevice && setupMobileAccessEnabled ? '/m/neworder' : '/billing/retail', { replace: true });
+        // Navigation and offline database synchronization are coordinated by SetupScreen
+        // so mobile/laptop users can grant permission and observe one-by-one dependency downloads.
       }
     };
     runSetup();
@@ -354,6 +340,12 @@ function App() {
     isMobileDevice,
     navigate,
   ]);
+
+  useEffect(() => {
+    if (userDetails && location.pathname !== '/setup' && !setupReady) {
+      setSetupReady(true);
+    }
+  }, [userDetails, location.pathname, setupReady]);
 
   useEffect(() => {
     const checkSession = async () => {

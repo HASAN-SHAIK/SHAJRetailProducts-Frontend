@@ -1,0 +1,479 @@
+/* PosDatabaseSyncManager.css */
+.pos-db-sync-card {
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+  padding: 24px;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: #1f2937;
+  transition: all 0.3s ease;
+}
+
+/* Header & Device Badge */
+.pos-db-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.pos-device-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pos-device-badge--mobile {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.pos-device-badge--laptop {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.pos-device-icon {
+  font-size: 16px;
+}
+
+.pos-system-mode-tag {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+/* Permission Phase */
+.pos-permission-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 8px 0;
+}
+
+.pos-permission-desc {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #4b5563;
+  margin: 0 0 18px 0;
+}
+
+.pos-dependencies-preview {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+
+.pos-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.pos-preview-title {
+  font-weight: 600;
+  color: #374151;
+}
+
+.pos-preview-total {
+  font-weight: 600;
+  color: #2563eb;
+  background: #dbeafe;
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.pos-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 540px) {
+  .pos-preview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pos-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.pos-preview-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.pos-preview-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pos-preview-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pos-preview-size {
+  font-size: 11px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Remember Choice */
+.pos-remember-choice {
+  margin-bottom: 18px;
+}
+
+.pos-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #4b5563;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pos-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+/* Action Buttons */
+.pos-permission-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pos-btn-download {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  width: 100%;
+}
+
+.pos-btn-download:hover {
+  background: #1d4ed8;
+}
+
+.pos-btn-skip {
+  background: #ffffff;
+  color: #4b5563;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.pos-btn-skip:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.pos-permission-footnote {
+  margin-top: 14px;
+  font-size: 12px;
+  color: #9ca3af;
+  text-align: center;
+}
+
+/* Downloading Phase */
+.pos-downloading-header {
+  margin-bottom: 18px;
+}
+
+.pos-progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.pos-progress-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.pos-progress-percent {
+  font-size: 14px;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.pos-progress-bar-track {
+  width: 100%;
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.pos-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.pos-progress-steps-count {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: right;
+}
+
+/* Steps List */
+.pos-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.pos-step-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  transition: all 0.2s;
+}
+
+.pos-step-card--active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+}
+
+.pos-step-card--completed {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.pos-step-card--error {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.pos-step-indicator {
+  flex-shrink: 0;
+}
+
+.pos-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pos-step-badge--idle {
+  background: #e5e7eb;
+  color: #6b7280;
+}
+
+.pos-step-badge--active {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.pos-step-badge--done {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.pos-step-badge--error {
+  background: #d97706;
+  color: #ffffff;
+}
+
+.pos-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #ffffff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: pos-spin 0.8s linear infinite;
+}
+
+@keyframes pos-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pos-step-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.pos-step-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.pos-step-icon {
+  font-size: 14px;
+}
+
+.pos-step-title {
+  color: #1f2937;
+}
+
+.pos-step-estimate {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-left: auto;
+}
+
+.pos-step-status-msg {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pos-step-card--active .pos-step-status-msg {
+  color: #1d4ed8;
+  font-weight: 500;
+}
+
+.pos-step-card--completed .pos-step-status-msg {
+  color: #15803d;
+}
+
+.pos-step-card--error .pos-step-status-msg {
+  color: #b45309;
+}
+
+.pos-downloading-cancel {
+  text-align: center;
+  margin-top: 10px;
+}
+
+.pos-btn-cancel {
+  font-size: 13px;
+  color: #6b7280;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* Completed & Skipped Phases */
+.pos-completed-section,
+.pos-skipped-section {
+  text-align: center;
+  padding: 20px 10px;
+}
+
+.pos-completed-icon-wrapper,
+.pos-skipped-icon-wrapper {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.pos-completed-title,
+.pos-skipped-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 8px 0;
+}
+
+.pos-completed-subtitle,
+.pos-skipped-subtitle {
+  font-size: 14px;
+  color: #4b5563;
+  line-height: 1.5;
+  margin: 0 0 18px 0;
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.pos-redirect-box {
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 8px 16px;
+  display: inline-block;
+  font-size: 13px;
+  color: #374151;
+  margin-bottom: 20px;
+}
+
+.pos-btn-start {
+  min-width: 200px;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-success.pos-btn-start {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.btn-success.pos-btn-start:hover {
+  background: #15803d;
+}

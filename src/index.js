@@ -11,26 +11,32 @@ import {persistor,store} from './store/store';
 import { PersistGate } from 'redux-persist/integration/react';
 import { PopupProvider } from './components/common/PopUp/PopupProvider';
 
-const cleanupLegacyServiceWorkers = async () => {
-  if (!('serviceWorker' in navigator)) return;
+const registerServiceWorker = async () => {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
-  try {
-    const registrations = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(registrations.map((registration) => registration.unregister()));
-  } catch {
-    // Best-effort cleanup only; app startup must continue.
-  }
-
-  if (!('caches' in window)) return;
-  try {
-    const cacheKeys = await caches.keys();
-    await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
-  } catch {
-    // Ignore cache deletion failures.
+  if (process.env.NODE_ENV === 'production') {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((reg) => {
+          console.log('[PWA] Service Worker registered with scope:', reg.scope);
+        })
+        .catch((err) => {
+          console.warn('[PWA] Service Worker registration skipped:', err);
+        });
+    });
+  } else {
+    // In local dev, unregister legacy service workers to prevent stale HMR chunks
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    } catch {
+      // Best-effort cleanup
+    }
   }
 };
 
-cleanupLegacyServiceWorkers();
+registerServiceWorker();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
