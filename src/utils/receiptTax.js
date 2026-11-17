@@ -37,6 +37,48 @@ export const resolveGstin = (...candidates) => {
 };
 
 /**
+ * Extracts the 2-digit Indian GST state code from a candidate GSTIN string.
+ * Returns a 2-digit string (e.g. '36', '33', '27') or '' when invalid/absent.
+ */
+export const extractGstinStateCode = (candidate) => {
+  if (candidate === null || candidate === undefined) return '';
+  const text = String(candidate).trim();
+  if (text.length >= 2 && /^\d{2}/.test(text)) {
+    return text.slice(0, 2);
+  }
+  return '';
+};
+
+/**
+ * Determines whether a transaction is an inter-state sale under Indian GST rules.
+ *
+ * Rules:
+ * - If `isInterState` boolean flag is explicitly passed, respect it.
+ * - If `order` specifies `is_inter_state` or carries a positive IGST, it is inter-state.
+ * - If both shop GSTIN and customer GSTIN have valid state codes, returns true when they differ.
+ * - Defaults to false (intra-state B2C retail).
+ */
+export const isInterStateSale = ({ shopGstin, customerGstin, order, isInterState } = {}) => {
+  if (typeof isInterState === 'boolean') return isInterState;
+  if (order && typeof order.is_inter_state === 'boolean') return order.is_inter_state;
+  if (order && typeof order.isInterState === 'boolean') return order.isInterState;
+  if (firstPositive(order, IGST_KEYS) > 0) return true;
+
+  const shopState = extractGstinStateCode(shopGstin);
+  const custState = extractGstinStateCode(
+    customerGstin ||
+    order?.customer_gstin ||
+    order?.customer_gst_number ||
+    order?.customer?.gst_number ||
+    order?.customer?.gstin
+  );
+  if (shopState && custState) {
+    return shopState !== custState;
+  }
+  return false;
+};
+
+/**
  * Intra-state split of a GST total into CGST + SGST (2 decimals) so that
  * cgst + sgst === gst exactly (in paise). An odd paisa always goes to SGST.
  * Returns null when the GST total is zero, negative or absent.
@@ -53,16 +95,21 @@ export const splitGst = (gst) => {
  * Builds the optional receipt fields to spread into the print payload.
  *
  * @param {object} params
- * @param {number} params.gst      The GST total already sent as `gst`.
- * @param {object} [params.order]  Order object that may carry real
- *                                 cgst/sgst/igst values (preferred when present).
- * @param {string} [params.gstin]  Shop GSTIN (already resolved); omitted when empty.
+ * @param {number} params.gst             The GST total already sent as `gst`.
+ * @param {object} [params.order]         Order object that may carry real
+ *                                        cgst/sgst/igst values (preferred when present).
+ * @param {string} [params.gstin]         Shop GSTIN (already resolved); omitted when empty.
+ * @param {string} [params.customerGstin] Customer GSTIN for B2B transactions.
+ * @param {boolean} [params.isInterState] Explicit override for inter-state sale.
  * @returns {{gstin?: string, cgst?: number, sgst?: number, igst?: number}}
  */
-export const buildReceiptTaxFields = ({ gst, order, gstin } = {}) => {
+export const buildReceiptTaxFields = ({ gst, order, gstin, customerGstin, isInterState } = {}) => {
   const fields = {};
   const resolvedGstin = resolveGstin(gstin);
   if (resolvedGstin) fields.gstin = resolvedGstin;
+
+  const totalPaise = toPaise(gst);
+  if (totalPaise <= 0) return fields;
 
   const igstPaise = firstPositive(order, IGST_KEYS);
   const cgstPaise = firstPositive(order, CGST_KEYS);
@@ -76,6 +123,12 @@ export const buildReceiptTaxFields = ({ gst, order, gstin } = {}) => {
   if (cgstPaise > 0 || sgstPaise > 0) {
     fields.cgst = fromPaise(cgstPaise);
     fields.sgst = fromPaise(sgstPaise);
+    return fields;
+  }
+
+  // Check whether this transaction is an inter-state sale (e.g. out-of-state B2B customer)
+  if (isInterStateSale({ shopGstin: resolvedGstin, customerGstin, order, isInterState })) {
+    fields.igst = fromPaise(totalPaise);
     return fields;
   }
 
