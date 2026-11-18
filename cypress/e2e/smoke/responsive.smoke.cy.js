@@ -10,6 +10,10 @@ const RESPONSIVE_SCREENS = [
   { name: 'Dashboard', path: '/dashboard', primaryAction: '.nav-toggle, .nav-main-links' },
   { name: 'Sales Orders', path: '/orders/sales', primaryAction: 'table, .billing-empty, .orders-table' },
   { name: 'Inventory Catalog', path: '/inventory/catalog', primaryAction: 'input, table, button' },
+  { name: 'Customers', path: '/customers', primaryAction: '.customers-search, input, button' },
+  { name: 'Accounts Receipt', path: '/accounts/receipt', primaryAction: '.accounts-form, button, input' },
+  { name: 'Sync Center', path: '/sync-center', primaryAction: '.sync-center-actions, button' },
+  { name: 'Returns & Corrections', path: '/returns-corrections/returns/new', primaryAction: '.returns-header, table, button' },
 ];
 
 describe('Smoke - Responsive Layout & Overflow (Unauthenticated)', () => {
