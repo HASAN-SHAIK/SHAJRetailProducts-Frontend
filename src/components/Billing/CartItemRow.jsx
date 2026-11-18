@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from 'react';
 
+export const stepQuantity = (currentVal, delta, isWeightBased = false) => {
+  if (isWeightBased) return null;
+  const current = Math.floor(Number(currentVal || 1));
+  const safeCurrent = Number.isFinite(current) && current > 0 ? current : 1;
+  const next = Math.max(1, safeCurrent + delta);
+  return String(next);
+};
+
 const CartItemRow = ({
   item,
   isSelected,
@@ -49,6 +57,14 @@ const CartItemRow = ({
     onQtyChange(item.key, normalized);
   };
 
+  const handleStepQty = (delta) => {
+    if (weightBased) return;
+    const next = stepQuantity(qtyDraft || item.qty, delta, weightBased);
+    if (!next) return;
+    setQtyDraft(next);
+    onQtyChange(item.key, next);
+  };
+
   return (
     <tr
       className={`billing-row ${isSelected ? 'selected' : ''}`}
@@ -65,22 +81,19 @@ const CartItemRow = ({
       </td>
       <td className="qty-cell">
         <div className="billing-qty-control d-flex align-items-center gap-1">
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary billing-qty-btn"
-            aria-label={`Decrease quantity for ${itemName}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              const current = Number(qtyDraft || 1);
-              const next = weightBased
-                ? Math.max(0.1, Number((current - 1).toFixed(2)))
-                : Math.max(1, current - 1);
-              setQtyDraft(String(next));
-              onQtyChange(item.key, String(next));
-            }}
-          >
-            -
-          </button>
+          {!weightBased && (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary billing-qty-btn billing-qty-btn-minus"
+              aria-label={`Decrease quantity for ${itemName}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleStepQty(-1);
+              }}
+            >
+              -
+            </button>
+          )}
           <input
             className="form-control billing-qty-input"
             type="number"
@@ -102,22 +115,19 @@ const CartItemRow = ({
               }
             }}
           />
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary billing-qty-btn"
-            aria-label={`Increase quantity for ${itemName}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              const current = Number(qtyDraft || 0);
-              const next = weightBased
-                ? Number((current + 1).toFixed(2))
-                : current + 1;
-              setQtyDraft(String(next));
-              onQtyChange(item.key, String(next));
-            }}
-          >
-            +
-          </button>
+          {!weightBased && (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary billing-qty-btn billing-qty-btn-plus"
+              aria-label={`Increase quantity for ${itemName}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleStepQty(1);
+              }}
+            >
+              +
+            </button>
+          )}
         </div>
       </td>
       <td className="price-cell">

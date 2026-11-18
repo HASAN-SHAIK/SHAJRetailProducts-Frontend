@@ -858,9 +858,8 @@
     transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease;
   }
 
-  /* When typing, hide footer so virtual keyboard never obscures input */
-  .billing-main.is-input-focused .billing-right,
-  body:has(.billing-left input:focus, .billing-center input:focus) .billing-right {
+  /* Hide footer only while virtual keyboard is actually open under 768px */
+  .billing-main.keyboard-open .billing-right {
     transform: translateY(105%);
     opacity: 0;
     pointer-events: none;

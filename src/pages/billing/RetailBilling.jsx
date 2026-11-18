@@ -321,7 +321,21 @@ const RetailBilling = () => {
     showPopup(message, title);
   };
 
-  const [isInputFocused, setIsInputFocused] = useState(false);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.visualViewport) return undefined;
+    const handleViewportResize = () => {
+      if (window.innerWidth < 768) {
+        const isOpen = window.visualViewport.height < window.innerHeight * 0.75;
+        setIsKeyboardOpen(isOpen);
+      } else {
+        setIsKeyboardOpen(false);
+      }
+    };
+    window.visualViewport.addEventListener('resize', handleViewportResize);
+    return () => window.visualViewport.removeEventListener('resize', handleViewportResize);
+  }, []);
   const [barcodeValue, setBarcodeValue] = useState('');
   const [quantityValue, setQuantityValue] = useState('1');
   const [message, setMessage] = useState('');
@@ -2294,15 +2308,7 @@ const RetailBilling = () => {
 
   return (
     <div className="billing-page billing-page-shell">
-      <div
-        className={`billing-main ${isInputFocused ? 'is-input-focused' : ''}`}
-        onFocusCapture={(e) => {
-          if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
-            setIsInputFocused(true);
-          }
-        }}
-        onBlurCapture={() => setIsInputFocused(false)}
-      >
+      <div className={`billing-main ${isKeyboardOpen ? 'keyboard-open' : ''}`}>
         <div className="billing-left">
           <ProductSearch
             value={searchText}
