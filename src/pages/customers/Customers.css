@@ -155,3 +155,55 @@ body.app-theme-light .customer-tab.active {
     grid-template-columns: 1fr;
   }
 }
+
+
+@media (max-width: 768px) {
+  .customers-page {
+    padding: max(12px, env(safe-area-inset-top)) 10px max(16px, env(safe-area-inset-bottom));
+  }
+
+  .customers-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .customers-search {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .customers-search input,
+  .customers-search .btn,
+  .customers-header .btn {
+    width: 100%;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .customer-tabs {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+
+  .customer-tab {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .customer-form-grid,
+  .customer-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .table-responsive,
+  .customers-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+}
