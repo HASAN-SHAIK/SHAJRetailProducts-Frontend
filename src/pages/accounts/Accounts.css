@@ -273,3 +273,65 @@
   color: #64748b;
   font-size: 0.9375rem;
 }
+
+@media (max-width: 768px) {
+  .accounts-container {
+    padding: max(12px, env(safe-area-inset-top)) 10px max(16px, env(safe-area-inset-bottom));
+  }
+
+  .accounts-header-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .accounts-summary-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .accounts-tabs-bar {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .accounts-tab-btn {
+    white-space: nowrap;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .accounts-action-btn,
+  .accounts-date-btn,
+  .accounts-page .accounts-form button {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .accounts-table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .accounts-data-table {
+    min-width: 580px;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .accounts-page .accounts-form {
+    grid-template-columns: 1fr;
+  }
+
+  .accounts-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .accounts-filter-bar > * {
+    width: 100%;
+  }
+}

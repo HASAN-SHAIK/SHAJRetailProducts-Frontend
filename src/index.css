@@ -100,3 +100,17 @@ textarea,
     scroll-behavior: auto !important;
   }
 }
+
+
+/* Responsive modals on small screens */
+@media (max-width: 767.98px) {
+  .modal-dialog {
+    margin: 0.5rem auto !important;
+    max-width: 95vw !important;
+  }
+  .modal-content {
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+    border-radius: 16px !important;
+  }
+}

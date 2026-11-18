@@ -225,6 +225,7 @@ export default function ShiftDeclarationModal({
                           <input
                             type="number"
                             min="0"
+                            inputMode="numeric"
                             className="form-control bg-dark text-light border-secondary text-end"
                             placeholder="Count"
                             value={count}
@@ -245,6 +246,7 @@ export default function ShiftDeclarationModal({
                       <input
                         type="number"
                         min="0"
+                        inputMode="numeric"
                         className="form-control bg-dark text-light border-secondary text-end"
                         placeholder="₹ Amount"
                         value={denominations.coins}

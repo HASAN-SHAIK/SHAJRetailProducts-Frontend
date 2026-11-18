@@ -451,6 +451,7 @@ export default function PaymentEntry() {
                 <input
                   id="payment-amount-input"
                   type="number"
+                  inputMode="decimal"
                   step="0.01"
                   min="0.01"
                   className="form-control"

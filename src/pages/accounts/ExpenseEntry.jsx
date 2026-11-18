@@ -295,6 +295,7 @@ export default function ExpenseEntry() {
                 <input
                   id="expense-amount-input"
                   type="number"
+                  inputMode="decimal"
                   step="0.01"
                   min="0.01"
                   className="form-control"
