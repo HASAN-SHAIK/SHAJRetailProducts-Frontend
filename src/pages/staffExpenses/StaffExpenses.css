@@ -209,3 +209,63 @@ body.app-theme-light .staff-expenses-page .btn-outline-light:hover {
   background: rgba(186, 230, 253, 0.4);
   border-color: rgba(56, 189, 248, 0.55);
 }
+
+
+@media (max-width: 768px) {
+  .staff-expenses-page {
+    padding: max(12px, env(safe-area-inset-top)) 10px max(16px, env(safe-area-inset-bottom));
+  }
+
+  .staff-expenses-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .staff-expenses-actions {
+    width: 100%;
+  }
+
+  .staff-expenses-actions .btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .staff-expenses-card {
+    padding: 14px 10px;
+  }
+
+  .staff-expenses-table-wrap,
+  .table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .staff-expenses-table {
+    min-width: 580px;
+  }
+
+  .staff-expenses-form .form-control,
+  .staff-expenses-form .form-select,
+  .staff-expenses-form .btn {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .staff-expenses-form {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-expenses-form .row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .staff-expenses-form .row > * {
+    width: 100%;
+  }
+}
