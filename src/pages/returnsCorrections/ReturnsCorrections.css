@@ -137,3 +137,59 @@ body.app-theme-light .badge-flag {
   background: rgba(186, 230, 253, 0.72);
   color: #0369a1;
 }
+
+
+@media (max-width: 768px) {
+  .returns-page {
+    padding: max(12px, env(safe-area-inset-top)) 10px max(16px, env(safe-area-inset-bottom));
+  }
+
+  .returns-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .returns-actions {
+    width: 100%;
+  }
+
+  .returns-actions .btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .returns-card {
+    padding: 14px 10px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .returns-table {
+    min-width: 600px;
+  }
+
+  .returns-page .form-control,
+  .returns-page .form-select,
+  .returns-page .btn {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .returns-grid,
+  .returns-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .returns-card .row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .returns-card .row > * {
+    width: 100%;
+  }
+}
