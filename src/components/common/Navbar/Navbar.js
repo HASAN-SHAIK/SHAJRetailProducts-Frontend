@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import './Navbar.css'
 import { useSelector } from 'react-redux';
 import { useBranchStore } from '../../../store/branchStore';
+import { useDrawerStore } from '../../../store/drawerStore';
 import { ThemeContext } from '../../../ThemeContext';
 import { findBranchById, getBranchDisplayName, getBranchId, normalizeBranchLabel } from '../../../utils/branchLabels';
 import { isLocalPosEnabled } from '../../../Repositories/local/posLocalApiClient';
@@ -92,6 +93,22 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
     return () => window.removeEventListener('mousedown', handleClickOutside);
   }, [settingsOpen]);
 
+  const isDrawerOpen = useDrawerStore((state) => state.isOpen);
+  const toggleDrawer = useDrawerStore((state) => state.toggleDrawer);
+  const closeDrawer = useDrawerStore((state) => state.closeDrawer);
+
+  const currentModule = String(location.pathname || '').split('/')[1] || '';
+  const modulesWithSidebar = new Set([
+    'billing',
+    'inventory',
+    'customers',
+    'accounts',
+    'orders',
+    'staff-expenses',
+    'returns-corrections',
+  ]);
+  const hasModuleSidebar = modulesWithSidebar.has(currentModule);
+
   const handleBranchSelect = (value, name, confirmed = true) => {
     setSelectedBranchId(value, { confirmed, name: name || '' });
     setBranchOpen(false);
@@ -101,6 +118,7 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
     setMenuOpen(false);
     setMoreOpen(false);
     setSettingsOpen(false);
+    closeDrawer();
     navigate(route);
   };
 
@@ -190,10 +208,16 @@ const Navbar = ({ isOpeningCompleted = true, canManageOpeningSetup = false }) =>
             {/* </div> */}
             <button
               type="button"
-              className={`nav-toggle${menuOpen ? ' is-open' : ''}`}
-              onClick={() => setMenuOpen((prev) => !prev)}
-              aria-label="Toggle navigation"
-              aria-expanded={menuOpen}
+              className={`nav-toggle${(hasModuleSidebar ? isDrawerOpen : menuOpen) ? ' is-open' : ''}`}
+              onClick={() => {
+                if (hasModuleSidebar) {
+                  toggleDrawer();
+                } else {
+                  setMenuOpen((prev) => !prev);
+                }
+              }}
+              aria-label={hasModuleSidebar ? "Toggle sidebar menu" : "Toggle navigation"}
+              aria-expanded={hasModuleSidebar ? isDrawerOpen : menuOpen}
             >
               <span />
               <span />

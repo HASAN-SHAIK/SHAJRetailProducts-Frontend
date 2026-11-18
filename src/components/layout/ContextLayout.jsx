@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import ContextSidebar from './ContextSidebar';
+import { useDrawerStore } from '../../store/drawerStore';
 import './ContextSidebar.css';
 
 const ContextLayout = () => {
@@ -18,6 +19,8 @@ const ContextLayout = () => {
   ]);
   const hasSidebar = modulesWithSidebar.has(module);
   const [collapsed, setCollapsed] = useState(false);
+  const isDrawerOpen = useDrawerStore((state) => state.isOpen);
+  const closeDrawer = useDrawerStore((state) => state.closeDrawer);
 
   useEffect(() => {
     try {
@@ -42,6 +45,20 @@ const ContextLayout = () => {
     }
   }, []);
 
+  useEffect(() => {
+    closeDrawer();
+  }, [location.pathname, closeDrawer]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        closeDrawer();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [closeDrawer]);
+
   const handleToggle = () => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -53,13 +70,26 @@ const ContextLayout = () => {
       return next;
     });
   };
+
   if (isMobileRoute) {
     return <Outlet />;
   }
 
   return (
-    <div className={`context-layout ${collapsed ? 'is-collapsed' : ''}`}>
-      <ContextSidebar collapsed={collapsed} onToggle={handleToggle} />
+    <div className={`context-layout ${collapsed ? 'is-collapsed' : ''} ${isDrawerOpen ? 'drawer-is-open' : ''}`}>
+      {hasSidebar && (
+        <div
+          className={`context-sidebar-backdrop ${isDrawerOpen ? 'is-open' : ''}`}
+          onClick={closeDrawer}
+          aria-hidden="true"
+        />
+      )}
+      <ContextSidebar
+        collapsed={collapsed}
+        onToggle={handleToggle}
+        isDrawerOpen={isDrawerOpen}
+        onCloseDrawer={closeDrawer}
+      />
       <div className={`context-content ${hasSidebar ? '' : 'no-sidebar'}`.trim()}>
         <Outlet />
       </div>

@@ -9,7 +9,6 @@ body {
   font-family: "Space Grotesk", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
 }
 
 code {
@@ -23,18 +22,81 @@ code {
   }
 }
 
-/* @media (max-width: 768px) {
-  body {
-    font-size: 14px;
-  }
-
-  body *:not(.navbar):not(.navbar *) {
-    font-size: 14px;
-  }
-} */
-
 @media (max-width: 576px) {
   body {
     font-size: 14px;
+  }
+}
+
+/* =========================================================================
+   MOBILE RESPONSIVENESS & ACCESSIBILITY FOUNDATIONS
+   ========================================================================= */
+
+/* Prevent iOS double-tap zoom on interactive controls */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"],
+.btn {
+  touch-action: manipulation;
+}
+
+/* Accessible focus visible outlines */
+:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+/* Ensure inputs use at least 16px font on small screens to prevent iOS auto-zoom */
+@media (max-width: 768px) {
+  input,
+  select,
+  textarea,
+  .form-control,
+  .form-select {
+    font-size: 16px !important;
+  }
+}
+
+/* Consistent responsive table container */
+.table-responsive-container {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 1rem;
+  position: relative;
+}
+
+/* Minimum 44x44px touch targets */
+.touch-target,
+.btn-touch {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Single-column form utility on < 576px */
+@media (max-width: 575.98px) {
+  .responsive-form-row {
+    display: flex;
+    flex-direction: column !important;
+    gap: 12px;
+  }
+}
+
+/* Respect user preference for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

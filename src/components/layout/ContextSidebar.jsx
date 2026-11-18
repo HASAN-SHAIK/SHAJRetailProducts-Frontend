@@ -9,11 +9,17 @@ import ReturnsCorrectionsSidebar from '../sidebar/ReturnsCorrectionsSidebar';
 import OrdersSidebar from '../sidebar/OrdersSidebar';
 import './ContextSidebar.css';
 
-const ContextSidebar = ({ collapsed, onToggle }) => {
+const ContextSidebar = ({ collapsed, onToggle, isDrawerOpen, onCloseDrawer }) => {
   const location = useLocation();
   const module = String(location.pathname || '').split('/')[1] || '';
 
-  const sidebarProps = { collapsed, onToggle };
+  const sidebarProps = {
+    collapsed,
+    onToggle,
+    isDrawerOpen,
+    onCloseDrawer,
+    onItemClick: onCloseDrawer,
+  };
 
   if (module === 'billing') return <BillingSidebar {...sidebarProps} />;
   if (module === 'inventory') return <InventorySidebar {...sidebarProps} />;
