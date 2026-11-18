@@ -360,12 +360,34 @@
     margin-left: 0;
     width: 100%;
     max-width: none;
-    padding: 16px 14px 22px;
+    padding: max(14px, env(safe-area-inset-top)) 12px max(18px, env(safe-area-inset-bottom));
+  }
+
+  .sync-center-actions {
+    width: 100%;
+  }
+
+  .sync-center-actions .btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .sync-stat-clickable {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .sync-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sync-inline-select {
     width: 100%;
     max-width: none;
+    min-height: 44px;
   }
 }
 

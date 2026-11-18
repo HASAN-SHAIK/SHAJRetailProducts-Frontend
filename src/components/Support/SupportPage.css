@@ -298,3 +298,53 @@ body.app-theme-light .message-card {
   color: #0f172a;
   border-color: rgba(148, 163, 184, 0.3);
 }
+
+
+@media (max-width: 768px) {
+  .support-page {
+    padding: max(14px, env(safe-area-inset-top)) 12px max(18px, env(safe-area-inset-bottom));
+  }
+  .support-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .support-header-actions {
+    width: 100%;
+  }
+  .support-header-actions .btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+  .support-controls {
+    flex-direction: column;
+  }
+  .support-controls .form-control,
+  .support-controls .form-select {
+    width: 100%;
+    min-height: 44px;
+  }
+  .support-modal {
+    width: 95vw !important;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 16px;
+  }
+  .support-drawer {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    padding: 16px 12px;
+  }
+  .support-drawer .btn {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+  .page-btn {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+  }
+}

@@ -315,7 +315,7 @@ const Login = () => {
               </div>
               <div className="field">
                 <label className="form-label" htmlFor="pos-registration-tenant">Tenant ID</label>
-                <input id="pos-registration-tenant" className="form-control" value={registrationTenantId} onChange={e=>setRegistrationTenantId(e.target.value)} placeholder="2" disabled={Boolean(registration?.request_id) || registrationBusy} />
+                <input id="pos-registration-tenant" className="form-control" inputMode="numeric" value={registrationTenantId} onChange={e=>setRegistrationTenantId(e.target.value)} placeholder="2" disabled={Boolean(registration?.request_id) || registrationBusy} />
               </div>
             </div>
 

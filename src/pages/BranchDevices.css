@@ -95,3 +95,26 @@ body.app-theme-light .branch-devices-page .table-striped > tbody > tr:nth-of-typ
   background: rgba(248, 250, 252, 0.98);
   color: #0f172a;
 }
+
+@media (max-width: 768px) {
+  .branch-devices-page {
+    padding: 12px 10px;
+  }
+  .branch-devices-page .card {
+    border-radius: 14px;
+    margin-bottom: 16px;
+  }
+  .branch-devices-page .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .branch-devices-page .table th,
+  .branch-devices-page .table td {
+    padding: 8px 10px;
+    white-space: nowrap;
+  }
+  .branch-devices-page .btn {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+}
