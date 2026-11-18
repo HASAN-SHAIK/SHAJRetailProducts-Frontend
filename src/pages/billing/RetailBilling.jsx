@@ -321,6 +321,7 @@ const RetailBilling = () => {
     showPopup(message, title);
   };
 
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const [barcodeValue, setBarcodeValue] = useState('');
   const [quantityValue, setQuantityValue] = useState('1');
   const [message, setMessage] = useState('');
@@ -2293,7 +2294,15 @@ const RetailBilling = () => {
 
   return (
     <div className="billing-page billing-page-shell">
-      <div className="billing-main">
+      <div
+        className={`billing-main ${isInputFocused ? 'is-input-focused' : ''}`}
+        onFocusCapture={(e) => {
+          if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+            setIsInputFocused(true);
+          }
+        }}
+        onBlurCapture={() => setIsInputFocused(false)}
+      >
         <div className="billing-left">
           <ProductSearch
             value={searchText}

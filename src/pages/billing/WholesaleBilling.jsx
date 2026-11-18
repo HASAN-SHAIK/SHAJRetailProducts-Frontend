@@ -52,6 +52,7 @@ const WholesaleBilling = () => {
   const selectItem = useBillingStore((state) => state.selectItem);
   const clearCart = useBillingStore((state) => state.clearCart);
 
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const [barcodeValue, setBarcodeValue] = useState('');
   const [quantityValue, setQuantityValue] = useState('1');
   const [searchText, setSearchText] = useState('');
@@ -432,7 +433,15 @@ const WholesaleBilling = () => {
 
   return (
     <div className="billing-page">
-      <div className="billing-main">
+      <div
+        className={`billing-main ${isInputFocused ? 'is-input-focused' : ''}`}
+        onFocusCapture={(e) => {
+          if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+            setIsInputFocused(true);
+          }
+        }}
+        onBlurCapture={() => setIsInputFocused(false)}
+      >
         <div className="billing-left">
           <ProductSearch
             value={searchText}

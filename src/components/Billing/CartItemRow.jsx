@@ -64,26 +64,61 @@ const CartItemRow = ({
         </div>
       </td>
       <td className="qty-cell">
-        <input
-          className="form-control billing-qty-input"
-          type="number"
-          min="0"
-          step={weightBased ? '0.01' : '1'}
-          value={qtyDraft}
-          aria-label={`Quantity for ${itemName}`}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => updateQtyDraft(event.target.value)}
-          onBlur={commitQty}
-          onKeyDown={(event) => {
-            if (!weightBased && ['.', ',', 'e', 'E', '+', '-'].includes(event.key)) {
-              event.preventDefault();
-              return;
-            }
-            if (event.key === 'Enter') {
-              commitQty();
-            }
-          }}
-        />
+        <div className="billing-qty-control d-flex align-items-center gap-1">
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary billing-qty-btn"
+            aria-label={`Decrease quantity for ${itemName}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              const current = Number(qtyDraft || 1);
+              const next = weightBased
+                ? Math.max(0.1, Number((current - 1).toFixed(2)))
+                : Math.max(1, current - 1);
+              setQtyDraft(String(next));
+              onQtyChange(item.key, String(next));
+            }}
+          >
+            -
+          </button>
+          <input
+            className="form-control billing-qty-input"
+            type="number"
+            min="0"
+            step={weightBased ? '0.01' : '1'}
+            inputMode={weightBased ? 'decimal' : 'numeric'}
+            value={qtyDraft}
+            aria-label={`Quantity for ${itemName}`}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => updateQtyDraft(event.target.value)}
+            onBlur={commitQty}
+            onKeyDown={(event) => {
+              if (!weightBased && ['.', ',', 'e', 'E', '+', '-'].includes(event.key)) {
+                event.preventDefault();
+                return;
+              }
+              if (event.key === 'Enter') {
+                commitQty();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary billing-qty-btn"
+            aria-label={`Increase quantity for ${itemName}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              const current = Number(qtyDraft || 0);
+              const next = weightBased
+                ? Number((current + 1).toFixed(2))
+                : current + 1;
+              setQtyDraft(String(next));
+              onQtyChange(item.key, String(next));
+            }}
+          >
+            +
+          </button>
+        </div>
       </td>
       <td className="price-cell">
         <div className="billing-price-stack">
@@ -91,6 +126,7 @@ const CartItemRow = ({
             className="form-control billing-price-input"
             type="number"
             min="0"
+            inputMode="decimal"
             value={item.price}
             aria-label={`Price for ${itemName}`}
             readOnly={!canEditPrice}

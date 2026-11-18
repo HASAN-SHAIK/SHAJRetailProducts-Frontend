@@ -56,6 +56,7 @@ const BarcodeInput = ({
             className="form-control billing-input"
             type="number"
             min="1"
+            inputMode="numeric"
             value={quantityValue}
             onChange={(event) => onQuantityChange(event.target.value)}
             onKeyDown={(event) => {

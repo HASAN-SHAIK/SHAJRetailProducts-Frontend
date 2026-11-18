@@ -735,34 +735,204 @@
   color: #e2e8f0;
 }
 
-@media (max-width: 1024px) {
+/* Base tap target and touch action rules */
+.billing-checkout,
+.billing-draft-btn,
+.billing-skip-draft,
+.billing-actual-toggle,
+.billing-qty-btn,
+.numpad-btn,
+.billing-search-item {
+  touch-action: manipulation;
+}
+
+.billing-qty-btn {
+  min-width: 38px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0;
+  border-radius: 8px;
+}
+
+.billing-qty-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 1199.98px) {
+  .billing-main {
+    grid-template-columns: 240px minmax(0, 1fr) 300px;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 991.98px) {
   .billing-main {
     grid-template-columns: 1fr;
+    gap: 16px;
   }
 
   .billing-camera-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    min-height: 44px;
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .billing-page {
-    padding: 16px;
-    padding-top: 16px;
+    padding: 10px;
+    padding-bottom: max(160px, calc(140px + env(safe-area-inset-bottom)));
+  }
+
+  .billing-page-shell {
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .billing-main {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    position: relative;
+  }
+
+  .billing-left {
+    order: 1;
   }
 
   .billing-center {
+    order: 2;
     min-height: auto;
+    padding: 12px;
+    border-radius: 14px;
+    margin-bottom: 8px;
+  }
+
+  .billing-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    margin-bottom: 8px;
   }
 
   .billing-table {
-    min-width: 520px;
+    min-width: 580px;
+  }
+
+  .qty-cell {
+    width: 145px;
+    min-width: 145px;
   }
 
   .billing-barcode-input-row {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .billing-barcode-input-row .billing-input {
+    flex: 1;
+  }
+
+  /* Mobile Sticky Footer for Totals + Primary Checkout action */
+  .billing-right {
+    order: 3;
+    position: sticky;
+    bottom: 0;
+    z-index: 100;
+    background: rgba(15, 23, 42, 0.98);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.65);
+    padding: 12px 14px max(14px, env(safe-area-inset-bottom));
+    margin-left: -10px;
+    margin-right: -10px;
+    transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease;
+  }
+
+  /* When typing, hide footer so virtual keyboard never obscures input */
+  .billing-main.is-input-focused .billing-right,
+  body:has(.billing-left input:focus, .billing-center input:focus) .billing-right {
+    transform: translateY(105%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .billing-checkout {
+    min-height: 48px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    width: 100%;
+    touch-action: manipulation;
+  }
+
+  .billing-option-row label {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    touch-action: manipulation;
+    font-size: 0.95rem;
+  }
+
+  .billing-option-row input[type="radio"],
+  .billing-option-row input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+  }
+
+  /* Modals fit small screens */
+  .billing-modal,
+  .gst-popup,
+  .billing-camera-modal {
+    max-width: 95vw !important;
+    max-height: 88vh !important;
+    max-height: 88dvh !important;
+    overflow-y: auto !important;
+    box-sizing: border-box;
+  }
+
+  .billing-camera-header .btn,
+  .gst-popup-header .btn-close,
+  .billing-modal-actions .btn {
+    min-height: 44px;
+    min-width: 44px;
+    touch-action: manipulation;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .billing-barcode-input-row {
     flex-direction: column;
+  }
+
+  .billing-camera-btn {
+    width: 100%;
+  }
+
+  .billing-totals {
+    padding: 10px 12px;
+    font-size: 0.9rem;
+  }
+
+  .billing-totals .grand-total {
+    font-size: 1.1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .billing-right {
+    transition: none !important;
   }
 }
 
