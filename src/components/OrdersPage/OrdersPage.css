@@ -1025,18 +1025,56 @@ body.app-theme-light .payment-input-group label {
   .orders-page-header {
     flex-direction: column;
     align-items: flex-start;
+    gap: 12px;
   }
-  .orders-controls { flex-wrap: nowrap; }
-  .orders-controls-right { width: auto; }
-  .search-input { min-width: 280px; flex: 1 1 auto; }
+  .orders-controls {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .orders-controls-right {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .search-input {
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 100%;
+  }
 }
 
 @media (max-width: 768px) {
-  .order-drawer {
+  .orders-page {
+    padding: max(12px, env(safe-area-inset-top)) 10px max(16px, env(safe-area-inset-bottom));
+  }
+  .orders-controls-right > * {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 140px;
+  }
+  .orders-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     width: 100%;
+  }
+  .order-drawer {
+    width: 100% !important;
   }
   .product-summary {
     max-width: 180px;
+  }
+  .orders-purchase-toggle,
+  .sort-select,
+  .orders-controls .btn {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .orders-controls-right > * {
+    flex: 1 1 100%;
+    width: 100%;
   }
 }
 
